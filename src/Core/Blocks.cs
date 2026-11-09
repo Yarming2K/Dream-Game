@@ -29,6 +29,20 @@ public enum BlockKind
     BilgePump,
     LeadBallast,
     TorpedoTube,
+    Wing,
+    ControlSurface,
+    AirPropeller,
+    JetEngine,
+    Rotor,
+    LiftFan,
+    GasCell,
+    BombRack,
+    MissileRail,
+    MissileSeeker,
+    MissileWarhead,
+    MissileMotor,
+    MissileFins,
+    DroneCore,
 }
 
 public enum BlockShape
@@ -47,6 +61,9 @@ public enum AmmoType
     AP,
     HE,
     Torpedo,
+
+    /// <summary>Air-burst shells for shooting down aircraft: they go off near one, or at the range you aimed at.</summary>
+    Flak,
 }
 
 /// <summary>Fixed properties of a breech, which sets a gun's caliber.</summary>
@@ -71,6 +88,9 @@ public sealed class BreechSpec
 
     /// <summary>Velocity loss per meter: v(x) = v0 * e^(-k x).</summary>
     public float DragK;
+
+    /// <summary>How far up the gun can point. Anti-aircraft guns point nearly straight up.</summary>
+    public float MaxElevationDeg = 20f;
 }
 
 public sealed class BlockDef
@@ -121,6 +141,11 @@ public sealed class BlockDef
     public float DeathExplosionDamage;
     public float DeathExplosionRadiusM;
 
+    /// <summary>Gas cells: weight they hold up (kg). Jets: push (N). Missile seekers: what they home on.</summary>
+    public float LiftKg;
+    public float ThrustN;
+    public SeekerKind Seeker;
+
     public float ColorR, ColorG, ColorB;
     public float Metallic = 0.6f;
     public float Roughness = 0.6f;
@@ -128,12 +153,15 @@ public sealed class BlockDef
     public bool IsArmorLike => Kind == BlockKind.Armor || Kind == BlockKind.Frame;
     public bool ConductsAmmo => Kind == BlockKind.AmmoRack || Kind == BlockKind.AmmoFeed || Kind == BlockKind.TurretRing;
     public bool IsWheelLike => Kind == BlockKind.Wheel || Kind == BlockKind.SteerWheel || Kind == BlockKind.Track;
-    public bool IsSeat => Kind == BlockKind.DriverSeat || Kind == BlockKind.GunnerSeat || Kind == BlockKind.CommanderSeat;
+    public bool IsSeat => Kind == BlockKind.DriverSeat || Kind == BlockKind.GunnerSeat || Kind == BlockKind.CommanderSeat ||
+                          Kind == BlockKind.DroneCore;
+    public bool IsMissilePart => Kind is BlockKind.MissileSeeker or BlockKind.MissileWarhead or BlockKind.MissileMotor or BlockKind.MissileFins;
+    public bool IsLiftingSurface => Kind is BlockKind.Wing or BlockKind.ControlSurface;
 }
 
 public static class BlockCatalog
 {
-    public static readonly string[] Categories = { "Structure", "Mobility", "Sea", "Control", "Weapons", "Ammo" };
+    public static readonly string[] Categories = { "Structure", "Mobility", "Sea", "Air", "Control", "Weapons", "Ammo" };
 
     public static readonly BreechSpec Light37 = new()
     {
@@ -151,6 +179,14 @@ public static class BlockCatalog
     {
         CaliberMm = 120, ShellMassKg = 18f, BaseVelocity = 650, BasePenMm = 165,
         ApDamage = 340, HeDamage = 540, HeRadiusM = 3.2f, ReloadS = 8f, ShellUnits = 8, DragK = 0.00005f,
+    };
+
+    /// <summary>A quick-firing 40 mm: light hits, but a lot of them, and it points almost straight up.</summary>
+    public static readonly BreechSpec AutoCannon40 = new()
+    {
+        CaliberMm = 40, ShellMassKg = 0.9f, BaseVelocity = 700, BasePenMm = 42,
+        ApDamage = 55, HeDamage = 80, HeRadiusM = 1.4f, ReloadS = 0.3f, ShellUnits = 1, DragK = 0.00014f,
+        MaxElevationDeg = 85f,
     };
 
     private static readonly List<BlockDef> Defs = new()
@@ -417,6 +453,134 @@ public static class BlockCatalog
             Id = "torpedo_tube", Name = "Torpedo Tube", Category = "Sea", Kind = BlockKind.TorpedoTube,
             Description = "Launches a torpedo the way its arrow points. Torpedoes run just under the surface and blow holes below the waterline. Feed it from Torpedo Racks.",
             MassKg = 600, Hp = 200, ArmorMm = 30, ColorR = 0.3f, ColorG = 0.33f, ColorB = 0.36f, Metallic = 0.8f, Roughness = 0.35f,
+        },
+
+        // Air
+        new BlockDef
+        {
+            Id = "airframe", Name = "Airframe", Category = "Air", Kind = BlockKind.Armor,
+            Description = "Light aluminium skin for fuselages and gondolas. Very light, but bullets go straight through. Sealed, so a flying boat's hull floats.",
+            MassKg = 12, Hp = 45, ArmorMm = 4, ColorR = 0.62f, ColorG = 0.64f, ColorB = 0.62f, Metallic = 0.75f, Roughness = 0.35f,
+        },
+        new BlockDef
+        {
+            Id = "wing", Name = "Wing Panel", Category = "Air", Kind = BlockKind.Wing,
+            Description = "Makes lift when air flows over it edge-on. Lay panels flat in rows for wings, stand them up (G) for a tail fin. More panels lift more, but the plane still needs speed: it stalls if it's too slow or pitched up too far.",
+            MassKg = 7, Hp = 40, ArmorMm = 3, Watertight = false, ColorR = 0.55f, ColorG = 0.58f, ColorB = 0.52f, Metallic = 0.6f, Roughness = 0.45f,
+        },
+        new BlockDef
+        {
+            Id = "control_surface", Name = "Control Surface", Category = "Air", Kind = BlockKind.ControlSurface,
+            Description = "A hinged panel that steers in the air. What it does depends on where it is: at the wingtips it rolls (aileron), on the tailplane it pitches (elevator), standing up on the tail it turns (rudder).",
+            MassKg = 9, Hp = 40, ArmorMm = 3, Watertight = false, ColorR = 0.7f, ColorG = 0.52f, ColorB = 0.26f, Metallic = 0.6f, Roughness = 0.45f,
+        },
+        new BlockDef
+        {
+            Id = "air_propeller", Name = "Air Propeller", Category = "Air", Kind = BlockKind.AirPropeller,
+            Description = "Pulls the aircraft the way its arrow points, using engine power. Strong at low speed, weaker the faster you go. Its blades sweep 1.3 m around it, so leave room.",
+            MassKg = 60, Hp = 60, ArmorMm = 5, HasCollider = false, Watertight = false,
+            ColorR = 0.2f, ColorG = 0.2f, ColorB = 0.2f, Metallic = 0.5f, Roughness = 0.5f,
+        },
+        new BlockDef
+        {
+            Id = "aero_engine", Name = "Aero Engine", Category = "Air", Kind = BlockKind.Engine,
+            Description = "A light, powerful engine built for aircraft: 800 kW for half a tonne. Thirsty, and lightly protected.",
+            MassKg = 520, Hp = 90, ArmorMm = 8, PowerKw = 800, Watertight = false,
+            ColorR = 0.34f, ColorG = 0.33f, ColorB = 0.3f, Metallic = 0.75f, Roughness = 0.4f,
+        },
+        new BlockDef
+        {
+            Id = "jet_engine", Name = "Jet Engine", Category = "Air", Kind = BlockKind.JetEngine,
+            Description = "Pushes the way its arrow points with 16 kN, all on its own: it needs fuel but no other engine. Keeps pushing at any speed, so jets are fast. Point it up and it lifts.",
+            MassKg = 600, Hp = 120, ArmorMm = 10, ThrustN = 16000, Watertight = false,
+            ColorR = 0.3f, ColorG = 0.3f, ColorB = 0.32f, Metallic = 0.85f, Roughness = 0.3f,
+        },
+        new BlockDef
+        {
+            Id = "rotor", Name = "Rotor", Category = "Air", Kind = BlockKind.Rotor,
+            Description = "A helicopter rotor: lifts straight up along its arrow using engine power. The blades sweep 4.5 m around it, so keep the space clear. One big engine lifts about three tonnes.",
+            MassKg = 250, Hp = 120, ArmorMm = 10, HasCollider = false, Watertight = false,
+            ColorR = 0.22f, ColorG = 0.23f, ColorB = 0.22f, Metallic = 0.6f, Roughness = 0.45f,
+        },
+        new BlockDef
+        {
+            Id = "lift_fan", Name = "Lift Fan", Category = "Air", Kind = BlockKind.LiftFan,
+            Description = "A ducted fan that pushes along its arrow using engine power. Point four of them up at the corners for a drone or VTOL; they steer it by pushing harder on one side.",
+            MassKg = 50, Hp = 60, ArmorMm = 6, Watertight = false, ColorR = 0.28f, ColorG = 0.3f, ColorB = 0.3f, Metallic = 0.7f, Roughness = 0.4f,
+        },
+        new BlockDef
+        {
+            Id = "gas_cell", Name = "Gas Cell", Category = "Air", Kind = BlockKind.GasCell,
+            Description = "A bag of lifting gas: each one holds up 20 kg. Fill a big envelope with them for an airship. Shot full of holes, they leak their lift away.",
+            MassKg = 4, Hp = 25, ArmorMm = 1, LiftKg = 20, Watertight = false, Displacement = 1f,
+            ColorR = 0.78f, ColorG = 0.76f, ColorB = 0.68f, Metallic = 0.05f, Roughness = 0.8f,
+        },
+        new BlockDef
+        {
+            Id = "drone_core", Name = "Drone Core", Category = "Control", Kind = BlockKind.DroneCore,
+            Description = "Lets it be flown or driven by remote instead of from a seat. You fly it from wherever you're standing (look at it and press E), so losing it costs no one.",
+            MassKg = 30, Hp = 40, ArmorMm = 5, Watertight = false, ColorR = 0.2f, ColorG = 0.45f, ColorB = 0.32f, Metallic = 0.6f, Roughness = 0.45f,
+        },
+        new BlockDef
+        {
+            Id = "breech_40ac", Name = "40 mm Autocannon", Category = "Weapons", Kind = BlockKind.Breech, Breech = AutoCannon40,
+            Description = "A quick-firing 40 mm: about three rounds a second, and it can point almost straight up. Load it with Flak to shoot down aircraft.",
+            MassKg = 120, Hp = 90, ArmorMm = 15, Watertight = false, ColorR = 0.24f, ColorG = 0.25f, ColorB = 0.22f, Metallic = 0.8f, Roughness = 0.4f,
+        },
+        new BlockDef
+        {
+            Id = "bomb_rack", Name = "Bomb Rack", Category = "Weapons", Kind = BlockKind.BombRack, AmmoUnits = 1,
+            Description = "Carries one 250 kg bomb, hung underneath. Drop it with B: the diamond on screen shows where it will land. Blows up if shot while loaded.",
+            MassKg = 290, Hp = 60, ArmorMm = 5, HasCollider = false, Watertight = false,
+            ColorR = 0.3f, ColorG = 0.32f, ColorB = 0.28f, Metallic = 0.6f, Roughness = 0.5f,
+        },
+        new BlockDef
+        {
+            Id = "missile_rail", Name = "Missile Rail", Category = "Weapons", Kind = BlockKind.MissileRail,
+            Description = "Launches the missile built in front of it (the arrow side): line up missile parts on it, a motor and a warhead at least, and a seeker on the nose to guide it. Fire with F. Missiles are rebuilt at supply points.",
+            MassKg = 40, Hp = 60, ArmorMm = 8, Watertight = false, ColorR = 0.32f, ColorG = 0.33f, ColorB = 0.3f, Metallic = 0.7f, Roughness = 0.4f,
+        },
+        new BlockDef
+        {
+            Id = "seeker_optical", Name = "Optical Seeker", Category = "Weapons", Kind = BlockKind.MissileSeeker, Seeker = SeekerKind.Optical,
+            Description = "Missile nose. The missile flies to wherever you keep the crosshair, so steer it all the way in. Works against anything.",
+            MassKg = 15, Hp = 20, ArmorMm = 2, HasCollider = false, Watertight = false, ColorR = 0.25f, ColorG = 0.28f, ColorB = 0.32f, Metallic = 0.6f, Roughness = 0.3f,
+        },
+        new BlockDef
+        {
+            Id = "seeker_radar", Name = "Radar Seeker", Category = "Weapons", Kind = BlockKind.MissileSeeker, Seeker = SeekerKind.Radar,
+            Description = "Missile nose. Locks on to the enemy aircraft nearest your crosshair and chases it on its own (fire and forget). Can't see ground targets.",
+            MassKg = 18, Hp = 20, ArmorMm = 2, HasCollider = false, Watertight = false, ColorR = 0.85f, ColorG = 0.85f, ColorB = 0.8f, Metallic = 0.2f, Roughness = 0.6f,
+        },
+        new BlockDef
+        {
+            Id = "missile_warhead", Name = "Warhead", Category = "Weapons", Kind = BlockKind.MissileWarhead,
+            Description = "Missile part: the bang. Each one adds damage and blast size, and weight.",
+            MassKg = 35, Hp = 30, ArmorMm = 3, HasCollider = false, Watertight = false,
+            DeathExplosionDamage = 260, DeathExplosionRadiusM = 2f,
+            ColorR = 0.45f, ColorG = 0.42f, ColorB = 0.2f, Metallic = 0.5f, Roughness = 0.5f,
+        },
+        new BlockDef
+        {
+            Id = "missile_motor", Name = "Rocket Motor", Category = "Weapons", Kind = BlockKind.MissileMotor,
+            Description = "Missile part: thrust. Each motor adds push and burns a little longer, for more speed and range.",
+            MassKg = 30, Hp = 30, ArmorMm = 3, HasCollider = false, Watertight = false,
+            DeathExplosionDamage = 90, DeathExplosionRadiusM = 1.2f,
+            ColorR = 0.6f, ColorG = 0.6f, ColorB = 0.58f, Metallic = 0.5f, Roughness = 0.45f,
+        },
+        new BlockDef
+        {
+            Id = "missile_fins", Name = "Missile Fins", Category = "Weapons", Kind = BlockKind.MissileFins,
+            Description = "Missile part: steering. More fins turn harder. A guided missile without fins can't turn at all.",
+            MassKg = 6, Hp = 20, ArmorMm = 2, HasCollider = false, Watertight = false,
+            ColorR = 0.4f, ColorG = 0.42f, ColorB = 0.4f, Metallic = 0.6f, Roughness = 0.4f,
+        },
+        new BlockDef
+        {
+            Id = "ammo_flak", Name = "Flak Rack", Category = "Ammo", Kind = BlockKind.AmmoRack, Ammo = AmmoType.Flak,
+            AmmoUnits = 24,
+            Description = "Air-burst shells for any gun: they go off when they pass close to an aircraft, or at the range you're aiming at, filling the sky with shrapnel. Explodes if destroyed while loaded.",
+            MassKg = 120, Hp = 70, ArmorMm = 5, Watertight = false, ColorR = 0.35f, ColorG = 0.38f, ColorB = 0.42f, Metallic = 0.5f, Roughness = 0.5f,
         },
     };
 

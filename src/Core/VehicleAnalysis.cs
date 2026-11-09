@@ -51,6 +51,7 @@ public sealed class GunInfo
     public int Propellants;
     public readonly List<Int3> ApRacks = new();
     public readonly List<Int3> HeRacks = new();
+    public readonly List<Int3> FlakRacks = new();
 
     /// <summary>The section the breech sits in (hull or a turret).</summary>
     public int Section;
@@ -61,6 +62,7 @@ public sealed class GunInfo
     public GunStats Stats;
     public int ApRounds;
     public int HeRounds;
+    public int FlakRounds;
     public bool MuzzleBlocked;
     public bool Valid;
     public string Label => $"{BreechDef.Breech.CaliberMm:0} mm";
@@ -75,6 +77,12 @@ public enum MobilityMode
     Ground,
     Ship,
     Submarine,
+    Plane,
+    Helicopter,
+
+    /// <summary>VTOL and drones: held up by lift fans or jets pointing down.</summary>
+    Hover,
+    Airship,
 }
 
 public sealed class LauncherInfo
@@ -155,12 +163,33 @@ public sealed class VehicleAnalysis
     public List<LauncherInfo> TorpedoTubes = new();
     public int Pumps;
 
+    public List<SurfaceInfo> Surfaces = new();
+    public List<ThrusterInfo> Thrusters = new();
+    public List<MissileInfo> Missiles = new();
+    public List<Int3> BombRacks = new();
+    public int GasCells;
+    public AirStats Air;
+
     public bool IsNaval => Mode is MobilityMode.Ship or MobilityMode.Submarine;
+    public bool IsAir => Mode is MobilityMode.Plane or MobilityMode.Helicopter or MobilityMode.Hover or MobilityMode.Airship;
+    public int Jets => Thrusters.Count(t => t.Kind == BlockKind.JetEngine);
 
     public bool CanDrive => HasDriver && FuelL > 0 && Mode switch
     {
         MobilityMode.Ground => PowerKw > 0 && Wheels.Count > 0,
-        _ => PowerKw > 0 && ShipPropellers.Count > 0 && Water.Floats,
+        MobilityMode.Ship or MobilityMode.Submarine => PowerKw > 0 && ShipPropellers.Count > 0 && Water.Floats,
+        _ => (PowerKw > 0 || Jets > 0) && Air.CanFly,
+    };
+
+    public static string ModeName(MobilityMode m) => m switch
+    {
+        MobilityMode.Ground => "Land vehicle",
+        MobilityMode.Ship => "Ship",
+        MobilityMode.Submarine => "Submarine",
+        MobilityMode.Plane => "Aircraft",
+        MobilityMode.Helicopter => "Helicopter",
+        MobilityMode.Hover => "VTOL / drone",
+        _ => "Airship",
     };
     public int ErrorCount => Warnings.Count(w => w.Severity == Severity.Error);
 
@@ -188,10 +217,12 @@ public sealed class VehicleAnalysis
         a.AssignTurrets();
         foreach (Int3 c in a.Cells.Keys) a.SectionOf.TryAdd(c, 0);
         a.FindGuns();
+        a.FindMissiles();
         a.FindDisconnected();
         a.ComputeMass();
         a.ComputeMobility();
         a.ComputeNaval();
+        a.ComputeAir();
         a.ComputeTurrets();
         a.ComputeArmor();
         a.AssignCrew();
@@ -363,6 +394,7 @@ public sealed class VehicleAnalysis
                 {
                     if (nd.Ammo == AmmoType.AP) gun.ApRacks.Add(n);
                     else if (nd.Ammo == AmmoType.HE) gun.HeRacks.Add(n);
+                    else if (nd.Ammo == AmmoType.Flak) gun.FlakRacks.Add(n);
                 }
                 foreach (Int3 d in Int3.Directions)
                 {
@@ -377,6 +409,7 @@ public sealed class VehicleAnalysis
             int units = def.Breech.ShellUnits;
             gun.ApRounds = gun.ApRacks.Sum(r => Defs[r].AmmoUnits) / units;
             gun.HeRounds = gun.HeRacks.Sum(r => Defs[r].AmmoUnits) / units;
+            gun.FlakRounds = gun.FlakRacks.Sum(r => Defs[r].AmmoUnits) / units;
             gun.Valid = gun.Barrels.Count > 0;
         }
     }
@@ -442,7 +475,7 @@ public sealed class VehicleAnalysis
             sum += kv.Key.ToVector3() * kv.Value.MassKg;
             PowerKw += kv.Value.PowerKw;
             FuelL += kv.Value.FuelL;
-            if (kv.Value.Kind == BlockKind.DriverSeat) HasDriver = true;
+            if (kv.Value.Kind is BlockKind.DriverSeat or BlockKind.DroneCore) HasDriver = true;
         }
 
         CenterOfMass = MassKg > 0 ? sum / MassKg * Blueprint.CellSize : Vector3.Zero;
@@ -592,7 +625,7 @@ public sealed class VehicleAnalysis
         {
             SeatRole? role = Crew.RoleOf(Defs[c].Kind);
             if (role == null || Disconnected.Contains(c)) continue;
-            Seats.Add(new SeatInfo { Cell = c, Role = role.Value, Section = SectionOf[c] });
+            Seats.Add(new SeatInfo { Cell = c, Role = role.Value, Section = SectionOf[c], Remote = Defs[c].Kind == BlockKind.DroneCore });
         }
 
         HasCommander = Seats.Any(s => s.Role == SeatRole.Commander);
@@ -677,18 +710,251 @@ public sealed class VehicleAnalysis
         return info;
     }
 
+    /// <summary>Missiles: the line of missile parts in front of each rail.</summary>
+    private void FindMissiles()
+    {
+        foreach (Int3 rail in Sorted(Defs.Where(kv => kv.Value.Kind == BlockKind.MissileRail).Select(kv => kv.Key)))
+        {
+            var m = new MissileInfo { Rail = rail, Forward = Orientations.Forward(Cells[rail].O), Section = SectionOf[rail] };
+            Missiles.Add(m);
+            Int3 c = rail + m.Forward;
+            while (Defs.TryGetValue(c, out BlockDef d) && d.IsMissilePart)
+            {
+                m.Parts.Add(c);
+                c += m.Forward;
+            }
+
+            var defs = m.Parts.Select(p => Defs[p]).ToList();
+            m.Stats = Aero.Missile(defs);
+            int seekers = defs.Count(d => d.Kind == BlockKind.MissileSeeker);
+            if (m.Parts.Count == 0)
+                m.Problem = $"The missile rail at {rail} is empty. Line up a Rocket Motor and a Warhead in front of it (the arrow side), with a seeker on the nose.";
+            else if (defs.All(d => d.Kind != BlockKind.MissileMotor))
+                m.Problem = $"The missile on the rail at {rail} has no Rocket Motor.";
+            else if (defs.All(d => d.Kind != BlockKind.MissileWarhead))
+                m.Problem = $"The missile on the rail at {rail} has no Warhead.";
+            else if (seekers > 1)
+                m.Problem = $"The missile on the rail at {rail} has {seekers} seekers. It only needs one, on the nose.";
+            else if (seekers == 1 && defs[^1].Kind != BlockKind.MissileSeeker)
+                m.Problem = $"The seeker on the missile at {rail} must be the last part, on the nose.";
+            else
+                m.Valid = true;
+
+            if (m.Valid && m.Stats.Seeker != SeekerKind.None && defs.All(d => d.Kind != BlockKind.MissileFins))
+                m.Problem = $"The guided missile at {rail} has no fins, so it can't steer. Add Missile Fins.";
+        }
+    }
+
+    /// <summary>
+    /// Aircraft: lifting surfaces and what each control surface does, propellers, jets, rotors, fans and
+    /// gas, and from those whether it's a plane, a helicopter, a VTOL or drone, or an airship.
+    /// </summary>
+    private void ComputeAir()
+    {
+        float cs = Blueprint.CellSize;
+        foreach (Int3 c in Sorted(Defs.Keys))
+        {
+            if (Disconnected.Contains(c)) continue;
+            BlockDef d = Defs[c];
+            int o = Cells[c].O;
+            switch (d.Kind)
+            {
+                case BlockKind.Wing:
+                case BlockKind.ControlSurface:
+                {
+                    Int3 n = Orientations.Up(o);
+                    var info = new SurfaceInfo { Cell = c, Orientation = o, Control = d.Kind == BlockKind.ControlSurface, Role = SurfaceRole.Wing };
+                    if (info.Control && Math.Abs(n.Y) == 1)
+                    {
+                        float dx = MathF.Abs(c.X * cs - CenterOfMass.X), dz = MathF.Abs(c.Z * cs - CenterOfMass.Z);
+                        info.Role = dx > 1.2f && dx > dz * 0.8f ? SurfaceRole.Aileron : SurfaceRole.Elevator;
+                    }
+                    else if (info.Control && Math.Abs(n.X) == 1)
+                    {
+                        info.Role = SurfaceRole.Rudder;
+                    }
+
+                    Surfaces.Add(info);
+                    break;
+                }
+                case BlockKind.AirPropeller:
+                case BlockKind.JetEngine:
+                case BlockKind.LiftFan:
+                    Thrusters.Add(new ThrusterInfo { Cell = c, Kind = d.Kind, Orientation = o, Direction = Orientations.Forward(o) });
+                    break;
+                case BlockKind.Rotor:
+                    Thrusters.Add(new ThrusterInfo { Cell = c, Kind = d.Kind, Orientation = o, Direction = Orientations.Up(o) });
+                    break;
+                case BlockKind.GasCell:
+                    GasCells++;
+                    break;
+                case BlockKind.BombRack:
+                    BombRacks.Add(c);
+                    break;
+            }
+        }
+
+        if (Thrusters.Count == 0 && GasCells == 0 && Surfaces.Count == 0) return;
+
+        var air = new AirStats { GasLiftKg = GasCells * Aero.GasCellLiftKg, Bombs = BombRacks.Count };
+        var flat = Surfaces.Where(s => Math.Abs(Orientations.Up(s.Orientation).Y) == 1).ToList();
+        air.WingAreaM2 = flat.Count * Aero.PanelArea;
+        air.LiftCenterZ = flat.Count > 0 ? flat.Average(s => s.Cell.Z * cs) : CenterOfMass.Z;
+        air.StaticMarginM = air.LiftCenterZ - CenterOfMass.Z;
+        air.HasRoll = Surfaces.Any(s => s.Role == SurfaceRole.Aileron);
+        air.HasPitch = Surfaces.Any(s => s.Role == SurfaceRole.Elevator);
+        air.HasYaw = Surfaces.Any(s => s.Role == SurfaceRole.Rudder);
+        air.StallSpeedMs = Aero.StallSpeed(MassKg, air.WingAreaM2);
+
+        // Engines share their power between everything they turn.
+        bool Up(ThrusterInfo t) => t.Direction == Int3.Up;
+        var powered = Thrusters.Where(t => t.Kind is BlockKind.AirPropeller or BlockKind.Rotor or BlockKind.LiftFan).ToList();
+        var lifters = powered.Where(t => t.Kind == BlockKind.Rotor ? Up(t) : t.Kind == BlockKind.LiftFan && Up(t)).ToList();
+        var pushers = powered.Where(t => t.Kind == BlockKind.AirPropeller && t.Direction.Y == 0).ToList();
+        float watts = PowerKw * 1000f;
+        float liftShare = lifters.Count > 0 ? watts / lifters.Count : 0;
+        float pushShare = pushers.Count > 0 ? watts / pushers.Count : 0;
+        float upJets = Thrusters.Count(t => t.Kind == BlockKind.JetEngine && Up(t)) * Aero.JetThrustN;
+        float fwdJets = Thrusters.Count(t => t.Kind == BlockKind.JetEngine && t.Direction.Y == 0) * Aero.JetThrustN;
+        air.HoverThrustN = upJets + lifters.Sum(t =>
+            Aero.RotorThrust(liftShare, Aero.DiskArea(t.Kind == BlockKind.Rotor ? Aero.RotorRadiusM : Aero.FanRadiusM)));
+        float diskProp = Aero.DiskArea(Aero.PropRadiusM);
+        float ThrustAt(float v) => fwdJets + pushers.Count * Aero.PropThrust(pushShare, v, diskProp);
+        air.StaticThrustN = ThrustAt(0);
+
+        // Drag of the body: what it shows end-on, not counting wing panels (they have their own).
+        var frontal = new HashSet<(int, int)>();
+        foreach ((Int3 c, BlockDef d) in Defs)
+            if (!d.IsLiftingSurface && !Disconnected.Contains(c)) frontal.Add((c.X, c.Y));
+        float bodyDrag = frontal.Count * Aero.PanelArea * 0.35f;
+
+        float weight = MassKg * GunMath.Gravity;
+        int rotors = Thrusters.Count(t => t.Kind == BlockKind.Rotor);
+        if (GasCells > 0 && air.GasLiftKg >= 0.85f * MassKg) Mode = MobilityMode.Airship;
+        else if (rotors > 0) Mode = MobilityMode.Helicopter;
+        else if (air.HoverThrustN > 0.8f * weight) Mode = MobilityMode.Hover;
+        else if (air.WingAreaM2 > 0 && air.StaticThrustN > 0) Mode = MobilityMode.Plane;
+        else if (air.HoverThrustN > 0) Mode = MobilityMode.Hover;
+        else return;
+
+        DragArea = bodyDrag;
+        switch (Mode)
+        {
+            case MobilityMode.Plane:
+                air.TopSpeedMs = Aero.TopSpeed(ThrustAt, MassKg, air.WingAreaM2, bodyDrag);
+                air.CanFly = air.TopSpeedMs > air.StallSpeedMs * 1.05f;
+                break;
+            case MobilityMode.Helicopter:
+            case MobilityMode.Hover:
+                bodyDrag += Thrusters.Sum(t => t.Kind == BlockKind.Rotor ? Aero.RotorDragArea : t.Kind == BlockKind.LiftFan ? Aero.FanDragArea : 0f);
+                DragArea = bodyDrag;
+                air.CanFly = air.HoverThrustN > weight * 1.05f;
+                // Flying along tipped forward about 18°, the rotors' push pulls it along against drag.
+                air.TopSpeedMs = air.CanFly ? MathF.Min(MathF.Sqrt(weight * 0.32f / (0.5f * Aero.AirDensity * MathF.Max(bodyDrag, 0.5f))), 90f) : 0;
+                if (fwdJets + air.StaticThrustN > 0 && air.WingAreaM2 > 0)
+                    air.TopSpeedMs = MathF.Max(air.TopSpeedMs, Aero.TopSpeed(ThrustAt, MassKg, air.WingAreaM2, bodyDrag));
+                break;
+            case MobilityMode.Airship:
+                // A fat envelope is a lot draggier than a streamlined fuselage.
+                bodyDrag *= 4f;
+                DragArea = bodyDrag;
+                air.CanFly = air.GasLiftKg >= MassKg;
+                air.TopSpeedMs = MathF.Min(Aero.TopSpeed(ThrustAt, MassKg, 0f, MathF.Max(bodyDrag, 0.5f)), 40f);
+                break;
+        }
+
+        Air = air;
+        TopSpeedKmh = FuelL > 0 ? air.TopSpeedMs * 3.6f : 0;
+    }
+
+    /// <summary>Blocks in the way of a propeller's or rotor's blades.</summary>
+    private int BladeStrikes(ThrusterInfo t, float radiusM)
+    {
+        float r = radiusM / Blueprint.CellSize;
+        int hits = 0;
+        foreach (Int3 c in Cells.Keys)
+        {
+            if (c == t.Cell) continue;
+            Int3 d = c - t.Cell;
+            int along = d.X * t.Direction.X + d.Y * t.Direction.Y + d.Z * t.Direction.Z;
+            if (along != 0) continue;
+            float dist = MathF.Sqrt(d.X * d.X + d.Y * d.Y + d.Z * d.Z);
+            if (dist > 1.01f && dist <= r) hits++;
+        }
+
+        return hits;
+    }
+
+    private void AirWarnings()
+    {
+        AirStats a = Air;
+        float t = MassKg / 1000f;
+        switch (Mode)
+        {
+            case MobilityMode.Plane:
+                if (!a.CanFly)
+                    Warnings.Add(new DesignWarning(Severity.Error,
+                        $"It can't stay up: it needs {a.StallSpeedMs * 3.6f:0} km/h to fly but only reaches {a.TopSpeedMs * 3.6f:0} km/h. Add wing panels, more engine or propellers, or lose weight."));
+                else if (a.StallSpeedMs > 50f)
+                    Warnings.Add(new DesignWarning(Severity.Warning,
+                        $"Heavy for its wings: it needs {a.StallSpeedMs * 3.6f:0} km/h before it can lift off, which is a long run. Add wing panels or lose weight."));
+                if (Wheels.Count == 0)
+                    Warnings.Add(new DesignWarning(Severity.Warning,
+                        "No landing gear. Put Wheels on the bottom row (a Steering Wheel at the nose or tail steers on the ground), or it can only start in the air."));
+                if (a.StaticMarginM < -0.25f)
+                    Warnings.Add(new DesignWarning(Severity.Warning,
+                        "The wings lift ahead of the center of mass, so it will pitch up and flip. Move the wings back, or add a tailplane of wing panels behind them."));
+                if (!a.HasRoll)
+                    Warnings.Add(new DesignWarning(Severity.Warning, "No ailerons, so it can't roll into a turn. Put Control Surfaces out at the wingtips."));
+                if (!a.HasPitch)
+                    Warnings.Add(new DesignWarning(Severity.Warning, "No elevator, so it can't pitch. Put Control Surfaces on a tailplane behind the wings."));
+                if (!a.HasYaw)
+                    Warnings.Add(new DesignWarning(Severity.Info, "No rudder. Stand a Control Surface up (G) on the tail fin."));
+                break;
+            case MobilityMode.Helicopter:
+            case MobilityMode.Hover:
+                if (!a.CanFly)
+                    Warnings.Add(new DesignWarning(Severity.Error,
+                        $"Its {(Mode == MobilityMode.Helicopter ? "rotors" : "lift fans and jets")} can lift {a.HoverThrustN / GunMath.Gravity / 1000f:0.0} t but it weighs {t:0.0} t. Add engine power or {(Mode == MobilityMode.Helicopter ? "rotors" : "fans")}, or lose weight."));
+                break;
+            case MobilityMode.Airship:
+                if (!a.CanFly)
+                    Warnings.Add(new DesignWarning(Severity.Error,
+                        $"Its gas cells hold up {a.GasLiftKg / 1000f:0.0} t but it weighs {t:0.0} t. Add {(int)MathF.Ceiling((MassKg - a.GasLiftKg) / Aero.GasCellLiftKg)} more gas cells or lose weight."));
+                else if (a.GasLiftKg * Aero.GasTrimMin > MassKg)
+                    Warnings.Add(new DesignWarning(Severity.Warning,
+                        "So much gas it can't come back down, even after venting. Use fewer gas cells or carry more."));
+                if (a.TopSpeedMs <= 0)
+                    Warnings.Add(new DesignWarning(Severity.Warning, "No propellers or jets, so it can only drift. Add Air Propellers."));
+                break;
+        }
+
+        foreach (ThrusterInfo th in Thrusters)
+        {
+            float radius = th.Kind switch { BlockKind.Rotor => Aero.RotorRadiusM, BlockKind.AirPropeller => Aero.PropRadiusM, _ => 0 };
+            int hits = radius > 0 ? BladeStrikes(th, radius) : 0;
+            if (hits > 0)
+                Warnings.Add(new DesignWarning(Severity.Warning,
+                    $"{hits} block(s) sit in the path of the {Defs[th.Cell].Name.ToLowerInvariant()} blades at {th.Cell}. Leave {radius:0.0} m clear around it."));
+        }
+    }
+
     private void CollectWarnings()
     {
         if (!HasDriver)
-            Warnings.Add(new DesignWarning(Severity.Error, "No driver seat. Every vehicle needs one to be driven."));
-        if (PowerKw <= 0)
-            Warnings.Add(new DesignWarning(Severity.Error, "No engine. Add a Small or Large Engine (Mobility)."));
+            Warnings.Add(new DesignWarning(Severity.Error, "No driver seat. Every vehicle needs one to be driven (or a Drone Core to fly it by remote)."));
+        bool needsEngine = !(IsAir && Jets > 0 && Thrusters.All(t => t.Kind == BlockKind.JetEngine));
+        if (PowerKw <= 0 && needsEngine)
+            Warnings.Add(new DesignWarning(Severity.Error, "No engine. Add a Small or Large Engine (Mobility), or an Aero Engine (Air)."));
         else if (FuelL <= 0)
             Warnings.Add(new DesignWarning(Severity.Error, "No fuel tank. The engines can't run without one."));
         if (Mode == MobilityMode.Ground && Wheels.Count == 0)
             Warnings.Add(new DesignWarning(Severity.Error,
                 "No wheels or tracks. Put them on the bottom row with nothing underneath (or Ship Propellers, to make it a boat)."));
         if (IsNaval) NavalWarnings();
+        if (IsAir) AirWarnings();
+        foreach (MissileInfo m in Missiles.Where(m => m.Problem != null))
+            Warnings.Add(new DesignWarning(m.Valid ? Severity.Info : Severity.Warning, m.Problem));
 
         int blocked = Wheels.Count(w => w.Blocked);
         if (blocked > 0)
@@ -703,15 +969,15 @@ public sealed class VehicleAnalysis
 
         foreach (GunInfo g in Guns.Where(g => g.Valid))
         {
-            if (g.ApRounds + g.HeRounds == 0)
+            if (g.ApRounds + g.HeRounds + g.FlakRounds == 0)
                 Warnings.Add(new DesignWarning(Severity.Warning,
-                    $"The {g.Label} gun has no ammo. Put an AP or HE Ammo Rack touching the breech, or connect racks to it with Ammo Feeds."));
+                    $"The {g.Label} gun has no ammo. Put an AP, HE or Flak Rack touching the breech, or connect racks to it with Ammo Feeds."));
             if (g.MuzzleBlocked)
                 Warnings.Add(new DesignWarning(Severity.Warning,
                     $"The {g.Label} gun's muzzle is blocked by a block right in front of it. It will shoot itself."));
         }
 
-        if (Guns.Any(g => g.Valid) && HasDriver && Seats.All(s => s.Role != SeatRole.Gunner))
+        if (Guns.Any(g => g.Valid) && HasDriver && Seats.All(s => s.Role != SeatRole.Gunner) && Mode is not (MobilityMode.Plane or MobilityMode.Hover))
             Warnings.Add(new DesignWarning(Severity.Info,
                 "No gunner seat, so the driver aims the guns. Add a Gunner Seat and an AI gunner will shoot while you drive."));
 

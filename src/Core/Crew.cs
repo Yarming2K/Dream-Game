@@ -13,6 +13,9 @@ public sealed class SeatInfo
     public Int3 Cell;
     public SeatRole Role;
     public int Section;
+
+    /// <summary>A drone core: flown by remote, so nobody is actually sitting in it.</summary>
+    public bool Remote;
 }
 
 public static class Crew
@@ -20,6 +23,7 @@ public static class Crew
     public static SeatRole? RoleOf(BlockKind kind) => kind switch
     {
         BlockKind.DriverSeat => SeatRole.Driver,
+        BlockKind.DroneCore => SeatRole.Driver,
         BlockKind.GunnerSeat => SeatRole.Gunner,
         BlockKind.CommanderSeat => SeatRole.Commander,
         _ => null,
