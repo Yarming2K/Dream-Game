@@ -34,14 +34,15 @@ public class CrewTests
         var plate = new Int3(3, 1, 0);
         g.Remove(g.Blocks[plate]);
         Assert.Contains(plate, Repair.Missing(a, g));
-        Assert.True(Repair.CanRebuild(g, plate, a.SectionOf[plate]));
-        Assert.False(Repair.CanRebuild(g, new Int3(3, 1, 1), a.SectionOf[new Int3(3, 1, 1)])); // still there
-        Assert.False(Repair.CanRebuild(g, new Int3(9, 9, 9), 0)); // floating in the air
+        BlockDef armor = BlockCatalog.Get("armor_light");
+        Assert.True(Repair.CanRebuild(g, a, plate));
+        Assert.False(Repair.CanRebuild(g, a, new Int3(3, 1, 1))); // still there
+        Assert.False(Repair.CanRebuild(g, armor, new Int3(9, 9, 9), 0, 0)); // floating in the air
 
         // The turret ring can be welded back onto the hull, which reattaches the turret's root.
         var ring = new Int3(0, 2, -1);
         g.Remove(g.Blocks[ring]);
-        Assert.True(Repair.CanRebuild(g, ring, 0));
+        Assert.True(Repair.CanRebuild(g, a, ring));
     }
 
     [Fact]

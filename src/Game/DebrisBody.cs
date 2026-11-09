@@ -63,8 +63,9 @@ public partial class DebrisBody : RigidBody3D, IGridHost
     private void CountFloats()
     {
         _floats.Clear();
-        foreach (BlockInstance b in Model.Blocks.Values)
-            if (b.Alive && b.Def.Displacement > 0) _floats.Add((Conv.CellPos(b.Cell), b.Def.Displacement * Hydro.CellVolume));
+        foreach (BlockInstance b in Model.Instances)
+            if (b.Alive && b.Def.Displacement > 0)
+                foreach (Int3 c in b.Cells) _floats.Add((Conv.CellPos(c), b.Def.Displacement * Hydro.CellVolume));
     }
 
     /// <summary>In the sea: fuel tanks bob, armor sinks, and everything is slowed by the water.</summary>

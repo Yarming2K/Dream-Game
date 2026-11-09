@@ -270,7 +270,7 @@ public static class BlockVisuals
         return m;
     }
 
-    public static float BarrelRadius(float caliberMm) => Math.Clamp(caliberMm / 1000f * 0.85f, 0.03f, 0.12f);
+    public static float BarrelRadius(float caliberMm) => Math.Clamp(caliberMm / 1000f * 0.85f, 0.03f, 0.4f);
 
     private static readonly Basis AlongX = new(Vector3.Back, Mathf.Pi / 2);
     private static readonly Basis AlongZ = new(Vector3.Right, Mathf.Pi / 2);
@@ -292,6 +292,12 @@ public static class BlockVisuals
         var root = new Node3D { Name = def.Id };
         StandardMaterial3D mat = MaterialOf(def);
         float full = Conv.CS;
+        if (def.IsMultiCell)
+        {
+            BuildBig(def, root, mat, hints);
+            return root;
+        }
+
         switch (def.Kind)
         {
             case BlockKind.Armor when def.Shape == BlockShape.Wedge:
@@ -529,6 +535,112 @@ public static class BlockVisuals
             if (n is MeshInstance3D mi && mi.MaterialOverride is StandardMaterial3D sm && sm.ShadingMode == BaseMaterial3D.ShadingModeEnum.Unshaded)
                 mi.CastShadow = GeometryInstance3D.ShadowCastingSetting.Off;
         return root;
+    }
+
+    /// <summary>
+    /// A big block: its shape is built to its full size, centered on the middle of its box (its anchor cell
+    /// isn't the middle when a size is even).
+    /// </summary>
+    private static void BuildBig(BlockDef def, Node3D root, StandardMaterial3D mat, bool hints)
+    {
+        float full = Conv.CS;
+        var ext = new Vector3(def.Size.X, def.Size.Y, def.Size.Z) * full;
+        var body = new Node3D { Name = "Body", Position = Footprint.LocalCenter(def).G() * full };
+        root.AddChild(body);
+        float bevel = Mathf.Min(0.06f, ext[(int)ext.MinAxisIndex()] * 0.1f);
+        switch (def.Kind)
+        {
+            case BlockKind.Engine:
+                Add(body, Bevel(ext, bevel), mat, Vector3.Zero);
+                for (int i = -1; i <= 1; i++)
+                    Add(body, Cylinder(0.12f, 0.4f), Dark, new Vector3(i * ext.X * 0.25f, ext.Y * 0.5f + 0.15f, 0));
+                Add(body, Box(new Vector3(ext.X * 0.8f, 0.08f, ext.Z * 0.9f)), Steel, new Vector3(0, ext.Y * 0.5f, 0));
+                break;
+            case BlockKind.FuelTank:
+                Add(body, Cylinder(Mathf.Min(ext.X, ext.Y) * 0.47f, ext.Z * 0.98f), mat, new Transform3D(AlongZ, Vector3.Zero));
+                Add(body, Box(new Vector3(ext.X, 0.08f, ext.Z)), Dark, new Vector3(0, -ext.Y * 0.45f, 0));
+                break;
+            case BlockKind.Track:
+            {
+                float r = def.WheelRadiusM;
+                Add(body, Cylinder(r * 0.85f, ext.X * 0.9f), Dark, new Transform3D(AlongX, Vector3.Zero));
+                Add(body, Box(new Vector3(ext.X * 0.95f, 0.12f, ext.Z)), mat, new Vector3(0, -r, 0));
+                Add(body, Box(new Vector3(ext.X * 0.95f, 0.12f, ext.Z)), mat, new Vector3(0, r, 0));
+                break;
+            }
+            case BlockKind.ShipPropeller:
+            {
+                float r = Mathf.Min(ext.X, ext.Y) * 0.5f;
+                Add(body, Cylinder(r * 0.2f, ext.Z * 1.6f), Steel, new Transform3D(AlongZ, Vector3.Zero));
+                for (int i = 0; i < 4; i++)
+                {
+                    var blade = new Basis(Vector3.Back, i * Mathf.Tau / 4f) * new Basis(Vector3.Up, 0.5f);
+                    Add(body, Box(new Vector3(r * 0.35f, r * 0.95f, 0.06f)), mat, new Transform3D(blade, blade * new Vector3(0, r * 0.5f, 0)));
+                }
+
+                break;
+            }
+            case BlockKind.Rudder:
+                Add(body, Box(new Vector3(Mathf.Max(ext.X * 0.25f, 0.1f), ext.Y * 0.96f, ext.Z * 0.9f)), mat, Vector3.Zero);
+                Add(body, Cylinder(0.08f, ext.Y), Steel, new Vector3(0, 0, -ext.Z * 0.4f));
+                break;
+            case BlockKind.Breech:
+                Add(body, Bevel(ext, bevel), mat, Vector3.Zero);
+                Add(body, Cylinder(BarrelRadius(def.Breech.CaliberMm) * 1.5f, 0.3f), Steel,
+                    new Transform3D(AlongZ, new Vector3(0, 0, -ext.Z * 0.5f - 0.1f)));
+                Add(body, Box(new Vector3(ext.X * 1.02f, 0.1f, ext.Z * 0.3f)), Dark, new Vector3(0, ext.Y * 0.2f, ext.Z * 0.2f));
+                break;
+            case BlockKind.AmmoRack:
+                Add(body, Bevel(ext, bevel), mat, Vector3.Zero);
+                for (int i = 0; i < 4; i++)
+                {
+                    var p = new Vector3((i % 2 == 0 ? -0.25f : 0.25f) * ext.X, ext.Y * 0.5f + 0.05f, (i < 2 ? -0.25f : 0.25f) * ext.Z);
+                    Add(body, Cylinder(0.15f, 0.12f, 0.04f), def.Ammo == AmmoType.HE ? RedTip : Brass, p);
+                }
+
+                break;
+            case BlockKind.GasCell:
+                Add(body, Bevel(ext * 0.99f, Mathf.Min(0.35f, ext.X * 0.12f)), mat, Vector3.Zero);
+                Add(body, Box(new Vector3(ext.X * 1.005f, 0.04f, ext.Z * 1.005f)), Dark, Vector3.Zero);
+                break;
+            default:
+                Add(body, Bevel(ext, bevel), mat, Vector3.Zero);
+                break;
+        }
+
+        if (hints && def.Kind is BlockKind.Breech or BlockKind.ShipPropeller)
+            Add(body, Cylinder(0.18f, 0.4f, 0f), Glow(new Color(1f, 0.85f, 0.2f), 2f),
+                new Transform3D(new Basis(Vector3.Right, -Mathf.Pi / 2), new Vector3(0, ext.Y * 0.5f + 0.3f, -ext.Z * 0.3f)));
+    }
+
+    /// <summary>Blocks that move on their own (spinning, swinging, rolling, dropping their load): drawn one by one.</summary>
+    public static bool IsAnimated(BlockDef def) =>
+        def.IsWheelLike || def.Kind is BlockKind.AirPropeller or BlockKind.Rotor or BlockKind.LiftFan or BlockKind.ControlSurface or BlockKind.BombRack;
+
+    private static readonly Dictionary<string, List<(Mesh, Material, Transform3D)>> PartsCache = new();
+
+    /// <summary>A block's look as a flat list of meshes, materials and placements (for drawing many at once).</summary>
+    public static List<(Mesh, Material, Transform3D)> Parts(BlockDef def, float caliberMm, bool hints = false)
+    {
+        string key = $"{def.Id}:{Mathf.RoundToInt(caliberMm)}:{hints}";
+        if (PartsCache.TryGetValue(key, out List<(Mesh, Material, Transform3D)> parts)) return parts;
+        parts = new List<(Mesh, Material, Transform3D)>();
+        Node3D root = Create(def, caliberMm, hints);
+        void Walk(Node3D n, Transform3D parent)
+        {
+            foreach (Node child in n.GetChildren())
+            {
+                if (child is not Node3D c) continue;
+                Transform3D xf = parent * c.Transform;
+                if (c is MeshInstance3D mi && mi.Mesh != null) parts.Add((mi.Mesh, mi.MaterialOverride, xf));
+                Walk(c, xf);
+            }
+        }
+
+        Walk(root, Transform3D.Identity);
+        root.Free();
+        PartsCache[key] = parts;
+        return parts;
     }
 
     /// <summary>Sets one material on every mesh under a node (for ghosts).</summary>

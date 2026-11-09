@@ -9,21 +9,76 @@ public static class ExampleDesigns
     private sealed class Draft
     {
         private readonly Dictionary<Int3, BlueprintBlock> _cells = new();
+        private readonly Dictionary<Int3, BlueprintBlock> _filled = new();
 
-        /// <summary>Places a block, replacing whatever is there.</summary>
-        public void Set(int x, int y, int z, string id, int o = 0) =>
-            _cells[new Int3(x, y, z)] = new BlueprintBlock(id, new Int3(x, y, z), o);
+        /// <summary>Places a block, replacing whatever is in its way.</summary>
+        public void Set(int x, int y, int z, string id, int o = 0)
+        {
+            var anchor = new Int3(x, y, z);
+            BlockDef def = BlockCatalog.Get(id);
+            foreach (Int3 c in Footprint.Cells(def, anchor, o))
+                if (_filled.TryGetValue(c, out BlueprintBlock old)) Remove(old);
+            Put(new BlueprintBlock(id, anchor, o), def);
+        }
+
+        private void Put(BlueprintBlock b, BlockDef def)
+        {
+            _cells[b.Cell] = b;
+            foreach (Int3 c in Footprint.Cells(def, b.Cell, b.O)) _filled[c] = b;
+        }
+
+        private void Remove(BlueprintBlock b)
+        {
+            _cells.Remove(b.Cell);
+            foreach (Int3 c in Footprint.Cells(BlockCatalog.Get(b.Id), b.Cell, b.O)) _filled.Remove(c);
+        }
+
+        private bool Free(BlockDef def, Int3 anchor, int o)
+        {
+            foreach (Int3 c in Footprint.Cells(def, anchor, o))
+                if (_filled.ContainsKey(c)) return false;
+            return true;
+        }
 
         /// <summary>Fills a box, skipping cells that already have something.</summary>
         public void Fill(int x0, int x1, int y0, int y1, int z0, int z1, string id, int o = 0)
         {
+            BlockDef def = BlockCatalog.Get(id);
             for (int x = x0; x <= x1; x++)
             for (int y = y0; y <= y1; y++)
             for (int z = z0; z <= z1; z++)
             {
                 var c = new Int3(x, y, z);
-                if (!_cells.ContainsKey(c)) _cells[c] = new BlueprintBlock(id, c, o);
+                if (!_filled.ContainsKey(c)) Put(new BlueprintBlock(id, c, o), def);
             }
+        }
+
+        /// <summary>
+        /// Tiles a box with a big block (turned by <paramref name="o"/>) wherever it fits, then fills the gaps
+        /// with <paramref name="filler"/>.
+        /// </summary>
+        public void Tile(int x0, int x1, int y0, int y1, int z0, int z1, string id, int o, string filler)
+        {
+            BlockDef def = BlockCatalog.Get(id);
+            Int3 lo = default, hi = default;
+            bool first = true;
+            foreach (Int3 c in Footprint.Cells(def, Int3.Zero, o))
+            {
+                lo = first ? c : Int3.Min(lo, c);
+                hi = first ? c : Int3.Max(hi, c);
+                first = false;
+            }
+
+            Int3 ext = hi - lo + new Int3(1, 1, 1);
+            for (int x = x0; x + ext.X - 1 <= x1; x += ext.X)
+            for (int y = y0; y + ext.Y - 1 <= y1; y += ext.Y)
+            for (int z = z0; z + ext.Z - 1 <= z1; z += ext.Z)
+            {
+                Int3 anchor = new Int3(x, y, z) - lo;
+                if (Free(def, anchor, o)) Put(new BlueprintBlock(id, anchor, o), def);
+            }
+
+            if (filler != null) Fill(x0, x1, y0, y1, z0, z1, filler);
         }
 
         /// <summary>A slope whose sloped face points along <paramref name="facing"/> (e.g. (1,-1,0) for a bilge chamfer).</summary>
@@ -32,7 +87,10 @@ public static class ExampleDesigns
         public void FillSlope(int x0, int x1, int y0, int y1, int z0, int z1, string id, Int3 facing) =>
             Fill(x0, x1, y0, y1, z0, z1, id, Facing(facing));
 
-        public void Remove(int x, int y, int z) => _cells.Remove(new Int3(x, y, z));
+        public void Remove(int x, int y, int z)
+        {
+            if (_filled.TryGetValue(new Int3(x, y, z), out BlueprintBlock b)) Remove(b);
+        }
 
         public Blueprint Build(string name) => Blueprint.FromCellMap(name, _cells.Values);
     }
@@ -57,7 +115,7 @@ public static class ExampleDesigns
 
     public static IReadOnlyList<Blueprint> All => new[]
     {
-        Warden(), Jackal(), Bulwark(), Skyguard(), Corsair(), Barracuda(), Kestrel(), Hornet(), Wasp(), Zephyr(),
+        Warden(), Jackal(), Bulwark(), Skyguard(), Corsair(), Barracuda(), Kestrel(), Hornet(), Wasp(), Zephyr(), Colossus(),
     };
 
     /// <summary>Medium tank: sloped front, 76 mm gun in a turret with a gunner and commander, ammo stored low in the hull.</summary>
@@ -576,6 +634,97 @@ public static class ExampleDesigns
         d.Set(1, 6, half + 1, "control_surface");
         d.Set(-1, 6, half + 1, "control_surface");
         return d.Build("Zephyr (airship)");
+    }
+
+    /// <summary>
+    /// A 300 m battleship, built from big blocks: a hull of hull plates and belt armor split into fourteen
+    /// compartments by bulkheads, a bed of lead along the keel, twelve turbines on four great screws, a bridge
+    /// tower, and two twin 406 mm turrets, one forward and one aft.
+    /// </summary>
+    public static Blueprint Colossus()
+    {
+        var d = new Draft();
+        const int half = 24, deck = 25, bow = -300, stern = 299;
+        int sideWall = Orientations.RotateAroundZ(0, 1), endWall = Orientations.RotateAroundX(0, 1), beltTurn = Orientations.RotateAroundY(0, 1);
+
+        // Turrets first, so the deck is laid around their rings.
+        void Turret(int zt, int f)
+        {
+            int ob = f < 0 ? 0 : Pointing(Int3.Back);
+            d.Set(0, deck, zt, "turret_ring");
+            d.Fill(-6, 6, deck + 1, deck + 1, zt - 5, zt + 5, "armor_light");
+            foreach (int sx in new[] { -3, 3 })
+            {
+                d.Set(sx, deck + 3, zt, "breech_406", ob);
+                for (int k = 0; k < 20; k++) d.Set(sx, deck + 3, zt + f * (2 + k), "heavy_barrel");
+                int mx = sx > 0 ? sx : sx - 1, mz = f < 0 ? zt + 2 : zt - 3;
+                d.Set(mx, deck + 2, mz, "magazine_ap");
+                d.Set(mx, deck + 4, mz, "magazine_he");
+                d.Set(Math.Sign(sx), deck + 3, zt, "loader");
+            }
+
+            d.Set(0, deck + 2, zt - f * 2, "gunner_seat");
+            d.Fill(-6, -6, deck + 2, deck + 6, zt - 5, zt + 5, "armor_heavy");
+            d.Fill(6, 6, deck + 2, deck + 6, zt - 5, zt + 5, "armor_heavy");
+            d.Fill(-5, 5, deck + 2, deck + 6, zt + f * 2, zt + f * 2, "armor_heavy");
+            d.Fill(-5, 5, deck + 2, deck + 6, zt - f * 5, zt - f * 5, "armor_heavy");
+            d.Fill(-6, 6, deck + 7, deck + 7, zt - 5, zt + 5, "armor_heavy");
+        }
+
+        Turret(-230, -1);
+        Turret(230, 1);
+
+        // Bridge tower amidships-forward, with the helm and the commander up top.
+        d.Set(0, deck + 19, -109, "driver_seat");
+        d.Set(1, deck + 19, -109, "commander_seat");
+        d.Tile(-6, 6, deck + 1, deck + 20, -110, -110, "hull_plate", endWall, "armor_light");
+        d.Tile(-6, 6, deck + 1, deck + 20, -90, -90, "hull_plate", endWall, "armor_light");
+        d.Tile(-6, -6, deck + 1, deck + 20, -109, -91, "hull_plate", sideWall, "armor_light");
+        d.Tile(6, 6, deck + 1, deck + 20, -109, -91, "hull_plate", sideWall, "armor_light");
+        d.Tile(-5, 5, deck + 20, deck + 20, -109, -91, "hull_plate", 0, "armor_light");
+
+        // Machinery aft of amidships: twelve turbines and their fuel.
+        foreach (int x in new[] { -14, -8, 6, 12 })
+        foreach (int z in new[] { 150, 160, 170 })
+            d.Set(x, 3, z, "turbine");
+        foreach (int x in new[] { -20, 18 })
+        foreach (int z in new[] { 150, 158, 166, 174 })
+            d.Set(x, 3, z, "fuel_bunker");
+
+        // Pumps in every compartment, standing on the ballast.
+        for (int z = bow + 22; z < stern; z += 40)
+        {
+            d.Set(-2, 3, z, "bilge_pump");
+            d.Set(2, 3, z, "bilge_pump");
+        }
+
+        // Lead along the keel, so she sits deep and steady.
+        for (int x = -22; x <= 20; x += 2)
+        for (int z = bow + 2; z <= stern - 3; z += 4)
+            d.Set(x, 1, z, "ballast_block");
+
+        // Four great screws under the stern, a great rudder behind each inner pair.
+        foreach (int x in new[] { -16, -8, 8, 16 }) d.Set(x, 6, stern + 1, "great_screw");
+        foreach (int x in new[] { -8, 8 }) d.Set(x, 6, stern + 3, "great_rudder");
+
+        // The hull: keel and deck plates, belt armor along the waterline band, plates above and below it,
+        // closed ends, and watertight bulkheads every 20 m.
+        d.Tile(-half, half, 0, 0, bow, stern, "hull_plate", 0, "armor_light");
+        d.Tile(-half, half, deck, deck, bow, stern, "hull_plate", 0, "armor_light");
+        foreach (int sgn in new[] { -1, 1 })
+        {
+            int outer = sgn * half, inner = sgn * (half - 1);
+            d.Tile(Math.Min(outer, inner), Math.Max(outer, inner), 2, 17, bow, stern, "belt_armor", beltTurn, "armor_heavy");
+            d.Fill(outer, outer, 1, 1, bow, stern, "armor_light");
+            d.Tile(outer, outer, 18, deck - 1, bow, stern, "hull_plate", sideWall, "armor_light");
+        }
+
+        d.Tile(-half + 1, half - 1, 1, deck - 1, bow, bow, "hull_plate", endWall, "armor_light");
+        d.Tile(-half + 1, half - 1, 1, deck - 1, stern, stern, "hull_plate", endWall, "armor_light");
+        for (int z = bow + 40; z < stern; z += 40)
+            d.Tile(-half + 1, half - 1, 1, deck - 1, z, z, "hull_plate", endWall, "armor_light");
+
+        return d.Build("Colossus (battleship)");
     }
 
     /// <summary>A flat wall of one armor type, standing on the ground (y = 0).</summary>

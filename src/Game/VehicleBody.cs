@@ -109,9 +109,10 @@ public partial class VehicleBody : RigidBody3D, IGridHost
     private readonly RandomNumberGenerator _rng = new();
     private AudioStreamPlayer3D _engineSound;
 
-    public static VehicleBody Create(Blueprint bp, Transform3D where, bool player)
+    public static VehicleBody Create(Blueprint bp, Transform3D where, bool player, VehicleAnalysis analysis = null)
     {
-        VehicleAnalysis a = VehicleAnalysis.Analyze(bp);
+        // Each vehicle gets its own analysis (it keeps flood water in its compartments), so a shared one is only reused once.
+        VehicleAnalysis a = analysis ?? VehicleAnalysis.Analyze(bp);
         var v = new VehicleBody { Name = player ? "PlayerVehicle" : "Vehicle", Blueprint = bp, Analysis = a, Faction = player ? 0 : 1 };
         v.Model = GridModel.FromAnalysis(a);
         foreach (Int3 c in a.Disconnected)
@@ -163,7 +164,7 @@ public partial class VehicleBody : RigidBody3D, IGridHost
     public override void _Ready()
     {
         _engineSound = Sfx.Loop(this, SoundId.Engine, -14f);
-        BlockInstance engine = Model.Blocks.Values.FirstOrDefault(b => b.Def.Kind == BlockKind.Engine);
+        BlockInstance engine = Model.Instances.FirstOrDefault(b => b.Def.Kind == BlockKind.Engine);
         if (engine != null) _engineSound.Position = Conv.CellPos(engine.Cell);
     }
 
@@ -230,11 +231,11 @@ public partial class VehicleBody : RigidBody3D, IGridHost
         Mass = mass;
         CenterOfMass = Model.CenterOfMass().G();
 
-        PowerKw = Model.Blocks.Values.Where(b => b.Alive).Sum(b => b.Def.PowerKw);
-        FuelCapacityL = Model.Blocks.Values.Where(b => b.Alive).Sum(b => b.Def.FuelL);
+        PowerKw = Model.Instances.Where(b => b.Alive).Sum(b => b.Def.PowerKw);
+        FuelCapacityL = Model.Instances.Where(b => b.Alive).Sum(b => b.Def.FuelL);
         FuelL = Mathf.Min(FuelL, FuelCapacityL);
         bool driverWas = DriverAlive;
-        DriverAlive = Model.Blocks.Values.Any(b => b.Alive && b.Def.Kind == BlockKind.DriverSeat);
+        DriverAlive = Model.Instances.Any(b => b.Alive && b.Def.Kind is BlockKind.DriverSeat or BlockKind.DroneCore);
         if (driverWas && !DriverAlive) Status?.Invoke("Driver knocked out!");
         if (_hadEngine && PowerKw <= 0) Status?.Invoke("Engine destroyed");
         _hadEngine = PowerKw > 0;
@@ -282,7 +283,7 @@ public partial class VehicleBody : RigidBody3D, IGridHost
         foreach (TurretRt t in Turrets)
         {
             t.Lead = Guns.FirstOrDefault(g => g.Alive && g.Info.Section == t.Section);
-            float turretMass = Model.Blocks.Values
+            float turretMass = Model.Instances
                 .Where(b => b.Section == t.Section || Model.Sections[b.Section].Parent == t.Section)
                 .Sum(b => b.Def.MassKg);
             t.SpeedRad = Mathf.DegToRad(Mobility.TraverseDegPerSec(turretMass));

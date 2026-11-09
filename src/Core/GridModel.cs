@@ -33,6 +33,12 @@ public sealed class BlockInstance
     /// <summary>Free slot for the engine side (e.g. the node that draws this block).</summary>
     public object Tag;
 
+    /// <summary>Every cell it fills (just <see cref="Cell"/> for ordinary blocks).</summary>
+    public readonly Int3[] Cells;
+
+    /// <summary>Its middle, in grid cells (where its mass sits).</summary>
+    public readonly Vector3 Center;
+
     public BlockInstance(BlockDef def, Int3 cell, int orientation, int section)
     {
         Def = def;
@@ -40,7 +46,9 @@ public sealed class BlockInstance
         Orientation = orientation;
         Hp = def.Hp;
         Section = section;
-        if (def.Kind == BlockKind.AmmoRack) AmmoUnits = def.AmmoUnits;
+        if (def.Kind is BlockKind.AmmoRack or BlockKind.BombRack) AmmoUnits = def.AmmoUnits;
+        Cells = Footprint.CellArray(def, cell, orientation);
+        Center = def.IsMultiCell ? Footprint.Center(def, cell, orientation) : cell.ToVector3();
     }
 }
 
@@ -102,8 +110,14 @@ public sealed class Section : ICellShapeLookup
 /// <summary>The runtime state of one physical object made of blocks: a vehicle, a structure or a piece of debris.</summary>
 public sealed class GridModel
 {
+    /// <summary>What fills each cell. A big block appears under every cell it covers; use <see cref="Instances"/> to visit each block once.</summary>
     public readonly Dictionary<Int3, BlockInstance> Blocks = new();
     public readonly List<Section> Sections = new();
+    private readonly Dictionary<Int3, BlockInstance> _byAnchor = new();
+
+    /// <summary>Each block once.</summary>
+    public IEnumerable<BlockInstance> Instances => _byAnchor.Values;
+    public int InstanceCount => _byAnchor.Count;
 
     public GridModel()
     {
@@ -115,23 +129,35 @@ public sealed class GridModel
     public BlockInstance Add(BlockDef def, Int3 cell, int orientation, int section = 0)
     {
         var b = new BlockInstance(def, cell, orientation, section);
-        Blocks[cell] = b;
-        Sections[section].Cells[cell] = b;
+        Add(b);
         return b;
     }
 
     public void Add(BlockInstance b)
     {
-        Blocks[b.Cell] = b;
-        Sections[b.Section].Cells[b.Cell] = b;
+        foreach (Int3 c in b.Cells)
+        {
+            Blocks[c] = b;
+            Sections[b.Section].Cells[c] = b;
+        }
+
+        _byAnchor[b.Cell] = b;
     }
 
     public void Remove(BlockInstance b)
     {
         b.Alive = false;
-        Blocks.Remove(b.Cell);
-        Sections[b.Section].Cells.Remove(b.Cell);
+        foreach (Int3 c in b.Cells)
+        {
+            if (Blocks.TryGetValue(c, out BlockInstance here) && here == b) Blocks.Remove(c);
+            Sections[b.Section].Cells.Remove(c);
+        }
+
+        if (_byAnchor.TryGetValue(b.Cell, out BlockInstance a) && a == b) _byAnchor.Remove(b.Cell);
     }
+
+    /// <summary>The block whose anchor is <paramref name="anchor"/>, if it's there.</summary>
+    public bool TryGetInstance(Int3 anchor, out BlockInstance b) => _byAnchor.TryGetValue(anchor, out b);
 
     public void RecomputeBounds()
     {
@@ -141,7 +167,7 @@ public sealed class GridModel
     public float TotalMassKg()
     {
         float m = 0;
-        foreach (BlockInstance b in Blocks.Values) m += b.Def.MassKg;
+        foreach (BlockInstance b in Instances) m += b.Def.MassKg;
         return m;
     }
 
@@ -150,23 +176,25 @@ public sealed class GridModel
     {
         float m = 0;
         Vector3 sum = Vector3.Zero;
-        foreach (BlockInstance b in Blocks.Values)
+        foreach (BlockInstance b in Instances)
         {
             m += b.Def.MassKg;
-            sum += b.Cell.ToVector3() * b.Def.MassKg;
+            sum += b.Center * b.Def.MassKg;
         }
 
         return m > 0 ? sum / m * Blueprint.CellSize : Vector3.Zero;
     }
 
-    /// <summary>True if blocks in cells a and b (face neighbors) hold each other up.</summary>
-    public bool AreJoined(BlockInstance a, BlockInstance b)
+    /// <summary>True if blocks touching at cells <paramref name="ac"/> and <paramref name="bc"/> (face neighbors) hold each other up.</summary>
+    public bool AreJoined(BlockInstance a, Int3 ac, BlockInstance b, Int3 bc)
     {
         if (a.Section == b.Section) return true;
         Section sa = Sections[a.Section];
         Section sb = Sections[b.Section];
-        return (sa.Root == a.Cell && sa.Attach == b.Cell) || (sb.Root == b.Cell && sb.Attach == a.Cell);
+        return (sa.Root == ac && sa.Attach == bc) || (sb.Root == bc && sb.Attach == ac);
     }
+
+    public bool AreJoined(BlockInstance a, BlockInstance b) => AreJoined(a, a.Cell, b, b.Cell);
 
     /// <summary>Builds the runtime grid for a vehicle, with turrets and guns as their own sections.</summary>
     public static GridModel FromAnalysis(VehicleAnalysis a)
@@ -182,10 +210,10 @@ public sealed class GridModel
             });
         }
 
-        foreach (KeyValuePair<Int3, BlueprintBlock> kv in a.Cells)
+        foreach (Int3 anchor in a.Anchors)
         {
-            BlockDef def = BlockCatalog.Get(kv.Value.Id);
-            g.Add(def, kv.Key, kv.Value.O, a.SectionOf[kv.Key]);
+            BlueprintBlock bb = a.Cells[anchor];
+            g.Add(BlockCatalog.Get(bb.Id), anchor, bb.O, a.SectionOf[anchor]);
         }
 
         g.RecomputeBounds();

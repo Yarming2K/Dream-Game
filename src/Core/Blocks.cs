@@ -102,6 +102,11 @@ public sealed class BlockDef
     public BlockKind Kind;
     public BlockShape Shape = BlockShape.Cube;
 
+    /// <summary>How many cells it fills in each direction of its own frame. Big blocks share one health pool.</summary>
+    public Int3 Size = new(1, 1, 1);
+    public int Volume => Size.X * Size.Y * Size.Z;
+    public bool IsMultiCell => Volume > 1;
+
     public float MassKg;
     public float Hp;
     public float ArmorMm;
@@ -129,7 +134,7 @@ public sealed class BlockDef
     /// </summary>
     public float Displacement
     {
-        get => _displacement >= 0 ? _displacement : Math.Clamp(MassKg / (SteelDensity * CellVolume), 0f, 1f);
+        get => _displacement >= 0 ? _displacement : Math.Clamp(MassKg / Volume / (SteelDensity * CellVolume), 0f, 1f);
         set => _displacement = value;
     }
 
@@ -179,6 +184,22 @@ public static class BlockCatalog
     {
         CaliberMm = 120, ShellMassKg = 18f, BaseVelocity = 650, BasePenMm = 165,
         ApDamage = 340, HeDamage = 540, HeRadiusM = 3.2f, ReloadS = 8f, ShellUnits = 8, DragK = 0.00005f,
+    };
+
+    /// <summary>A cruiser's gun. Needs a long barrel (12 or so heavy segments) to reach full power.</summary>
+    public static readonly BreechSpec Heavy203 = new()
+    {
+        CaliberMm = 203, ShellMassKg = 120f, BaseVelocity = 420, BasePenMm = 150,
+        ApDamage = 900, HeDamage = 1400, HeRadiusM = 5f, ReloadS = 15f, ShellUnits = 24, DragK = 0.00003f,
+        MaxElevationDeg = 40f,
+    };
+
+    /// <summary>A battleship's main gun: a tonne of shell, from a breech three cells across.</summary>
+    public static readonly BreechSpec Naval406 = new()
+    {
+        CaliberMm = 406, ShellMassKg = 1200f, BaseVelocity = 450, BasePenMm = 270,
+        ApDamage = 3200, HeDamage = 4800, HeRadiusM = 9f, ReloadS = 30f, ShellUnits = 96, DragK = 0.000015f,
+        MaxElevationDeg = 40f,
     };
 
     /// <summary>A quick-firing 40 mm: light hits, but a lot of them, and it points almost straight up.</summary>
@@ -453,6 +474,112 @@ public static class BlockCatalog
             Id = "torpedo_tube", Name = "Torpedo Tube", Category = "Sea", Kind = BlockKind.TorpedoTube,
             Description = "Launches a torpedo the way its arrow points. Torpedoes run just under the surface and blow holes below the waterline. Feed it from Torpedo Racks.",
             MassKg = 600, Hp = 200, ArmorMm = 30, ColorR = 0.3f, ColorG = 0.33f, ColorB = 0.36f, Metallic = 0.8f, Roughness = 0.35f,
+        },
+
+
+        // Big blocks, for machines of scale. Each fills a box of cells and shares one health pool.
+        new BlockDef
+        {
+            Id = "hull_plate", Name = "Hull Plate (4×1×4)", Category = "Structure", Kind = BlockKind.Armor, Size = new Int3(4, 1, 4),
+            Description = "Sixteen cells of light plate in one piece, for laying big hulls, decks and floors quickly. Same protection as Light Armor.",
+            MassKg = 960, Hp = 1500, ArmorMm = 25, ColorR = 0.42f, ColorG = 0.45f, ColorB = 0.38f,
+        },
+        new BlockDef
+        {
+            Id = "armor_block", Name = "Heavy Armor Block (2×2×2)", Category = "Structure", Kind = BlockKind.Armor, Size = new Int3(2, 2, 2),
+            Description = "A meter-thick cube of rolled steel: 160 mm, twice heavy armor, with eight times the health.",
+            MassKg = 1760, Hp = 2600, ArmorMm = 160, ColorR = 0.33f, ColorG = 0.36f, ColorB = 0.31f,
+        },
+        new BlockDef
+        {
+            Id = "belt_armor", Name = "Belt Armor (4×4×2)", Category = "Structure", Kind = BlockKind.Armor, Size = new Int3(4, 4, 2),
+            Description = "Battleship armor: a 2×2 m slab a meter deep, 340 mm thick. Stops anything short of a battleship's own guns.",
+            MassKg = 9800, Hp = 11000, ArmorMm = 340, ColorR = 0.3f, ColorG = 0.32f, ColorB = 0.3f,
+        },
+        new BlockDef
+        {
+            Id = "turbine", Name = "Marine Turbine (2×2×3)", Category = "Mobility", Kind = BlockKind.Engine, Size = new Int3(2, 2, 3),
+            Description = "6,000 kW of steam turbine for big ships and land battleships. Twelve of these push a 300 m battleship along.",
+            MassKg = 12000, Hp = 1400, ArmorMm = 20, PowerKw = 6000, Watertight = false,
+            ColorR = 0.4f, ColorG = 0.38f, ColorB = 0.33f, Metallic = 0.8f, Roughness = 0.4f,
+        },
+        new BlockDef
+        {
+            Id = "fuel_bunker", Name = "Fuel Bunker (2×2×2)", Category = "Mobility", Kind = BlockKind.FuelTank, Size = new Int3(2, 2, 2),
+            Description = "2,000 L of fuel oil. Burns and explodes when destroyed.",
+            MassKg = 1800, Hp = 600, ArmorMm = 8, FuelL = 2000, DeathExplosionDamage = 700, DeathExplosionRadiusM = 4f,
+            Watertight = false, Displacement = 1f, ColorR = 0.55f, ColorG = 0.12f, ColorB = 0.1f, Metallic = 0.5f, Roughness = 0.55f,
+        },
+        new BlockDef
+        {
+            Id = "heavy_track", Name = "Heavy Track (1×3×3)", Category = "Mobility", Kind = BlockKind.Track, Size = new Int3(1, 3, 3),
+            Description = "A 1.5 m road wheel and track for land battleships. Run long lines of them down both sides.",
+            MassKg = 2400, Hp = 1600, ArmorMm = 40, WheelRadiusM = 0.7f, HasCollider = false, Watertight = false, Displacement = 0.5f,
+            ColorR = 0.16f, ColorG = 0.15f, ColorB = 0.13f, Metallic = 0.6f, Roughness = 0.8f,
+        },
+        new BlockDef
+        {
+            Id = "great_screw", Name = "Great Screw (3×3×1)", Category = "Sea", Kind = BlockKind.ShipPropeller, Size = new Int3(3, 3, 1),
+            Description = "A battleship's propeller, 1.5 m across. Like a Ship Propeller, it pushes the way its arrow points, only under water.",
+            MassKg = 3000, Hp = 900, ArmorMm = 25, HasCollider = false, Watertight = false,
+            ColorR = 0.72f, ColorG = 0.55f, ColorB = 0.25f, Metallic = 0.9f, Roughness = 0.3f,
+        },
+        new BlockDef
+        {
+            Id = "great_rudder", Name = "Great Rudder (1×3×3)", Category = "Sea", Kind = BlockKind.Rudder, Size = new Int3(1, 3, 3),
+            Description = "A big ship's rudder. Put it behind the screws, below the waterline.",
+            MassKg = 2600, Hp = 1000, ArmorMm = 30, HasCollider = false, Watertight = false,
+            ColorR = 0.3f, ColorG = 0.32f, ColorB = 0.3f, Metallic = 0.7f, Roughness = 0.45f,
+        },
+        new BlockDef
+        {
+            Id = "breech_203", Name = "203 mm Breech", Category = "Weapons", Kind = BlockKind.Breech, Breech = Heavy203,
+            Description = "A cruiser's gun. Give it a long run of Heavy Barrels (a dozen or so) and feed it from Shell Magazines.",
+            MassKg = 6000, Hp = 900, ArmorMm = 60, Watertight = false, ColorR = 0.22f, ColorG = 0.22f, ColorB = 0.2f,
+            Metallic = 0.8f, Roughness = 0.4f,
+        },
+        new BlockDef
+        {
+            Id = "breech_406", Name = "406 mm Breech (3×3×3)", Category = "Weapons", Kind = BlockKind.Breech, Breech = Naval406, Size = new Int3(3, 3, 3),
+            Description = "A battleship's main gun. Heavy Barrels line up from the middle of its front face; it wants twenty or so. Reloads in 30 s; each shell weighs a tonne.",
+            MassKg = 60000, Hp = 6000, ArmorMm = 80, Watertight = false, ColorR = 0.22f, ColorG = 0.22f, ColorB = 0.2f,
+            Metallic = 0.8f, Roughness = 0.4f,
+        },
+        new BlockDef
+        {
+            Id = "heavy_barrel", Name = "Heavy Barrel", Category = "Weapons", Kind = BlockKind.Barrel,
+            Description = "A barrel segment for the big guns: much heavier than an ordinary one, and drawn as thick as the gun it belongs to.",
+            MassKg = 2500, Hp = 700, ArmorMm = 60, HasCollider = false, Watertight = false,
+            ColorR = 0.2f, ColorG = 0.21f, ColorB = 0.19f, Metallic = 0.85f, Roughness = 0.35f,
+        },
+        new BlockDef
+        {
+            Id = "magazine_ap", Name = "AP Shell Magazine (2×2×2)", Category = "Ammo", Kind = BlockKind.AmmoRack, Ammo = AmmoType.AP, Size = new Int3(2, 2, 2),
+            AmmoUnits = 768,
+            Description = "A big gun's armor-piercing shells: 32 for a 203 mm, 8 for a 406 mm. Keep it deep under the armor: if it goes up, so does the ship.",
+            MassKg = 6000, Hp = 600, ArmorMm = 10, Watertight = false, ColorR = 0.7f, ColorG = 0.62f, ColorB = 0.3f,
+            Metallic = 0.5f, Roughness = 0.5f,
+        },
+        new BlockDef
+        {
+            Id = "magazine_he", Name = "HE Shell Magazine (2×2×2)", Category = "Ammo", Kind = BlockKind.AmmoRack, Ammo = AmmoType.HE, Size = new Int3(2, 2, 2),
+            AmmoUnits = 768,
+            Description = "A big gun's high-explosive shells: 32 for a 203 mm, 8 for a 406 mm.",
+            MassKg = 6000, Hp = 600, ArmorMm = 10, Watertight = false, ColorR = 0.65f, ColorG = 0.25f, ColorB = 0.18f,
+            Metallic = 0.5f, Roughness = 0.5f,
+        },
+        new BlockDef
+        {
+            Id = "ballast_block", Name = "Ballast Block (2×2×2)", Category = "Sea", Kind = BlockKind.LeadBallast, Size = new Int3(2, 2, 2),
+            Description = "Eight cells of lead: 11 t. Big ships carry a bed of these along the keel to sit low and steady in the water.",
+            MassKg = 11200, Hp = 3200, ArmorMm = 30, ColorR = 0.36f, ColorG = 0.37f, ColorB = 0.4f, Metallic = 0.5f, Roughness = 0.7f,
+        },
+        new BlockDef
+        {
+            Id = "gas_envelope", Name = "Gas Envelope (4×4×4)", Category = "Air", Kind = BlockKind.GasCell, Size = new Int3(4, 4, 4),
+            Description = "64 gas cells' worth in one bag: holds up 1.3 t. Stack them for giant airships.",
+            MassKg = 256, Hp = 900, ArmorMm = 1, LiftKg = 1280, Watertight = false, Displacement = 1f,
+            ColorR = 0.78f, ColorG = 0.76f, ColorB = 0.68f, Metallic = 0.05f, Roughness = 0.8f,
         },
 
         // Air

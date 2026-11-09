@@ -12,13 +12,17 @@ public static class Repair
     public static float RebuildSeconds(BlockDef d) => 0.8f + d.MassKg / 140f;
 
     /// <summary>
-    /// A destroyed block can be rebuilt if its cell is empty and it touches a block it would be joined to
+    /// A destroyed block can be rebuilt if all its cells are empty and it touches a block it would be joined to
     /// (same section, or the turret ring / barrel joint it hangs from).
     /// </summary>
-    public static bool CanRebuild(GridModel g, Int3 cell, int section)
+    public static bool CanRebuild(GridModel g, BlockDef def, Int3 anchor, int orientation, int section)
     {
-        if (g.Blocks.ContainsKey(cell) || section < 0 || section >= g.Sections.Count) return false;
+        if (section < 0 || section >= g.Sections.Count) return false;
+        Int3[] cells = Footprint.CellArray(def, anchor, orientation);
+        foreach (Int3 c in cells)
+            if (g.Blocks.ContainsKey(c)) return false;
         Section s = g.Sections[section];
+        foreach (Int3 cell in cells)
         foreach (Int3 d in Int3.Directions)
         {
             Int3 n = cell + d;
@@ -31,12 +35,19 @@ public static class Repair
         return false;
     }
 
-    /// <summary>Blocks from the design that are no longer on the vehicle (destroyed or knocked off).</summary>
+    /// <summary>A block of the design (by its anchor cell) that can be rebuilt right now.</summary>
+    public static bool CanRebuild(GridModel g, VehicleAnalysis design, Int3 anchor)
+    {
+        if (!design.Cells.TryGetValue(anchor, out BlueprintBlock bp) || !BlockCatalog.TryGet(bp.Id, out BlockDef def)) return false;
+        return CanRebuild(g, def, anchor, bp.O, design.SectionOf[anchor]);
+    }
+
+    /// <summary>Blocks from the design (by anchor cell) that are no longer on the vehicle (destroyed or knocked off).</summary>
     public static List<Int3> Missing(VehicleAnalysis design, GridModel g)
     {
         var list = new List<Int3>();
-        foreach (Int3 c in design.Cells.Keys)
-            if (!design.Disconnected.Contains(c) && !g.Blocks.ContainsKey(c)) list.Add(c);
+        foreach (Int3 c in design.Anchors)
+            if (!design.Disconnected.Contains(c) && !(g.TryGetInstance(c, out BlockInstance b) && b.Alive)) list.Add(c);
         return list;
     }
 }

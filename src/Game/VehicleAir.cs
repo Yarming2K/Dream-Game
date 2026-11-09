@@ -58,7 +58,7 @@ public partial class VehicleBody
 
     /// <summary>Airships and hovering aircraft hold this height (meters above the sea) when nobody is climbing.</summary>
     public float HoldAltitude { get; private set; } = float.NaN;
-    public int BombsLeft => Model.Blocks.Values.Count(b => b.Alive && b.Def.Kind == BlockKind.BombRack && b.AmmoUnits >= 1f);
+    public int BombsLeft => Model.Instances.Count(b => b.Alive && b.Def.Kind == BlockKind.BombRack && b.AmmoUnits >= 1f);
     public int MissilesReady => Analysis.Missiles.Count(MissileReady);
     public bool CanSwitchVtol => Analysis.Mode == MobilityMode.Hover && Analysis.Air.WingAreaM2 > 4f &&
                                  AirThrusters.Any(t => t.Alive && t.Info.Direction.Y == 0 && t.Info.Kind is BlockKind.AirPropeller or BlockKind.JetEngine);
@@ -129,7 +129,7 @@ public partial class VehicleBody
         Vector3 inertia = Vector3.Zero;
         float gas = 0;
         Vector3 gasSum = Vector3.Zero;
-        foreach (BlockInstance b in Model.Blocks.Values)
+        foreach (BlockInstance b in Model.Instances)
         {
             if (!b.Alive) continue;
             Vector3 r = Conv.CellPos(b.Cell) - com;
@@ -585,7 +585,7 @@ public partial class VehicleBody
             s.Flap.Rotation = new Vector3(Mathf.Lerp(now, s.Deflection, Mathf.Min(1f, dt * 10f)), 0, 0);
         }
 
-        foreach (BlockInstance b in Model.Blocks.Values)
+        foreach (BlockInstance b in Model.Instances)
         {
             if (b.Def.Kind != BlockKind.BombRack) continue;
             Node3D payload = View.VisualOf(b)?.GetNodeOrNull<Node3D>("Payload");
@@ -614,7 +614,7 @@ public partial class VehicleBody
     public bool DropBomb(bool byPlayer)
     {
         if (Combat.Instance == null) return false;
-        BlockInstance rack = Model.Blocks.Values
+        BlockInstance rack = Model.Instances
             .Where(b => b.Alive && b.Def.Kind == BlockKind.BombRack && b.AmmoUnits >= 1f)
             .OrderBy(b => Mathf.Abs(b.Cell.X)).ThenBy(b => b.Cell.X).FirstOrDefault();
         if (rack == null) return false;
@@ -628,7 +628,7 @@ public partial class VehicleBody
     /// <summary>Where a bomb dropped now would land (for the bombsight), or null if none are loaded.</summary>
     public Vector3? BombImpact(PhysicsDirectSpaceState3D space)
     {
-        BlockInstance rack = Model.Blocks.Values.FirstOrDefault(b => b.Alive && b.Def.Kind == BlockKind.BombRack && b.AmmoUnits >= 1f);
+        BlockInstance rack = Model.Instances.FirstOrDefault(b => b.Alive && b.Def.Kind == BlockKind.BombRack && b.AmmoUnits >= 1f);
         if (rack == null) return null;
         Vector3 p = View.BlockWorldPos(rack), v = LinearVelocity;
         var exclude = new Godot.Collections.Array<Rid> { GetRid() };
@@ -734,7 +734,7 @@ public partial class VehicleBody
     private bool ResupplyOrdnance(float dt)
     {
         bool changed = false;
-        foreach (BlockInstance b in Model.Blocks.Values)
+        foreach (BlockInstance b in Model.Instances)
         {
             if (!b.Alive || b.Def.Kind != BlockKind.BombRack || b.AmmoUnits >= 1f) continue;
             b.AmmoUnits = Mathf.Min(1f, b.AmmoUnits + dt / 3f);

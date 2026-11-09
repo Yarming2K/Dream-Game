@@ -14,16 +14,46 @@ namespace DreamGame.Game;
 /// </summary>
 public partial class Builder : Node3D
 {
-    public const int Reach = 40;
-    public const int MaxHeight = 30;
+    /// <summary>The build area: 320 m across and 80 m high, room for machines of scale.</summary>
+    public const int Reach = 320;
+    public const int MaxHeight = 160;
+
+    /// <summary>Designs bigger than this are analyzed on a background thread, so editing never stalls.</summary>
+    private const int AsyncAnalysisCells = 6000;
+
+    /// <summary>The most cells one box fill or clear may touch.</summary>
+    private const int MaxBoxCells = 400_000;
     private const string SaveDir = "user://blueprints";
 
     public event Action<Blueprint> TestDriveRequested;
 
+    /// <summary>Every filled cell (big blocks under each of their cells), and each block by its anchor.</summary>
     private readonly Dictionary<Int3, BlueprintBlock> _cells = new();
-    private readonly Dictionary<Int3, Node3D> _visuals = new();
-    private readonly Dictionary<Int3, float> _visualCaliber = new();
+    private readonly Dictionary<Int3, BlueprintBlock> _blocks = new();
     private readonly HashSet<Int3> _tinted = new();
+    private BatchedBlocks _batch;
+    private Int3 _min, _max;
+    private bool _boundsDirty = true;
+    private int _popsThisFrame;
+    private System.Threading.Tasks.Task<VehicleAnalysis> _analysisTask;
+    private bool _analysisAgain;
+
+    // Box tool: drag out a box to fill solid, fill as a hollow shell, or clear.
+    private enum BoxMode
+    {
+        Off,
+        Fill,
+        Hollow,
+        Clear,
+    }
+
+    private BoxMode _boxMode;
+    private bool _boxActive;
+    private Int3 _boxStart, _boxEnd;
+    private int _boxLift;
+    private MeshInstance3D _boxPreview;
+    private Label3D _boxLabel;
+    private Button _boxButton;
     private string _name = "Untitled";
     private VehicleAnalysis _analysis;
     private bool _dirty = true;
@@ -82,7 +112,21 @@ public partial class Builder : Node3D
     {
         Scenery.AddSkyAndSun(this, false);
         BuildFloor();
-        _cam = new Camera3D { Fov = 50f, Far = 800f };
+        _batch = new BatchedBlocks { Name = "Blocks", TintOverlay = BlockVisuals.LooseOverlay };
+        AddChild(_batch);
+        _boxPreview = new MeshInstance3D
+        {
+            Mesh = new BoxMesh { Size = Vector3.One }, Visible = false, CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
+            MaterialOverride = Shaders.Hologram(new Color(0.35f, 1f, 0.5f), 0.6f),
+        };
+        AddChild(_boxPreview);
+        _boxLabel = new Label3D
+        {
+            FontSize = 44, PixelSize = 0.01f, Font = Ui.BodyBoldFont, OutlineSize = 10, NoDepthTest = true,
+            Billboard = BaseMaterial3D.BillboardModeEnum.Enabled, Visible = false, Modulate = new Color(0.8f, 1f, 0.85f),
+        };
+        AddChild(_boxLabel);
+        _cam = new Camera3D { Fov = 50f, Far = 4000f };
         AddChild(_cam);
         _cam.MakeCurrent();
         _comMarker = new MeshInstance3D
@@ -143,7 +187,7 @@ public partial class Builder : Node3D
 
     private void BuildFloor()
     {
-        const float size = 120f;
+        float size = Reach * 2f * Conv.CS + 40f;
         AddChild(new MeshInstance3D
         {
             Mesh = new PlaneMesh { Size = new Vector2(size, size) },
@@ -193,88 +237,125 @@ public partial class Builder : Node3D
 
     // ---------- Editing ----------
 
-    private void SetCell(Int3 c, BlueprintBlock b, bool animate)
+    private static BlockDef DefOf(BlueprintBlock b) => BlockCatalog.Get(b.Id);
+
+    /// <summary>Puts a block at its anchor (or takes away whatever block has that anchor, with null).</summary>
+    private void SetCell(Int3 anchor, BlueprintBlock b, bool animate)
     {
-        if (_visuals.TryGetValue(c, out Node3D old))
+        if (_blocks.TryGetValue(anchor, out BlueprintBlock old))
         {
-            _visuals.Remove(c);
-            _visualCaliber.Remove(c);
-            _tinted.Remove(c);
-            if (animate && old.IsInsideTree())
-            {
-                Tween tw = old.CreateTween();
-                tw.TweenProperty(old, "scale", Vector3.One * 0.05f, 0.1).SetTrans(Tween.TransitionType.Quad).SetEase(Tween.EaseType.In);
-                tw.TweenCallback(Callable.From(old.QueueFree));
-            }
-            else
-            {
-                old.QueueFree();
-            }
+            foreach (Int3 c in Footprint.Cells(DefOf(old), old.Cell, old.O)) _cells.Remove(c);
+            _blocks.Remove(anchor);
+            _tinted.Remove(anchor);
+            _batch.Remove(anchor);
+            if (animate) Pop(old, appearing: false);
         }
 
-        if (b == null)
+        if (b != null)
         {
-            _cells.Remove(c);
+            BlockDef def = DefOf(b);
+            foreach (Int3 c in Footprint.Cells(def, b.Cell, b.O)) _cells[c] = b;
+            _blocks[anchor] = b;
+            _batch.Set(anchor, def, b.O);
+            if (animate) Pop(b, appearing: true);
+            if (!_boundsDirty)
+            {
+                foreach (Int3 c in Footprint.Cells(def, b.Cell, b.O))
+                {
+                    _min = Int3.Min(_min, c);
+                    _max = Int3.Max(_max, c);
+                }
+            }
         }
         else
         {
-            _cells[c] = b;
-            Node3D v = MakeVisual(c, b, 76f);
-            if (animate)
-            {
-                Tween tw = v.CreateTween();
-                tw.TweenProperty(v, "scale", Vector3.One, 0.18).From(Vector3.One * 0.55f)
-                    .SetTrans(Tween.TransitionType.Back).SetEase(Tween.EaseType.Out);
-            }
+            _boundsDirty = true;
         }
 
         _dirty = true;
     }
 
-    private Node3D MakeVisual(Int3 c, BlueprintBlock b, float caliber)
+    /// <summary>A quick flash where a block appears or disappears (the blocks themselves are drawn in batches).</summary>
+    private void Pop(BlueprintBlock b, bool appearing)
     {
-        Node3D v = BlockVisuals.Create(BlockCatalog.Get(b.Id), caliber, hints: true);
-        v.Transform = Conv.BlockTransform(c, b.O);
+        if (_popsThisFrame++ > 24) return;
+        Node3D v = BlockVisuals.Create(DefOf(b), 76f);
+        BlockVisuals.SetOverride(v, appearing ? BlockVisuals.GhostOk : BlockVisuals.GhostBad);
+        v.Transform = Conv.BlockTransform(b.Cell, b.O);
         AddChild(v);
-        _visuals[c] = v;
-        _visualCaliber[c] = caliber;
-        return v;
+        Tween tw = v.CreateTween();
+        if (appearing)
+            tw.TweenProperty(v, "scale", Vector3.One * 1.06f, 0.16).From(Vector3.One * 0.55f).SetTrans(Tween.TransitionType.Back).SetEase(Tween.EaseType.Out);
+        else
+            tw.TweenProperty(v, "scale", Vector3.One * 0.05f, 0.12).SetTrans(Tween.TransitionType.Quad).SetEase(Tween.EaseType.In);
+        tw.TweenCallback(Callable.From(v.QueueFree));
     }
 
     private bool InBounds(Int3 c) => Math.Abs(c.X) <= Reach && Math.Abs(c.Z) <= Reach && c.Y >= 0 && c.Y <= MaxHeight;
 
-    private bool Place(Int3 c, List<Change> into)
+    /// <summary>Whether a block fits here: every cell it would fill is inside the build area and empty.</summary>
+    private bool Fits(BlockDef def, Int3 anchor, int o)
     {
-        bool placed = PlaceOne(c, _orientation, into);
-        if (_mirror && c.X != 0) PlaceOne(new Int3(-c.X, c.Y, c.Z), Orientations.MirrorX(_orientation), into);
+        foreach (Int3 c in Footprint.Cells(def, anchor, o))
+            if (!InBounds(c) || _cells.ContainsKey(c)) return false;
+        return true;
+    }
+
+    /// <summary>The anchor of the mirror image of a block (big blocks with an even size need nudging to land exactly).</summary>
+    private static Int3 MirrorAnchor(BlockDef def, Int3 anchor, int o)
+    {
+        var m = new Int3(-anchor.X, anchor.Y, anchor.Z);
+        if (!def.IsMultiCell) return m;
+        int mo = Orientations.MirrorX(o);
+        int want = int.MaxValue, have = int.MaxValue;
+        foreach (Int3 c in Footprint.Cells(def, anchor, o)) want = Math.Min(want, -c.X);
+        foreach (Int3 c in Footprint.Cells(def, m, mo)) have = Math.Min(have, c.X);
+        return m + new Int3(want - have, 0, 0);
+    }
+
+    private bool Place(Int3 anchor, List<Change> into)
+    {
+        bool placed = PlaceOne(_selected, anchor, _orientation, into);
+        if (_mirror) PlaceOne(_selected, MirrorAnchor(_selected, anchor, _orientation), Orientations.MirrorX(_orientation), into);
         if (placed)
             Sfx.Play2D(this, _selected.MassKg >= 200 ? SoundId.PlaceHeavy : SoundId.PlaceLight, -4f, _rng.RandfRange(0.92f, 1.08f));
         return placed;
     }
 
-    private bool PlaceOne(Int3 c, int o, List<Change> into)
+    private bool PlaceOne(BlockDef def, Int3 anchor, int o, List<Change> into, bool animate = true)
     {
-        if (!InBounds(c) || _cells.ContainsKey(c)) return false;
-        var b = new BlueprintBlock(_selected.Id, c, o);
-        into.Add(new Change { Cell = c, Before = null, After = b });
-        SetCell(c, b, animate: true);
+        if (!Fits(def, anchor, o)) return false;
+        var b = new BlueprintBlock(def.Id, anchor, o);
+        into.Add(new Change { Cell = anchor, Before = null, After = b });
+        SetCell(anchor, b, animate);
         return true;
     }
 
     private void Remove(Int3 c)
     {
         var changes = new List<Change>();
-        RemoveOne(c, changes, true);
-        if (_mirror && c.X != 0) RemoveOne(new Int3(-c.X, c.Y, c.Z), changes, true);
+        if (_cells.TryGetValue(c, out BlueprintBlock b))
+        {
+            Int3 anchor = b.Cell;
+            RemoveOne(anchor, changes, true);
+            if (_mirror)
+            {
+                Int3 ma = MirrorAnchor(DefOf(b), anchor, b.O);
+                if (_cells.TryGetValue(ma, out BlueprintBlock mb) || _cells.TryGetValue(new Int3(-c.X, c.Y, c.Z), out mb))
+                    RemoveOne(mb.Cell, changes, true);
+            }
+        }
+
         if (changes.Count > 0) Sfx.Play2D(this, SoundId.Remove, -5f, _rng.RandfRange(0.92f, 1.1f));
         Commit(changes);
     }
 
+    /// <summary>Takes away the block filling cell <paramref name="c"/> (any of its cells will do).</summary>
     private void RemoveOne(Int3 c, List<Change> into, bool animate)
     {
         if (!_cells.TryGetValue(c, out BlueprintBlock old)) return;
-        into.Add(new Change { Cell = c, Before = old, After = null });
-        SetCell(c, null, animate);
+        into.Add(new Change { Cell = old.Cell, Before = old, After = null });
+        SetCell(old.Cell, null, animate);
     }
 
     private void Commit(List<Change> changes)
@@ -305,10 +386,11 @@ public partial class Builder : Node3D
     private void LoadBlueprint(Blueprint bp, bool recordUndo = true, bool animate = false)
     {
         var changes = new List<Change>();
-        foreach (Int3 c in _cells.Keys.ToList()) RemoveOne(c, changes, false);
+        foreach (Int3 a in _blocks.Keys.ToList()) RemoveOne(a, changes, false);
         foreach (BlueprintBlock b in bp.Blocks)
         {
             var copy = new BlueprintBlock(b.Id, b.Cell, b.O);
+            if (!BlockCatalog.TryGet(b.Id, out BlockDef def) || !Fits(def, b.Cell, b.O)) continue;
             changes.Add(new Change { Cell = b.Cell, Before = null, After = copy });
             SetCell(b.Cell, copy, animate);
         }
@@ -319,7 +401,33 @@ public partial class Builder : Node3D
         FocusCamera();
     }
 
-    public Blueprint CurrentBlueprint() => Blueprint.FromCellMap(_name, _cells.Values);
+    public Blueprint CurrentBlueprint() => Blueprint.FromCellMap(_name, _blocks.Values);
+
+    /// <summary>The box around every filled cell (kept up to date as blocks are added; recounted after removals).</summary>
+    private (Int3 min, Int3 max) Bounds()
+    {
+        if (_boundsDirty)
+        {
+            _boundsDirty = false;
+            bool first = true;
+            foreach (Int3 c in _cells.Keys)
+            {
+                if (first)
+                {
+                    _min = _max = c;
+                    first = false;
+                    continue;
+                }
+
+                _min = Int3.Min(_min, c);
+                _max = Int3.Max(_max, c);
+            }
+
+            if (first) _min = _max = Int3.Zero;
+        }
+
+        return (_min, _max);
+    }
 
     // ---------- Picking ----------
 
@@ -334,9 +442,9 @@ public partial class Builder : Node3D
 
         if (_cells.Count > 0)
         {
-            Int3 min = _cells.Keys.Aggregate(Int3.Min), max = _cells.Keys.Aggregate(Int3.Max);
+            (Int3 min, Int3 max) = Bounds();
             var hits = new List<RayCellHit>(1);
-            GridRaycast.Cast(new BlueprintShapeLookup(_cells), min, max, (o / Conv.CS).N(), d.N(), 2000f, hits, firstOnly: true);
+            GridRaycast.Cast(new BlueprintShapeLookup(_cells), min, max, (o / Conv.CS).N(), d.N(), 8000f, hits, firstOnly: true);
             if (hits.Count > 0)
             {
                 hitCell = hits[0].Cell;
@@ -356,12 +464,16 @@ public partial class Builder : Node3D
         return Math.Abs(hitCell.X) <= Reach && Math.Abs(hitCell.Z) <= Reach;
     }
 
-    private bool PlacementTarget(out Int3 cell)
+    /// <summary>
+    /// Where the selected block would go: against the face under the cursor. A big block sits out from the
+    /// face by however far it reaches back from its anchor.
+    /// </summary>
+    private bool PlacementTarget(out Int3 anchor)
     {
-        cell = default;
+        anchor = default;
         if (!PickCell(out Int3 hit, out Int3 n, out _)) return false;
-        cell = hit + n;
-        return InBounds(cell) && !_cells.ContainsKey(cell);
+        anchor = hit + n * (1 + Footprint.Reach(_selected, _orientation, -n));
+        return Fits(_selected, anchor, _orientation);
     }
 
     private bool OverUi() => GetViewport().GuiGetHoveredControl() != null;
@@ -392,11 +504,31 @@ public partial class Builder : Node3D
         if (mb.Pressed) GetViewport().GuiReleaseFocus();
         switch (mb.ButtonIndex)
         {
+            case MouseButton.WheelUp when mb.Pressed && _boxActive:
+                _boxLift++;
+                break;
+            case MouseButton.WheelDown when mb.Pressed && _boxActive:
+                _boxLift--;
+                break;
             case MouseButton.WheelUp when mb.Pressed:
-                _goalDist = Mathf.Clamp(_goalDist * 0.88f, 3f, 90f);
+                _goalDist = Mathf.Clamp(_goalDist * 0.88f, 3f, 700f);
                 break;
             case MouseButton.WheelDown when mb.Pressed:
-                _goalDist = Mathf.Clamp(_goalDist * 1.12f, 3f, 90f);
+                _goalDist = Mathf.Clamp(_goalDist * 1.12f, 3f, 700f);
+                break;
+            case MouseButton.Left when _boxMode != BoxMode.Off:
+                if (mb.Pressed && BoxCorner(out Int3 corner))
+                {
+                    _boxActive = true;
+                    _boxStart = _boxEnd = corner;
+                    _boxLift = 0;
+                }
+                else if (!mb.Pressed && _boxActive)
+                {
+                    _boxActive = false;
+                    ApplyBox();
+                }
+
                 break;
             case MouseButton.Left:
                 if (mb.Pressed)
@@ -473,6 +605,10 @@ public partial class Builder : Node3D
             Basis b = _cam.GlobalTransform.Basis;
             _goalTarget += (-b.X * mm.Relative.X + b.Y * mm.Relative.Y) * _dist * 0.0016f;
         }
+        else if (_boxActive)
+        {
+            if (BoxCorner(out Int3 corner)) _boxEnd = corner;
+        }
         else if (_lmbDown && _stroke != null && PlacementTarget(out Int3 c))
         {
             // Painting: stay on the layer the stroke started on.
@@ -509,6 +645,9 @@ public partial class Builder : Node3D
             case Key.M:
                 SetMirror(!_mirror);
                 Sfx.Play2D(this, SoundId.Tick, -6f);
+                break;
+            case Key.B:
+                SetBoxMode((BoxMode)(((int)_boxMode + 1) % 4));
                 break;
             case Key.F:
                 FocusCamera();
@@ -557,11 +696,29 @@ public partial class Builder : Node3D
     public override void _Process(double delta)
     {
         float dt = (float)delta;
+        _popsThisFrame = 0;
         if (_dirty)
         {
             _dirty = false;
-            Reanalyze();
+            // Big designs are analyzed in the background; the dashboard catches up a moment later.
+            if (_cells.Count < AsyncAnalysisCells && _analysisTask == null) ApplyAnalysis(VehicleAnalysis.Analyze(_cells));
+            else if (_analysisTask == null) StartAnalysis();
+            else _analysisAgain = true;
         }
+
+        if (_analysisTask is { IsCompleted: true })
+        {
+            VehicleAnalysis done = _analysisTask.IsFaulted ? null : _analysisTask.Result;
+            _analysisTask = null;
+            if (done != null) ApplyAnalysis(done);
+            if (_analysisAgain)
+            {
+                _analysisAgain = false;
+                StartAnalysis();
+            }
+        }
+
+        UpdateBoxPreview();
 
         if (_paletteDirty)
         {
@@ -627,9 +784,9 @@ public partial class Builder : Node3D
         }
         else
         {
-            Int3 min = _cells.Keys.Aggregate(Int3.Min), max = _cells.Keys.Aggregate(Int3.Max);
+            (Int3 min, Int3 max) = Bounds();
             _goalTarget = (min.G() + max.G()) * 0.5f * Conv.CS;
-            _goalDist = Mathf.Clamp((max - min).ToVector3().Length() * Conv.CS * 1.7f + 4f, 6f, 60f);
+            _goalDist = Mathf.Clamp((max - min).ToVector3().Length() * Conv.CS * 1.7f + 4f, 6f, 600f);
         }
     }
 
@@ -639,15 +796,20 @@ public partial class Builder : Node3D
         bool free = picked && !OverUi() && !_mmbDown && !(_rmbDown && _dragged);
 
         // Outline the block under the cursor; it turns red while right-click would remove it.
-        _outline.Visible = free && onBlock;
+        _outline.Visible = free && onBlock && !_boxActive;
         if (_outline.Visible)
         {
-            _outline.Position = Conv.CellPos(hit);
+            // Outline the whole block under the cursor, big ones included.
+            BlueprintBlock under = _cells[hit];
+            BlockDef ud = DefOf(under);
+            _outline.Position = Footprint.Center(ud, under.Cell, under.O).G() * Conv.CS;
+            Vector3 size = Orientations.Apply(under.O, ud.Size.ToVector3()).G().Abs();
+            _outline.Scale = size;
             _outlineMat.AlbedoColor = _rmbDown ? new Color(1f, 0.35f, 0.3f, 1f) : new Color(1, 1, 1, 0.75f);
         }
 
-        bool show = free && !_rmbDown;
-        Int3 cell = show ? hit + n : default;
+        bool show = free && !_rmbDown && _boxMode == BoxMode.Off;
+        Int3 cell = show ? hit + n * (1 + Footprint.Reach(_selected, _orientation, -n)) : default;
         string key = $"{_selected.Id}:{_orientation}";
         if (key != _ghostKey)
         {
@@ -660,7 +822,7 @@ public partial class Builder : Node3D
             _ghostKey = key;
         }
 
-        bool ok = show && InBounds(cell) && !_cells.ContainsKey(cell);
+        bool ok = show && Fits(_selected, cell, _orientation);
         _ghost.Visible = show;
         if (show)
         {
@@ -669,52 +831,49 @@ public partial class Builder : Node3D
             BlockVisuals.SetOverride(_ghost, ok ? BlockVisuals.GhostOk : BlockVisuals.GhostBad);
         }
 
-        var mc = new Int3(-cell.X, cell.Y, cell.Z);
-        bool mirrorShow = show && _mirror && cell.X != 0;
+        Int3 mc = MirrorAnchor(_selected, cell, _orientation);
+        int mo = Orientations.MirrorX(_orientation);
+        bool overlapsSelf = Footprint.Cells(_selected, mc, mo).Any(x => Footprint.Cells(_selected, cell, _orientation).Contains(x));
+        bool mirrorShow = show && _mirror && !overlapsSelf;
         _ghostMirror.Visible = mirrorShow;
         if (mirrorShow)
         {
-            _ghostMirror.Transform = Conv.BlockTransform(mc, Orientations.MirrorX(_orientation));
-            bool mok = InBounds(mc) && !_cells.ContainsKey(mc);
+            _ghostMirror.Transform = Conv.BlockTransform(mc, mo);
+            bool mok = Fits(_selected, mc, mo);
             BlockVisuals.SetOverride(_ghostMirror, mok ? BlockVisuals.GhostOk : BlockVisuals.GhostBad);
         }
     }
 
-    private void Reanalyze()
+    private void StartAnalysis()
     {
-        _analysis = VehicleAnalysis.Analyze(_cells);
+        var snapshot = new Dictionary<Int3, BlueprintBlock>(_cells);
+        _analysisTask = System.Threading.Tasks.Task.Run(() => VehicleAnalysis.Analyze(snapshot));
+    }
+
+    private void ApplyAnalysis(VehicleAnalysis a)
+    {
+        _analysis = a;
 
         // Barrels take the caliber of the gun they belong to.
-        var calibers = new Dictionary<Int3, float>();
         foreach (GunInfo g in _analysis.Guns)
         {
-            foreach (Int3 c in g.Barrels) calibers[c] = g.Stats.CaliberMm;
-            if (g.Brake.HasValue) calibers[g.Brake.Value] = g.Stats.CaliberMm;
+            foreach (Int3 c in g.Barrels)
+                if (_blocks.ContainsKey(c)) _batch.SetCaliber(c, g.Stats.CaliberMm);
+            if (g.Brake.HasValue && _blocks.ContainsKey(g.Brake.Value)) _batch.SetCaliber(g.Brake.Value, g.Stats.CaliberMm);
         }
 
-        foreach ((Int3 c, BlueprintBlock b) in _cells)
-        {
-            BlockKind kind = BlockCatalog.Get(b.Id).Kind;
-            if (kind != BlockKind.Barrel && kind != BlockKind.MuzzleBrake) continue;
-            float want = calibers.TryGetValue(c, out float cal) ? cal : 76f;
-            if (_visualCaliber.TryGetValue(c, out float have) && Math.Abs(have - want) < 0.1f) continue;
-            _visuals[c].QueueFree();
-            MakeVisual(c, b, want);
-        }
-
-        foreach (Int3 c in _tinted.ToList())
-        {
-            if (_analysis.Disconnected.Contains(c)) continue;
-            if (_visuals.TryGetValue(c, out Node3D v)) BlockVisuals.SetOverlay(v, null);
-            _tinted.Remove(c);
-        }
-
+        // Tint blocks that aren't attached.
+        var loose = new HashSet<Int3>();
         foreach (Int3 c in _analysis.Disconnected)
+            if (_cells.TryGetValue(c, out BlueprintBlock b)) loose.Add(b.Cell);
+        foreach (Int3 a0 in _tinted.Where(x => !loose.Contains(x)).ToList())
         {
-            if (_tinted.Contains(c) || !_visuals.TryGetValue(c, out Node3D v)) continue;
-            BlockVisuals.SetOverlay(v, BlockVisuals.LooseOverlay);
-            _tinted.Add(c);
+            _batch.SetTint(a0, false);
+            _tinted.Remove(a0);
         }
+
+        foreach (Int3 a1 in loose)
+            if (_tinted.Add(a1)) _batch.SetTint(a1, true);
 
         _comMarker.Visible = _cells.Count > 0;
         _comMarker.Position = _analysis.CenterOfMass.G();
@@ -734,6 +893,135 @@ public partial class Builder : Node3D
         _waterline.Scale = new Vector3(w, 1, l);
         _waterlineLabel.Position = center + new Vector3(w * 0.5f + 0.4f, 0.15f, 0);
         _waterlineLabel.Text = a.Water.Floats ? $"waterline · {a.Water.DraftM:0.0} m draft" : "sinks";
+    }
+
+    // ---------- Box tool ----------
+
+    private void SetBoxMode(BoxMode mode)
+    {
+        _boxMode = mode;
+        _boxActive = false;
+        if (_boxButton != null)
+        {
+            _boxButton.Text = mode == BoxMode.Off ? "BOX" : $"BOX: {mode.ToString().ToUpperInvariant()}";
+            _boxButton.SetPressedNoSignal(mode != BoxMode.Off);
+        }
+
+        Toast(mode switch
+        {
+            BoxMode.Fill => "Box fill: drag out a box to fill it with the selected block. Mouse wheel while dragging makes it taller.",
+            BoxMode.Hollow => "Hollow box: drag out a box to build just its walls, floor and roof (a hull in one go).",
+            BoxMode.Clear => "Box clear: drag out a box to remove everything in it.",
+            _ => "Box tool off.",
+        });
+        Sfx.Play2D(this, SoundId.Tick, -6f, 0.8f + 0.1f * (int)mode);
+    }
+
+    /// <summary>The cell under the cursor for a box corner: in front of the face for filling, the block itself for clearing.</summary>
+    private bool BoxCorner(out Int3 corner)
+    {
+        corner = default;
+        if (OverUi() || !PickCell(out Int3 hit, out Int3 n, out bool onBlock)) return false;
+        corner = _boxMode == BoxMode.Clear && onBlock ? hit : hit + n;
+        corner = new Int3(Math.Clamp(corner.X, -Reach, Reach), Math.Clamp(corner.Y, 0, MaxHeight), Math.Clamp(corner.Z, -Reach, Reach));
+        return true;
+    }
+
+    private (Int3 lo, Int3 hi) BoxRange()
+    {
+        Int3 lo = Int3.Min(_boxStart, _boxEnd), hi = Int3.Max(_boxStart, _boxEnd);
+        if (_boxLift > 0) hi = new Int3(hi.X, Math.Min(hi.Y + _boxLift, MaxHeight), hi.Z);
+        else if (_boxLift < 0) lo = new Int3(lo.X, Math.Max(lo.Y + _boxLift, 0), lo.Z);
+        return (lo, hi);
+    }
+
+    private void UpdateBoxPreview()
+    {
+        _boxPreview.Visible = _boxLabel.Visible = _boxActive;
+        if (!_boxActive) return;
+        (Int3 lo, Int3 hi) = BoxRange();
+        Int3 dims = hi - lo + new Int3(1, 1, 1);
+        Vector3 center = (lo.G() + hi.G()) * 0.5f * Conv.CS;
+        _boxPreview.Position = center;
+        _boxPreview.Scale = dims.G() * Conv.CS + Vector3.One * 0.02f;
+        _boxLabel.Position = center + Vector3.Up * (dims.Y * Conv.CS * 0.5f + 0.6f);
+        string what = _boxMode switch { BoxMode.Clear => "clear", BoxMode.Hollow => "hollow", _ => "fill" };
+        _boxLabel.Text = $"{what}  {dims.X} × {dims.Y} × {dims.Z}  ({dims.X * Conv.CS:0.#} × {dims.Y * Conv.CS:0.#} × {dims.Z * Conv.CS:0.#} m)";
+        _boxLabel.Modulate = _boxMode == BoxMode.Clear ? new Color(1f, 0.6f, 0.55f) : new Color(0.8f, 1f, 0.85f);
+    }
+
+    private void ApplyBox()
+    {
+        (Int3 lo, Int3 hi) = BoxRange();
+        Int3 dims = hi - lo + new Int3(1, 1, 1);
+        long volume = (long)dims.X * dims.Y * dims.Z;
+        if (volume > MaxBoxCells)
+        {
+            Toast($"That box is {volume:N0} cells; the most is {MaxBoxCells:N0}. Do it in parts.");
+            Sfx.Play2D(this, SoundId.Error, -8f);
+            return;
+        }
+
+        var changes = new List<Change>();
+        bool Inside(Int3 c, Int3 a, Int3 b) => c.X >= a.X && c.Y >= a.Y && c.Z >= a.Z && c.X <= b.X && c.Y <= b.Y && c.Z <= b.Z;
+        if (_boxMode == BoxMode.Clear)
+        {
+            var boxes = new List<(Int3, Int3)> { (lo, hi) };
+            if (_mirror) boxes.Add((new Int3(-hi.X, lo.Y, lo.Z), new Int3(-lo.X, hi.Y, hi.Z)));
+            var anchors = new HashSet<Int3>();
+            foreach ((Int3 a, Int3 b) in boxes)
+            {
+                if (volume < _cells.Count)
+                {
+                    for (int x = a.X; x <= b.X; x++)
+                    for (int y = a.Y; y <= b.Y; y++)
+                    for (int z = a.Z; z <= b.Z; z++)
+                        if (_cells.TryGetValue(new Int3(x, y, z), out BlueprintBlock bb)) anchors.Add(bb.Cell);
+                }
+                else
+                {
+                    foreach ((Int3 c, BlueprintBlock bb) in _cells)
+                        if (Inside(c, a, b)) anchors.Add(bb.Cell);
+                }
+            }
+
+            foreach (Int3 a in anchors) RemoveOne(a, changes, false);
+            if (changes.Count > 0) Sfx.Play2D(this, SoundId.Remove, -3f, 0.8f);
+            Toast(changes.Count > 0 ? $"Removed {changes.Count:N0} block(s)." : "Nothing in that box.");
+            Commit(changes);
+            return;
+        }
+
+        // Step through the box a block's width at a time, so big blocks tile it too.
+        Int3 offMin = default, offMax = default;
+        bool first = true;
+        foreach (Int3 c in Footprint.Cells(_selected, Int3.Zero, _orientation))
+        {
+            offMin = first ? c : Int3.Min(offMin, c);
+            offMax = first ? c : Int3.Max(offMax, c);
+            first = false;
+        }
+
+        Int3 ext = offMax - offMin + new Int3(1, 1, 1);
+        int mo = Orientations.MirrorX(_orientation);
+        for (int x = lo.X; x + ext.X - 1 <= hi.X; x += ext.X)
+        for (int y = lo.Y; y + ext.Y - 1 <= hi.Y; y += ext.Y)
+        for (int z = lo.Z; z + ext.Z - 1 <= hi.Z; z += ext.Z)
+        {
+            if (_boxMode == BoxMode.Hollow)
+            {
+                bool interior = x > lo.X && x + ext.X - 1 < hi.X && y > lo.Y && y + ext.Y - 1 < hi.Y && z > lo.Z && z + ext.Z - 1 < hi.Z;
+                if (interior) continue;
+            }
+
+            Int3 anchor = new Int3(x, y, z) - offMin;
+            PlaceOne(_selected, anchor, _orientation, changes, animate: false);
+            if (_mirror) PlaceOne(_selected, MirrorAnchor(_selected, anchor, _orientation), mo, changes, animate: false);
+        }
+
+        if (changes.Count > 0) Sfx.Play2D(this, _selected.MassKg >= 200 ? SoundId.PlaceHeavy : SoundId.PlaceLight, -2f, 0.85f);
+        Toast(changes.Count > 0 ? $"Placed {changes.Count:N0} block(s)." : "No room in that box.");
+        Commit(changes);
     }
 
     // ---------- UI: layout ----------
@@ -776,6 +1064,10 @@ public partial class Builder : Node3D
         _mirrorButton = Ui.Button("MIRROR", () => SetMirror(!_mirror), "Build both sides at once (M)", "Pill");
         _mirrorButton.ToggleMode = true;
         bar.AddChild(_mirrorButton);
+        _boxButton = Ui.Button("BOX", () => SetBoxMode((BoxMode)(((int)_boxMode + 1) % 4)),
+            "Box tool (B): drag out a box to fill it, build a hollow shell, or clear it", "Pill");
+        _boxButton.ToggleMode = true;
+        bar.AddChild(_boxButton);
         SetMirror(_mirror);
         bar.AddChild(Ui.Button("Help", () => _help.Visible = !_help.Visible, "Controls and how designs work (F1)", "GhostButton"));
         bar.AddChild(Ui.Button("TEST DRIVE", RequestTestDrive, "Drive this design on the test range (Tab)", "PrimaryButton"));
@@ -874,6 +1166,7 @@ public partial class Builder : Node3D
         "[cell]Middle click[/cell][cell]copy the block under the cursor[/cell]" +
         "[cell]R / T / G[/cell][cell]rotate around the up / side / front axis (Shift turns the other way)[/cell]" +
         "[cell]M[/cell][cell]mirror mode: build both sides at once[/cell]" +
+        "[cell]B[/cell][cell]box tool: drag out a box to fill it, build a hollow shell (a hull in one go), or clear it. Mouse wheel while dragging makes it taller[/cell]" +
         "[cell]1-9,  [ ][/cell][cell]pick a block / switch category[/cell]" +
         "[cell]Ctrl+Z / Ctrl+Y[/cell][cell]undo / redo[/cell]" +
         "[/table]\n" +
@@ -891,7 +1184,9 @@ public partial class Builder : Node3D
         "A gun is a breech with barrel segments in a line in front of it (the yellow arrow). Loaders and propellant must touch " +
         "the breech. Ammo racks must touch it too, or connect through ammo feeds, other racks or a turret ring.\n" +
         "Everything you build on top of a turret ring, connected to the block on top of it, turns as a turret.\n" +
-        "The pink dot is the center of mass. Red blocks aren't attached and will fall off.";
+        "The pink dot is the center of mass. Red blocks aren't attached and will fall off.\n" +
+        "Big blocks (sizes in brackets, like Belt Armor 4×4×2 or the 406 mm Breech 3×3×3) fill several cells and share one health pool. " +
+        "They're what make machines of scale buildable: the build area is 320 m across.";
 
     private void SetMirror(bool on)
     {

@@ -351,12 +351,15 @@ public partial class VehicleBody
 
     private Dictionary<int, HashSet<Int3>> MissingBySection()
     {
+        // Every cell a missing block used to fill (big blocks fill several), by section.
         var map = new Dictionary<int, HashSet<Int3>>();
-        foreach (Int3 c in Repair.Missing(Analysis, Model))
+        foreach (Int3 anchor in Repair.Missing(Analysis, Model))
         {
-            int s = Analysis.SectionOf[c];
+            int s = Analysis.SectionOf[anchor];
             if (!map.TryGetValue(s, out HashSet<Int3> set)) map[s] = set = new HashSet<Int3>();
-            set.Add(c);
+            BlueprintBlock bp = Analysis.Cells[anchor];
+            foreach (Int3 c in Footprint.Cells(Analysis.Defs[anchor], anchor, bp.O))
+                if (!Model.Blocks.ContainsKey(c)) set.Add(c);
         }
 
         return map;
@@ -397,7 +400,7 @@ public partial class VehicleBody
             best = hits[0].TEnter * Conv.CS;
             target = new WeldTarget
             {
-                Missing = true, Cell = hits[0].Cell, Def = BlockCatalog.Get(Analysis.Cells[hits[0].Cell].Id), Distance = best,
+                Missing = true, Cell = Analysis.Cells[hits[0].Cell].Cell, Def = BlockCatalog.Get(Analysis.Cells[hits[0].Cell].Id), Distance = best,
                 Point = from + dir * best, Normal = (g.Basis * hits[0].Normal.G()).Normalized(),
             };
             found = true;
@@ -418,7 +421,7 @@ public partial class VehicleBody
             return (WeldState.Repairing, b.Hp / b.Def.Hp);
         }
 
-        if (!Repair.CanRebuild(Model, t.Cell, Analysis.SectionOf[t.Cell])) return (WeldState.CantAttach, 0);
+        if (!Repair.CanRebuild(Model, Analysis, t.Cell)) return (WeldState.CantAttach, 0);
         float done = (_rebuildProgress.TryGetValue(t.Cell, out float p) ? p : 0) + dt;
         float need = Repair.RebuildSeconds(t.Def);
         if (done < need)
@@ -431,12 +434,12 @@ public partial class VehicleBody
         return TryRebuild(t.Cell) ? (WeldState.Rebuilt, 1) : (WeldState.CantAttach, 0);
     }
 
-    /// <summary>Welds a destroyed block back into place, the way the design had it.</summary>
+    /// <summary>Welds a destroyed block (by its anchor cell) back into place, the way the design had it.</summary>
     public bool TryRebuild(Int3 cell)
     {
-        if (!Analysis.Cells.TryGetValue(cell, out BlueprintBlock bp) || Model.Blocks.ContainsKey(cell)) return false;
+        if (!Analysis.Cells.TryGetValue(cell, out BlueprintBlock bp) || bp.Cell != cell || Model.Blocks.ContainsKey(cell)) return false;
         int section = Analysis.SectionOf[cell];
-        if (!Repair.CanRebuild(Model, cell, section)) return false;
+        if (!Repair.CanRebuild(Model, Analysis, cell)) return false;
 
         BlockDef def = BlockCatalog.Get(bp.Id);
         BlockInstance b = Model.Add(def, cell, bp.O, section);
@@ -496,7 +499,7 @@ public partial class VehicleBody
                 _repairGhosts[c] = ghost;
             }
 
-            BlockVisuals.SetOverride(ghost, Repair.CanRebuild(Model, c, section) ? _ghostCan : _ghostCant);
+            BlockVisuals.SetOverride(ghost, Repair.CanRebuild(Model, Analysis, c) ? _ghostCan : _ghostCant);
         }
     }
 
@@ -507,7 +510,7 @@ public partial class VehicleBody
     public bool Resupply(float dt)
     {
         bool changed = false;
-        foreach (BlockInstance b in Model.Blocks.Values)
+        foreach (BlockInstance b in Model.Instances)
         {
             if (!b.Alive || b.Def.Kind != BlockKind.AmmoRack || b.AmmoUnits >= b.Def.AmmoUnits) continue;
             b.AmmoUnits = Mathf.Min(b.Def.AmmoUnits, b.AmmoUnits + 8f * dt);

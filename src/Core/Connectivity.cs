@@ -20,24 +20,24 @@ public static class Connectivity
     public static List<List<BlockInstance>> Components(GridModel g)
     {
         var result = new List<List<BlockInstance>>();
-        var visited = new HashSet<Int3>();
+        var visited = new HashSet<BlockInstance>();
         var stack = new Stack<BlockInstance>();
-        foreach (BlockInstance start in g.Blocks.Values)
+        foreach (BlockInstance start in g.Instances)
         {
-            if (!start.Alive || !visited.Add(start.Cell)) continue;
+            if (!start.Alive || !visited.Add(start)) continue;
             var comp = new List<BlockInstance>();
             stack.Push(start);
             while (stack.Count > 0)
             {
                 BlockInstance b = stack.Pop();
                 comp.Add(b);
+                foreach (Int3 c in b.Cells)
                 foreach (Int3 d in Int3.Directions)
                 {
-                    Int3 n = b.Cell + d;
-                    if (visited.Contains(n)) continue;
-                    if (!g.Blocks.TryGetValue(n, out BlockInstance nb) || !nb.Alive) continue;
-                    if (!g.AreJoined(b, nb)) continue;
-                    visited.Add(n);
+                    Int3 n = c + d;
+                    if (!g.Blocks.TryGetValue(n, out BlockInstance nb) || nb == b || !nb.Alive || visited.Contains(nb)) continue;
+                    if (!g.AreJoined(b, c, nb, n)) continue;
+                    visited.Add(nb);
                     stack.Push(nb);
                 }
             }
@@ -63,9 +63,8 @@ public static class Connectivity
                     bool anchored = false;
                     foreach (BlockInstance b in c)
                     {
-                        if (b.Cell.Y != 0) continue;
-                        anchored = true;
-                        break;
+                        foreach (Int3 cell in b.Cells) anchored |= cell.Y == 0;
+                        if (anchored) break;
                     }
 
                     if (!anchored) detached.Add(c);
@@ -77,7 +76,7 @@ public static class Connectivity
                 int seatComp = -1;
                 for (int i = 0; i < comps.Count && seatComp < 0; i++)
                     foreach (BlockInstance b in comps[i])
-                        if (b.Def.Kind == BlockKind.DriverSeat)
+                        if (b.Def.Kind is BlockKind.DriverSeat or BlockKind.DroneCore)
                         {
                             seatComp = i;
                             break;

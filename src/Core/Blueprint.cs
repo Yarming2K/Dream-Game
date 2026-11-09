@@ -69,19 +69,31 @@ public sealed class Blueprint
         var seen = new HashSet<Int3>();
         var kept = new List<BlueprintBlock>(bp.Blocks.Count);
         var unknown = new HashSet<string>();
+        int overlaps = 0;
         foreach (BlueprintBlock b in bp.Blocks)
         {
             if (b == null) continue;
-            if (!BlockCatalog.TryGet(b.Id, out _))
+            if (!BlockCatalog.TryGet(b.Id, out BlockDef def))
             {
                 unknown.Add(b.Id ?? "(none)");
                 continue;
             }
 
             if (!Orientations.IsValid(b.O)) b.O = 0;
-            if (!seen.Add(b.Cell)) continue;
+            Int3[] cells = Footprint.CellArray(def, b.Cell, b.O);
+            bool clash = false;
+            foreach (Int3 c in cells) clash |= seen.Contains(c);
+            if (clash)
+            {
+                overlaps++;
+                continue;
+            }
+
+            foreach (Int3 c in cells) seen.Add(c);
             kept.Add(b);
         }
+
+        if (overlaps > 0) problems?.Add($"{overlaps} overlapping block(s) were skipped.");
 
         foreach (string id in unknown) problems?.Add($"Unknown block type '{id}' was skipped.");
         bp.Blocks = kept;
@@ -89,17 +101,31 @@ public sealed class Blueprint
         return bp;
     }
 
+    /// <summary>Every cell the design fills, each pointing at the block that fills it (big blocks appear under all their cells).</summary>
     public Dictionary<Int3, BlueprintBlock> ToCellMap()
     {
         var map = new Dictionary<Int3, BlueprintBlock>();
-        foreach (BlueprintBlock b in Blocks) map.TryAdd(b.Cell, b);
+        foreach (BlueprintBlock b in Blocks)
+        {
+            if (!BlockCatalog.TryGet(b.Id, out BlockDef def))
+            {
+                map.TryAdd(b.Cell, b);
+                continue;
+            }
+
+            foreach (Int3 c in Footprint.Cells(def, b.Cell, b.O)) map.TryAdd(c, b);
+        }
+
         return map;
     }
 
+    /// <summary>Builds a blueprint from blocks (a cell map's values are fine: big blocks are only kept once).</summary>
     public static Blueprint FromCellMap(string name, IEnumerable<BlueprintBlock> blocks)
     {
         var bp = new Blueprint { Name = name };
-        foreach (BlueprintBlock b in blocks) bp.Blocks.Add(new BlueprintBlock(b.Id, b.Cell, b.O));
+        var anchors = new HashSet<Int3>();
+        foreach (BlueprintBlock b in blocks)
+            if (anchors.Add(b.Cell)) bp.Blocks.Add(new BlueprintBlock(b.Id, b.Cell, b.O));
         // Stable order keeps saved files tidy and diffs small.
         bp.Blocks.Sort((a, c) =>
         {

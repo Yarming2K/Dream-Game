@@ -124,9 +124,15 @@ public struct ArmorProfile
 /// </summary>
 public sealed class VehicleAnalysis
 {
+    /// <summary>Every filled cell and the block filling it (a big block is listed under each of its cells).</summary>
     public Dictionary<Int3, BlueprintBlock> Cells = new();
     public Dictionary<Int3, BlockDef> Defs = new();
     public Dictionary<Int3, int> SectionOf = new();
+
+    /// <summary>The cell each block was placed on: one per block, however big.</summary>
+    public HashSet<Int3> Anchors = new();
+
+    public bool IsAnchor(Int3 c) => Anchors.Contains(c);
     public List<SectionInfo> Sections = new();
     public List<GunInfo> Guns = new();
     public List<TurretInfo> Turrets = new();
@@ -195,14 +201,24 @@ public sealed class VehicleAnalysis
 
     public static VehicleAnalysis Analyze(Blueprint bp) => Analyze(bp.ToCellMap());
 
+
     public static VehicleAnalysis Analyze(IReadOnlyDictionary<Int3, BlueprintBlock> cells)
     {
         var a = new VehicleAnalysis();
-        foreach (KeyValuePair<Int3, BlueprintBlock> kv in cells)
+        // Lay out every block's footprint (the map may list a big block under one cell or under all of them).
+        var placed = new HashSet<BlueprintBlock>();
+        foreach (BlueprintBlock bb in cells.Values.OrderBy(b => b.Y).ThenBy(b => b.Z).ThenBy(b => b.X))
         {
-            if (!BlockCatalog.TryGet(kv.Value.Id, out BlockDef def)) continue;
-            a.Cells[kv.Key] = kv.Value;
-            a.Defs[kv.Key] = def;
+            if (!placed.Add(bb) || !BlockCatalog.TryGet(bb.Id, out BlockDef def)) continue;
+            Int3[] fp = Footprint.CellArray(def, bb.Cell, bb.O);
+            if (fp.Any(a.Cells.ContainsKey)) continue;
+            foreach (Int3 c in fp)
+            {
+                a.Cells[c] = bb;
+                a.Defs[c] = def;
+            }
+
+            a.Anchors.Add(bb.Cell);
         }
 
         a.Sections.Add(new SectionInfo { Id = 0, Kind = SectionKind.Hull });
@@ -233,6 +249,21 @@ public sealed class VehicleAnalysis
     private static IEnumerable<Int3> Sorted(IEnumerable<Int3> cells) =>
         cells.OrderBy(c => c.Y).ThenBy(c => c.Z).ThenBy(c => c.X);
 
+    /// <summary>The anchor cells of every block of one kind, in a stable order.</summary>
+    private IEnumerable<Int3> AnchorsOf(BlockKind kind) => Sorted(Anchors.Where(c => Defs[c].Kind == kind));
+
+    /// <summary>The cells next to a block (touching any of its faces), not counting its own cells.</summary>
+    private IEnumerable<(Int3 cell, Int3 dir)> Around(Int3 anchor)
+    {
+        BlueprintBlock self = Cells[anchor];
+        foreach (Int3 c in Footprint.Cells(Defs[anchor], anchor, self.O))
+        foreach (Int3 d in Int3.Directions)
+        {
+            Int3 n = c + d;
+            if (!Cells.TryGetValue(n, out BlueprintBlock other) || other != self) yield return (n, d);
+        }
+    }
+
     private void ComputeBounds()
     {
         bool first = true;
@@ -256,7 +287,7 @@ public sealed class VehicleAnalysis
     // Turrets: everything connected to the block on top of an upright ring, at or above that block's height.
     private void AssignTurrets()
     {
-        foreach (Int3 ring in Sorted(Defs.Where(kv => kv.Value.Kind == BlockKind.TurretRing).Select(kv => kv.Key)))
+        foreach (Int3 ring in AnchorsOf(BlockKind.TurretRing))
         {
             if (SectionOf.ContainsKey(ring)) continue; // a ring inside another turret
             if (Orientations.Up(Cells[ring].O) != Int3.Up)
@@ -314,7 +345,7 @@ public sealed class VehicleAnalysis
     private void FindGuns()
     {
         var claimed = new HashSet<Int3>();
-        foreach (Int3 b in Sorted(Defs.Where(kv => kv.Value.Kind == BlockKind.Breech).Select(kv => kv.Key)))
+        foreach (Int3 b in AnchorsOf(BlockKind.Breech))
         {
             BlockDef def = Defs[b];
             int o = Cells[b].O;
@@ -332,7 +363,8 @@ public sealed class VehicleAnalysis
                 continue;
             }
 
-            Int3 c = b + gun.Forward;
+            // Barrels start at the breech's front face (a big breech reaches further forward).
+            Int3 c = b + gun.Forward * (Footprint.Reach(def, o, gun.Forward) + 1);
             while (Is(c, BlockKind.Barrel) && !claimed.Contains(c))
             {
                 gun.Barrels.Add(c);
@@ -357,9 +389,10 @@ public sealed class VehicleAnalysis
             else
             {
                 int id = Sections.Count;
+                // The barrels hang from the cell of the breech right behind the first one (its front face).
                 Sections.Add(new SectionInfo
                 {
-                    Id = id, Kind = SectionKind.Gun, Parent = gun.Section, Root = gun.Barrels[0], Attach = b,
+                    Id = id, Kind = SectionKind.Gun, Parent = gun.Section, Root = gun.Barrels[0], Attach = gun.Barrels[0] - gun.Forward,
                     Pivot = b.ToVector3(), Axis = gun.Right.ToVector3(), GunIndex = Guns.Count - 1,
                 });
                 gun.GunSection = id;
@@ -368,10 +401,11 @@ public sealed class VehicleAnalysis
             }
 
             // Loaders and propellant must touch the breech and turn with it.
-            foreach (Int3 d in Int3.Directions)
+            var counted = new HashSet<Int3>();
+            foreach ((Int3 n, Int3 d) in Around(b))
             {
-                Int3 n = b + d;
                 if (d == gun.Forward || !Defs.TryGetValue(n, out BlockDef nd) || SectionOf[n] != gun.Section) continue;
+                if (!counted.Add(Cells[n].Cell)) continue;
                 if (nd.Kind == BlockKind.Loader) gun.Loaders++;
                 else if (nd.Kind == BlockKind.Propellant) gun.Propellants++;
             }
@@ -379,22 +413,23 @@ public sealed class VehicleAnalysis
             // Ammo reaches the breech through racks, feeds and turret rings.
             var seen = new HashSet<Int3>();
             var stack = new Stack<Int3>();
-            foreach (Int3 d in Int3.Directions)
+            foreach ((Int3 n, Int3 d) in Around(b))
             {
-                Int3 n = b + d;
                 if (d == gun.Forward || !Defs.TryGetValue(n, out BlockDef nd) || !nd.ConductsAmmo) continue;
                 if (seen.Add(n)) stack.Push(n);
             }
 
+            var racks = new HashSet<Int3>();
             while (stack.Count > 0)
             {
                 Int3 n = stack.Pop();
                 BlockDef nd = Defs[n];
-                if (nd.Kind == BlockKind.AmmoRack)
+                Int3 rack = Cells[n].Cell;
+                if (nd.Kind == BlockKind.AmmoRack && racks.Add(rack))
                 {
-                    if (nd.Ammo == AmmoType.AP) gun.ApRacks.Add(n);
-                    else if (nd.Ammo == AmmoType.HE) gun.HeRacks.Add(n);
-                    else if (nd.Ammo == AmmoType.Flak) gun.FlakRacks.Add(n);
+                    if (nd.Ammo == AmmoType.AP) gun.ApRacks.Add(rack);
+                    else if (nd.Ammo == AmmoType.HE) gun.HeRacks.Add(rack);
+                    else if (nd.Ammo == AmmoType.Flak) gun.FlakRacks.Add(rack);
                 }
                 foreach (Int3 d in Int3.Directions)
                 {
@@ -448,13 +483,13 @@ public sealed class VehicleAnalysis
             comps.Add(comp);
         }
 
-        int keep = comps.FindIndex(c => c.Any(x => Defs[x].Kind == BlockKind.DriverSeat));
+        int keep = comps.FindIndex(c => c.Any(x => Defs[x].Kind is BlockKind.DriverSeat or BlockKind.DroneCore));
         if (keep < 0)
         {
             float best = -1;
             for (int i = 0; i < comps.Count; i++)
             {
-                float m = comps[i].Sum(x => Defs[x].MassKg);
+                float m = comps[i].Sum(x => Defs[x].MassKg / Defs[x].Volume);
                 if (m <= best) continue;
                 best = m;
                 keep = i;
@@ -469,12 +504,14 @@ public sealed class VehicleAnalysis
     private void ComputeMass()
     {
         Vector3 sum = Vector3.Zero;
+        // A big block's mass, power and fuel are spread evenly over its cells.
         foreach (KeyValuePair<Int3, BlockDef> kv in Defs)
         {
-            MassKg += kv.Value.MassKg;
-            sum += kv.Key.ToVector3() * kv.Value.MassKg;
-            PowerKw += kv.Value.PowerKw;
-            FuelL += kv.Value.FuelL;
+            float share = 1f / kv.Value.Volume;
+            MassKg += kv.Value.MassKg * share;
+            sum += kv.Key.ToVector3() * kv.Value.MassKg * share;
+            PowerKw += kv.Value.PowerKw * share;
+            FuelL += kv.Value.FuelL * share;
             if (kv.Value.Kind is BlockKind.DriverSeat or BlockKind.DroneCore) HasDriver = true;
         }
 
@@ -485,7 +522,7 @@ public sealed class VehicleAnalysis
     private void ComputeMobility()
     {
         int tracks = 0;
-        foreach (Int3 c in Sorted(Defs.Where(kv => kv.Value.IsWheelLike).Select(kv => kv.Key)))
+        foreach (Int3 c in Sorted(Anchors.Where(a => Defs[a].IsWheelLike)))
         {
             if (SectionOf[c] != 0)
             {
@@ -495,7 +532,10 @@ public sealed class VehicleAnalysis
             }
 
             BlockDef d = Defs[c];
-            var w = new WheelInfo { Cell = c, Kind = d.Kind, RadiusM = d.WheelRadiusM, Blocked = Cells.ContainsKey(c + Int3.Down) };
+            Int3[] fp = Footprint.CellArray(d, c, Cells[c].O);
+            int bottom = fp.Min(x => x.Y);
+            bool blocked = fp.Any(x => x.Y == bottom && Cells.ContainsKey(x + Int3.Down));
+            var w = new WheelInfo { Cell = c, Kind = d.Kind, RadiusM = d.WheelRadiusM, Blocked = blocked };
             Wheels.Add(w);
             if (d.Kind == BlockKind.Track) tracks++;
         }
@@ -530,8 +570,8 @@ public sealed class VehicleAnalysis
                 int s = kv.Value;
                 bool inTurret = s == t.Section || (Sections[s].Kind == SectionKind.Gun && Sections[s].Parent == t.Section);
                 if (!inTurret) continue;
-                t.Blocks++;
-                t.MassKg += Defs[kv.Key].MassKg;
+                if (IsAnchor(kv.Key)) t.Blocks++;
+                t.MassKg += Defs[kv.Key].MassKg / Defs[kv.Key].Volume;
             }
 
             t.TraverseDegPerSec = Mobility.TraverseDegPerSec(t.MassKg);
@@ -577,13 +617,16 @@ public sealed class VehicleAnalysis
         float start = positive ? Axis(Min, axis) - 2 : Axis(Max, axis) + 2;
         float span = Axis(Max, axis) - Axis(Min, axis) + 5;
         Vector3 dir = travel.ToVector3();
-        float[] offsets = { -0.25f, 0.25f };
+        // Big designs are sampled more sparsely so the estimate stays quick (a few thousand rays at most).
+        int faceCells = (Axis(Max, ua) - Axis(Min, ua) + 1) * (Axis(Max, va) - Axis(Min, va) + 1);
+        int stride = Math.Max(1, (int)MathF.Ceiling(MathF.Sqrt(faceCells / 1500f)));
+        float[] offsets = stride == 1 ? new[] { -0.25f, 0.25f } : new[] { 0.1f };
 
         var hits = new List<RayCellHit>();
         float total = 0, lowest = float.MaxValue;
         int samples = 0;
-        for (int i = Axis(Min, ua); i <= Axis(Max, ua); i++)
-        for (int j = Axis(Min, va); j <= Axis(Max, va); j++)
+        for (int i = Axis(Min, ua); i <= Axis(Max, ua); i += stride)
+        for (int j = Axis(Min, va); j <= Axis(Max, va); j += stride)
         foreach (float su in offsets)
         foreach (float sv in offsets)
         {
@@ -592,6 +635,7 @@ public sealed class VehicleAnalysis
             GridRaycast.Cast(lookup, Min, Max, origin, dir, span, hits);
             float sum = 0;
             bool reached = false;
+            BlueprintBlock last = null;
             foreach (RayCellHit h in hits)
             {
                 BlockDef d = Defs[h.Cell];
@@ -601,6 +645,9 @@ public sealed class VehicleAnalysis
                     break;
                 }
 
+                // A big plate counts once along a ray, however many of its cells the ray crosses.
+                if (Cells[h.Cell] == last) continue;
+                last = Cells[h.Cell];
                 sum += DamageModel.EffectiveArmor(d.ArmorMm, DamageModel.ImpactAngleDeg(dir, h.Normal));
             }
 
@@ -621,7 +668,7 @@ public sealed class VehicleAnalysis
     /// </summary>
     private void AssignCrew()
     {
-        foreach (Int3 c in Sorted(Defs.Keys))
+        foreach (Int3 c in Sorted(Anchors))
         {
             SeatRole? role = Crew.RoleOf(Defs[c].Kind);
             if (role == null || Disconnected.Contains(c)) continue;
@@ -645,7 +692,7 @@ public sealed class VehicleAnalysis
     /// <summary>Ships and submarines: how the hull floats, and its propellers, rudders, pumps and torpedo tubes.</summary>
     private void ComputeNaval()
     {
-        foreach (Int3 c in Sorted(Defs.Keys))
+        foreach (Int3 c in Sorted(Anchors))
         {
             switch (Defs[c].Kind)
             {
@@ -685,16 +732,16 @@ public sealed class VehicleAnalysis
         var info = new LauncherInfo { Cell = cell, Forward = Orientations.Forward(Cells[cell].O), Section = SectionOf[cell] };
         var seen = new HashSet<Int3>();
         var stack = new Stack<Int3>();
-        foreach (Int3 d in Int3.Directions)
+        foreach ((Int3 n, Int3 d) in Around(cell))
         {
-            Int3 n = cell + d;
             if (d != info.Forward && Defs.TryGetValue(n, out BlockDef nd) && nd.ConductsAmmo && seen.Add(n)) stack.Push(n);
         }
 
+        var racks = new HashSet<Int3>();
         while (stack.Count > 0)
         {
             Int3 n = stack.Pop();
-            if (Defs[n].Kind == BlockKind.AmmoRack && Defs[n].Ammo == ammo) info.Racks.Add(n);
+            if (Defs[n].Kind == BlockKind.AmmoRack && Defs[n].Ammo == ammo && racks.Add(Cells[n].Cell)) info.Racks.Add(Cells[n].Cell);
             foreach (Int3 d in Int3.Directions)
             {
                 Int3 m = n + d;
@@ -713,7 +760,7 @@ public sealed class VehicleAnalysis
     /// <summary>Missiles: the line of missile parts in front of each rail.</summary>
     private void FindMissiles()
     {
-        foreach (Int3 rail in Sorted(Defs.Where(kv => kv.Value.Kind == BlockKind.MissileRail).Select(kv => kv.Key)))
+        foreach (Int3 rail in AnchorsOf(BlockKind.MissileRail))
         {
             var m = new MissileInfo { Rail = rail, Forward = Orientations.Forward(Cells[rail].O), Section = SectionOf[rail] };
             Missiles.Add(m);
@@ -752,11 +799,13 @@ public sealed class VehicleAnalysis
     private void ComputeAir()
     {
         float cs = Blueprint.CellSize;
-        foreach (Int3 c in Sorted(Defs.Keys))
+        float gasLift = 0;
+        foreach (Int3 c in Sorted(Anchors))
         {
             if (Disconnected.Contains(c)) continue;
             BlockDef d = Defs[c];
             int o = Cells[c].O;
+            gasLift += d.LiftKg;
             switch (d.Kind)
             {
                 case BlockKind.Wing:
@@ -786,7 +835,7 @@ public sealed class VehicleAnalysis
                     Thrusters.Add(new ThrusterInfo { Cell = c, Kind = d.Kind, Orientation = o, Direction = Orientations.Up(o) });
                     break;
                 case BlockKind.GasCell:
-                    GasCells++;
+                    GasCells += d.Volume;
                     break;
                 case BlockKind.BombRack:
                     BombRacks.Add(c);
@@ -796,7 +845,7 @@ public sealed class VehicleAnalysis
 
         if (Thrusters.Count == 0 && GasCells == 0 && Surfaces.Count == 0) return;
 
-        var air = new AirStats { GasLiftKg = GasCells * Aero.GasCellLiftKg, Bombs = BombRacks.Count };
+        var air = new AirStats { GasLiftKg = gasLift, Bombs = BombRacks.Count };
         var flat = Surfaces.Where(s => Math.Abs(Orientations.Up(s.Orientation).Y) == 1).ToList();
         air.WingAreaM2 = flat.Count * Aero.PanelArea;
         air.LiftCenterZ = flat.Count > 0 ? flat.Average(s => s.Cell.Z * cs) : CenterOfMass.Z;
@@ -831,6 +880,7 @@ public sealed class VehicleAnalysis
         var frontal = new HashSet<(int, int)>();
         foreach ((Int3 c, BlockDef d) in Defs)
             if (!d.IsLiftingSurface && !Disconnected.Contains(c)) frontal.Add((c.X, c.Y));
+        // (A big design's frontal area grows with its cross-section, as it should.)
         float bodyDrag = frontal.Count * Aero.PanelArea * 0.35f;
 
         float weight = MassKg * GunMath.Gravity;
@@ -877,9 +927,10 @@ public sealed class VehicleAnalysis
     {
         float r = radiusM / Blueprint.CellSize;
         int hits = 0;
+        BlueprintBlock self = Cells[t.Cell];
         foreach (Int3 c in Cells.Keys)
         {
-            if (c == t.Cell) continue;
+            if (Cells[c] == self) continue;
             Int3 d = c - t.Cell;
             int along = d.X * t.Direction.X + d.Y * t.Direction.Y + d.Z * t.Direction.Z;
             if (along != 0) continue;
@@ -934,7 +985,7 @@ public sealed class VehicleAnalysis
             case MobilityMode.Airship:
                 if (!a.CanFly)
                     Warnings.Add(new DesignWarning(Severity.Error,
-                        $"Its gas cells hold up {a.GasLiftKg / 1000f:0.0} t but it weighs {t:0.0} t. Add {(int)MathF.Ceiling((MassKg - a.GasLiftKg) / Aero.GasCellLiftKg)} more gas cells or lose weight."));
+                        $"Its gas cells hold up {a.GasLiftKg / 1000f:0.0} t but it weighs {t:0.0} t. Add {(int)MathF.Ceiling((MassKg - a.GasLiftKg) / Aero.GasCellLiftKg)} more gas cells' worth, or lose weight."));
                 else if (a.GasLiftKg * Aero.GasTrimMin > MassKg)
                     Warnings.Add(new DesignWarning(Severity.Warning,
                         "So much gas it can't come back down, even after venting. Use fewer gas cells or carry more."));

@@ -71,8 +71,7 @@ public partial class VehicleBody
     public int TorpedoesLeft => Tubes.Where(t => t.Alive).Sum(TorpedoesFor);
     public bool CanFireTorpedo => Tubes.Any(t => t.Alive && t.ReloadLeft <= 0 && TorpedoesFor(t) > 0);
 
-    private readonly List<(Vector3 local, float volume)> _floats = new();
-    private readonly Dictionary<Int3, (Compartment comp, int index)> _compOf = new();
+    private FloatModel _float;
     private Dictionary<Int3, BlockDef> _designCells;
     private float _floatScale = 1f;
     private float _drownedKw;
@@ -93,29 +92,38 @@ public partial class VehicleBody
         float draft = a.IsNaval ? Mathf.Max(a.Water.DraftM, 0.3f) : _heightM;
         _hullK = 0.5f * Hydro.WaterDensity * (0.2f * _beamM * draft + 0.004f * _lengthM * (_beamM + 2f * draft));
         _designCells = a.Defs.Where(kv => !a.Disconnected.Contains(kv.Key)).ToDictionary(kv => kv.Key, kv => kv.Value);
-        foreach (Compartment c in a.Compartments)
-            for (int i = 0; i < c.Cells.Count; i++) _compOf[c.Cells[i]] = (c, i);
+        _float = new FloatModel(Solids(), a.Compartments);
 
         foreach (LauncherInfo t in a.TorpedoTubes)
             if (Model.Blocks.TryGetValue(t.Cell, out BlockInstance b)) Tubes.Add(new TubeRt { Info = t, Block = b });
     }
 
-    /// <summary>Recounts what floats and which sea parts still work (after damage or repairs).</summary>
-    private void RefreshNaval()
+    /// <summary>Every cell of block material that pushes water aside, and how much.</summary>
+    private IEnumerable<(Int3 cell, float volume)> Solids()
     {
-        _floats.Clear();
-        float total = 0;
-        int props = 0, rudders = 0, planes = 0, pumps = 0, valves = 0;
-        foreach (BlockInstance b in Model.Blocks.Values)
+        foreach (BlockInstance b in Model.Instances)
         {
             if (!b.Alive) continue;
             float v = b.Def.Displacement * Hydro.CellVolume;
-            if (v > 0)
-            {
-                _floats.Add((Conv.CellPos(b.Cell), v));
-                total += v;
-            }
+            if (v <= 0) continue;
+            foreach (Int3 c in b.Cells) yield return (c, v);
+        }
+    }
 
+    /// <summary>Recounts what floats and which sea parts still work (after damage or repairs).</summary>
+    private void RefreshNaval()
+    {
+        float total = 0;
+        if (_float != null)
+        {
+            _float.SetSolids(Solids());
+            foreach (FloatModel.Brick b in _float.Bricks) total += b.Solid;
+        }
+
+        int props = 0, rudders = 0, planes = 0, pumps = 0, valves = 0;
+        foreach (BlockInstance b in Model.Instances)
+        {
+            if (!b.Alive) continue;
             switch (b.Def.Kind)
             {
                 case BlockKind.ShipPropeller: props++; break;
@@ -142,7 +150,7 @@ public partial class VehicleBody
 
         if (Analysis.Compartments.Count > 0 && _designCells != null)
             Hydro.UpdateBreaches(Analysis.Compartments, _designCells,
-                c => Model.Blocks.TryGetValue(c, out BlockInstance wb) && wb.Alive && wb.Def.Watertight);
+                c => Model.Blocks.TryGetValue(c, out BlockInstance wb) && wb.Alive && wb.Def.Watertight, _float.CompartmentAt);
     }
 
     private int TorpedoesFor(TubeRt t)
@@ -199,10 +207,10 @@ public partial class VehicleBody
         Vector3 force = Vector3.Zero, torque = Vector3.Zero;
         float under = 0, total = 0;
 
-        void Piece(Vector3 local, float buoyant, float bulk)
+        void Piece(Vector3 local, float buoyant, float bulk, float height)
         {
             Vector3 p = xf * local;
-            float frac = Mathf.Clamp((Ocean.Level - (p.Y - cs * 0.5f)) / cs, 0, 1);
+            float frac = Mathf.Clamp((Ocean.Level - (p.Y - height * 0.5f)) / height, 0, 1);
             total += buoyant;
             if (frac <= 0) return;
             under += buoyant * frac;
@@ -217,17 +225,13 @@ public partial class VehicleBody
             torque += r.Cross(f) + (r - up * (r.Dot(up) * 0.6f)).Cross(side);
         }
 
-        foreach ((Vector3 local, float volume) in _floats) Piece(local, volume * _floatScale, volume);
-
-        foreach (Compartment c in Analysis.Compartments)
+        // Each brick of hull: its own material, plus whatever sealed air is still dry inside it.
+        _float.UpdateLevels();
+        foreach (FloatModel.Brick b in _float.Bricks)
         {
-            float perCell = c.CapacityM3 / Mathf.Max(c.Cells.Count, 1);
-            float flooded = c.Water / Mathf.Max(perCell, 1e-6f);
-            for (int i = 0; i < c.Cells.Count; i++)
-            {
-                float air = Mathf.Clamp(i + 1 - flooded, 0, 1) * perCell;
-                Piece(Conv.CellPos(c.Cells[i]), air, perCell);
-            }
+            float buoyant = b.Solid * _floatScale + _float.AirIn(b);
+            if (b.Bulk <= 0) continue;
+            Piece(b.Center.G(), buoyant, b.Bulk, b.HeightM);
         }
 
         ApplyCentralForce(force);
@@ -266,13 +270,7 @@ public partial class VehicleBody
             return deepest;
         }
 
-        float FloodLimit(Compartment c)
-        {
-            float perCell = c.CapacityM3 / Mathf.Max(c.Cells.Count, 1), limit = 0;
-            foreach (Int3 cell in c.Cells)
-                limit += Mathf.Clamp((Ocean.Level - ((xf * Conv.CellPos(cell)).Y - cs * 0.5f)) / cs, 0, 1) * perCell;
-            return limit;
-        }
+        float FloodLimit(Compartment c) => _float.FloodLimit(c, p => (xf * p.G()).Y, Ocean.Level);
 
         Hydro.Step(comps, dt, HoleDepth, PumpsAlive, ValvesAlive > 0 ? BallastCommand : 0, FloodLimit);
         float flood = FloodWater;
@@ -284,19 +282,11 @@ public partial class VehicleBody
     private void DrownedEngines(Transform3D xf)
     {
         float drowned = 0;
-        foreach (BlockInstance b in Model.Blocks.Values)
+        foreach (BlockInstance b in Model.Instances)
         {
             if (!b.Alive || b.Def.PowerKw <= 0) continue;
-            bool wet;
-            if (_compOf.TryGetValue(b.Cell, out (Compartment comp, int index) at))
-            {
-                float perCell = at.comp.CapacityM3 / Mathf.Max(at.comp.Cells.Count, 1);
-                wet = at.comp.Water / Mathf.Max(perCell, 1e-6f) > at.index + 0.5f;
-            }
-            else
-            {
-                wet = (xf * Conv.CellPos(b.Cell)).Y < Ocean.Level;
-            }
+            Compartment comp = _float.CompartmentAt(b.Cell);
+            bool wet = comp != null ? _float.Flooded(comp, b.Cell.Y) : (xf * (b.Center.G() * Conv.CS)).Y < Ocean.Level;
 
             if (wet) drowned += b.Def.PowerKw;
         }

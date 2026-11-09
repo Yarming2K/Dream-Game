@@ -384,7 +384,7 @@ public partial class TestRange : Node3D
         VehicleAnalysis a = VehicleAnalysis.Analyze(bp);
         Vector3 at = a.IsNaval ? new Vector3(pos.X, VehicleBody.FloatHeight(a), pos.Z) : pos + Vector3.Up * VehicleBody.SpawnHeight(a);
         var where = new Transform3D(new Basis(Vector3.Up, Mathf.DegToRad(yawDeg)), at);
-        VehicleBody v = VehicleBody.Create(bp, where, false);
+        VehicleBody v = VehicleBody.Create(bp, where, false, a);
         v.AiCrewActive = _liveFire;
         AddChild(v);
         _targets.Add(v);
@@ -406,7 +406,7 @@ public partial class TestRange : Node3D
             _ => SpawnPoint + Vector3.Up * VehicleBody.SpawnHeight(a),
         };
         var where = new Transform3D(Basis.Identity, at);
-        _vehicle = VehicleBody.Create(_bp, where, true);
+        _vehicle = VehicleBody.Create(_bp, where, true, a);
         _vehicle.AiCrewActive = _liveFire;
         VehicleBody v = _vehicle;
         v.Status += msg =>

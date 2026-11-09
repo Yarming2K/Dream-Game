@@ -107,6 +107,8 @@ public static class DamageModel
             OrderedHit h = hits[i];
             BlockInstance b = h.Block;
             if (!b.Alive) continue;
+            // A shell crossing several cells of one big block meets its armor once.
+            if (i > 0 && hits[i - 1].Block == b) continue;
 
             if (firstSurface && i == 0 && h.AngleDeg >= RicochetAngleDeg)
             {
@@ -172,20 +174,23 @@ public static class DamageModel
         Int3 c = Int3.Round(centerCells);
         // Iterate over whichever is smaller: the blast cube or the section.
         int cube = (2 * reach + 1) * (2 * reach + 1) * (2 * reach + 1);
+        // A big block is in the blast once, however many of its cells are.
+        var seen = new HashSet<BlockInstance>();
         if (cube < section.Cells.Count)
         {
             for (int x = -reach; x <= reach; x++)
             for (int y = -reach; y <= reach; y++)
             for (int z = -reach; z <= reach; z++)
             {
-                if (section.Cells.TryGetValue(c + new Int3(x, y, z), out BlockInstance b))
+                if (section.Cells.TryGetValue(c + new Int3(x, y, z), out BlockInstance b) && seen.Add(b))
                     BlastOne(b, centerCells, rCells, damage, destroyed, hurt);
             }
         }
         else
         {
             var list = new List<BlockInstance>(section.Cells.Values);
-            foreach (BlockInstance b in list) BlastOne(b, centerCells, rCells, damage, destroyed, hurt);
+            foreach (BlockInstance b in list)
+                if (seen.Add(b)) BlastOne(b, centerCells, rCells, damage, destroyed, hurt);
         }
     }
 
@@ -193,7 +198,9 @@ public static class DamageModel
         List<BlockInstance> destroyed, List<BlockInstance> hurt)
     {
         if (!b.Alive) return;
-        float d = Vector3.Distance(b.Cell.ToVector3(), center);
+        // Big blocks take the blast at their nearest cell.
+        float d = float.MaxValue;
+        foreach (Int3 cell in b.Cells) d = MathF.Min(d, Vector3.Distance(cell.ToVector3(), center));
         if (d >= rCells) return;
         float falloff = MathF.Pow(1f - d / rCells, 1.5f);
         float dmg = (damage * falloff - b.Def.ArmorMm * 1.5f) * b.Def.HeVulnerability;
@@ -208,6 +215,8 @@ public static class DamageModel
         if (units <= 0) return (0, 0);
         float damage = 120f + 55f * MathF.Sqrt(units);
         float radius = 1.2f + 0.25f * MathF.Sqrt(units);
-        return (MathF.Min(damage, 520f), MathF.Min(radius, 3.5f));
+        // A big gun's magazine going up is a different order of thing from a tank's ammo rack.
+        bool magazine = units > 100;
+        return (MathF.Min(damage, magazine ? 2500f : 520f), MathF.Min(radius, magazine ? 9f : 3.5f));
     }
 }

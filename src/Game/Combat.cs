@@ -342,6 +342,8 @@ public partial class Combat : Node3D
                         Block = b, Owner = h, DistanceM = c.TEnter * Conv.CS,
                         AngleDeg = DamageModel.ImpactAngleDeg(dir.N(), normal.N()),
                     };
+                    // A big block is met once, where the shell first enters it.
+                    if (_hitPoints.ContainsKey(oh)) continue;
                     _hits.Add(oh);
                     _hitPoints[oh] = from + dir * oh.DistanceM;
                     _hitNormals[oh] = normal;

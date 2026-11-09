@@ -96,26 +96,28 @@ public static class Hydro
     private static bool Inside(Int3 c, Int3 min, Int3 max) =>
         c.X >= min.X && c.Y >= min.Y && c.Z >= min.Z && c.X <= max.X && c.Y <= max.Y && c.Z <= max.Z;
 
-    /// <summary>Every cell water can reach from outside, moving through cells that aren't watertight.</summary>
-    private static HashSet<Int3> Outside(Func<Int3, bool> watertight, Int3 min, Int3 max)
+    /// <summary>A box of cells stored as a flat array, for flood fills over big hulls.</summary>
+    private readonly struct Grid
     {
-        var seen = new HashSet<Int3>();
-        var stack = new Stack<Int3>();
-        stack.Push(min);
-        seen.Add(min);
-        while (stack.Count > 0)
+        public readonly Int3 Min, Dims;
+
+        public Grid(Int3 min, Int3 max)
         {
-            Int3 c = stack.Pop();
-            foreach (Int3 d in Int3.Directions)
-            {
-                Int3 n = c + d;
-                if (!Inside(n, min, max) || seen.Contains(n) || watertight(n)) continue;
-                seen.Add(n);
-                stack.Push(n);
-            }
+            Min = min;
+            Dims = max - min + new Int3(1, 1, 1);
         }
 
-        return seen;
+        public int Count => Dims.X * Dims.Y * Dims.Z;
+        public int Index(Int3 c) => ((c.Z - Min.Z) * Dims.Y + (c.Y - Min.Y)) * Dims.X + (c.X - Min.X);
+
+        public Int3 Cell(int i)
+        {
+            int x = i % Dims.X, rest = i / Dims.X;
+            return new Int3(Min.X + x, Min.Y + rest % Dims.Y, Min.Z + rest / Dims.Y);
+        }
+
+        public bool Inside(Int3 c) =>
+            c.X >= Min.X && c.Y >= Min.Y && c.Z >= Min.Z && c.X < Min.X + Dims.X && c.Y < Min.Y + Dims.Y && c.Z < Min.Z + Dims.Z;
     }
 
     /// <summary>Finds the sealed air spaces in a design: cells water can't get into from outside.</summary>
@@ -124,79 +126,133 @@ public static class Hydro
         var result = new List<Compartment>();
         if (cells.Count == 0) return result;
         (Int3 min, Int3 max) = Bounds(cells.Keys);
-        bool Watertight(Int3 c) => cells.TryGetValue(c, out BlockDef d) && d.Watertight;
-        HashSet<Int3> outside = Outside(Watertight, min, max);
+        var grid = new Grid(min, max);
 
-        var assigned = new HashSet<Int3>();
-        for (int x = min.X; x <= max.X; x++)
-        for (int y = min.Y; y <= max.Y; y++)
-        for (int z = min.Z; z <= max.Z; z++)
+        // 0 = open, 1 = watertight wall, 2 = reached from outside, 3 = in a compartment.
+        var state = new byte[grid.Count];
+        foreach ((Int3 c, BlockDef d) in cells)
+            if (d.Watertight) state[grid.Index(c)] = 1;
+
+        var stack = new Stack<int>();
+        void Flood(int start, byte mark, List<Int3> into)
         {
-            var start = new Int3(x, y, z);
-            if (Watertight(start) || outside.Contains(start) || assigned.Contains(start)) continue;
-            var comp = new Compartment { Id = result.Count };
-            var stack = new Stack<Int3>();
+            state[start] = mark;
             stack.Push(start);
-            assigned.Add(start);
             while (stack.Count > 0)
             {
-                Int3 c = stack.Pop();
-                comp.Cells.Add(c);
+                int i = stack.Pop();
+                Int3 c = grid.Cell(i);
+                into?.Add(c);
                 foreach (Int3 d in Int3.Directions)
                 {
                     Int3 n = c + d;
-                    if (assigned.Contains(n) || Watertight(n) || outside.Contains(n) || !Inside(n, min, max)) continue;
-                    assigned.Add(n);
-                    stack.Push(n);
+                    if (!grid.Inside(n)) continue;
+                    int ni = grid.Index(n);
+                    if (state[ni] != 0) continue;
+                    state[ni] = mark;
+                    stack.Push(ni);
                 }
             }
+        }
 
+        Flood(grid.Index(min), 2, null);
+        var compOf = new int[state.Length];
+        for (int i = 0; i < state.Length; i++)
+        {
+            if (state[i] != 0) continue;
+            var comp = new Compartment { Id = result.Count };
+            Flood(i, 3, comp.Cells);
+            foreach (Int3 c in comp.Cells) compOf[grid.Index(c)] = result.Count;
             comp.Cells.Sort((a, b) => a.Y.CompareTo(b.Y));
             comp.MinY = comp.Cells[0].Y;
             comp.MaxY = comp.Cells[^1].Y;
-            // A non-watertight block inside (a frame, a feed) takes up some of the air space.
-            float air = 0;
-            foreach (Int3 c in comp.Cells) air += cells.TryGetValue(c, out BlockDef d) ? 1f - d.Displacement : 1f;
-            comp.CapacityM3 = air * CellVolume;
-            foreach (Int3 c in comp.Cells)
-            foreach (Int3 d in Int3.Directions)
-                if (cells.TryGetValue(c + d, out BlockDef nd) && nd.Kind == BlockKind.BallastValve)
-                    comp.IsBallast = true;
+            comp.CapacityM3 = comp.Cells.Count * CellVolume;
             result.Add(comp);
+        }
+
+        // Blocks inside a compartment (machinery, frames, feeds) take up some of its air; a ballast valve
+        // makes the compartments it touches ballast tanks.
+        foreach ((Int3 c, BlockDef d) in cells)
+        {
+            int i = grid.Index(c);
+            if (state[i] == 3) result[compOf[i]].CapacityM3 -= d.Displacement * CellVolume;
+            if (d.Kind != BlockKind.BallastValve) continue;
+            foreach (Int3 dir in Int3.Directions)
+            {
+                Int3 n = c + dir;
+                if (grid.Inside(n) && state[grid.Index(n)] == 3) result[compOf[grid.Index(n)]].IsBallast = true;
+            }
         }
 
         return result;
     }
 
     /// <summary>
-    /// After damage: which compartments are now open to the sea, and through how many holes. A hole is a
-    /// watertight block from the design that's gone.
+    /// After damage: which compartments are now open to the sea, and through which holes. A hole is a
+    /// watertight block from the design that's gone. Water gets from the sea to a compartment through holes
+    /// that touch the open water outside, each other, or another breached compartment, so this only looks
+    /// at the destroyed blocks (it never floods the whole hull), which keeps it quick on huge ships.
+    /// <paramref name="compartmentAt"/> answers which compartment a cell belongs to (built from the list if not given).
     /// </summary>
     public static void UpdateBreaches(List<Compartment> comps, IReadOnlyDictionary<Int3, BlockDef> design,
-        Func<Int3, bool> watertightNow)
+        Func<Int3, bool> watertightNow, Func<Int3, Compartment> compartmentAt = null)
     {
         if (comps.Count == 0) return;
-        (Int3 min, Int3 max) = Bounds(design.Keys);
-        HashSet<Int3> outside = Outside(watertightNow, min, max);
+        if (compartmentAt == null)
+        {
+            var map = new Dictionary<Int3, Compartment>();
+            foreach (Compartment c in comps)
+            foreach (Int3 cell in c.Cells)
+                map[cell] = c;
+            compartmentAt = cell => map.TryGetValue(cell, out Compartment found) ? found : null;
+        }
+
+        // Union-find over: the sea (0), each compartment (1..n), and each hole.
+        var holes = new List<Int3>();
+        foreach ((Int3 cell, BlockDef d) in design)
+            if (d.Watertight && !watertightNow(cell)) holes.Add(cell);
+        var holeIndex = new Dictionary<Int3, int>(holes.Count);
+        for (int i = 0; i < holes.Count; i++) holeIndex[holes[i]] = comps.Count + 1 + i;
+        var compIndex = new Dictionary<Compartment, int>(comps.Count);
+        for (int i = 0; i < comps.Count; i++) compIndex[comps[i]] = i + 1;
+        int[] parent = new int[comps.Count + 1 + holes.Count];
+        for (int i = 0; i < parent.Length; i++) parent[i] = i;
+        int Find(int x)
+        {
+            while (parent[x] != x) x = parent[x] = parent[parent[x]];
+            return x;
+        }
+
+        void Union(int a, int b) => parent[Find(a)] = Find(b);
+
+        var touching = new List<(Compartment comp, Int3 hole)>();
+        foreach (Int3 h in holes)
+        {
+            int self = holeIndex[h];
+            foreach (Int3 dir in Int3.Directions)
+            {
+                Int3 n = h + dir;
+                Compartment c = compartmentAt(n);
+                if (c != null && compIndex.TryGetValue(c, out int ci))
+                {
+                    Union(self, ci);
+                    touching.Add((c, h));
+                }
+                else if (holeIndex.TryGetValue(n, out int other)) Union(self, other);
+                else if (!(design.TryGetValue(n, out BlockDef nd) && nd.Watertight)) Union(self, 0); // open water (or a flooded passage to it)
+            }
+        }
+
+        int sea = Find(0);
         foreach (Compartment comp in comps)
         {
-            comp.Breached = comp.Cells.Any(outside.Contains);
-            var holes = new HashSet<Int3>();
-            if (comp.Breached)
-            {
-                var own = new HashSet<Int3>(comp.Cells);
-                foreach (Int3 c in comp.Cells)
-                foreach (Int3 d in Int3.Directions)
-                {
-                    Int3 n = c + d;
-                    if (!own.Contains(n) && design.TryGetValue(n, out BlockDef nd) && nd.Watertight && !watertightNow(n)) holes.Add(n);
-                }
-            }
-
-            comp.Holes = Math.Max(holes.Count, comp.Breached ? 1 : 0);
+            comp.Breached = Find(compIndex[comp]) == sea;
             comp.HoleCells.Clear();
-            comp.HoleCells.AddRange(holes);
         }
+
+        foreach ((Compartment comp, Int3 hole) in touching)
+            if (comp.Breached && !comp.HoleCells.Contains(hole)) comp.HoleCells.Add(hole);
+        foreach (Compartment comp in comps) comp.Holes = comp.Breached ? Math.Max(comp.HoleCells.Count, 1) : 0;
     }
 
     /// <summary>
@@ -256,14 +312,30 @@ public static class Hydro
         }
     }
 
+    /// <summary>Buoyant volume in each row of cells (rows from <paramref name="minY"/> up), which is all that matters for an upright hull.</summary>
+    private static float[] VolumeByRow(IReadOnlyDictionary<Int3, BlockDef> cells, IReadOnlyList<Compartment> comps, int minY, int maxY)
+    {
+        var rows = new float[maxY - minY + 1];
+        foreach ((Int3 c, BlockDef d) in cells)
+            if (d.Displacement > 0) rows[c.Y - minY] += d.Displacement * CellVolume;
+        foreach (Compartment comp in comps)
+        {
+            float perCell = comp.CapacityM3 / Math.Max(comp.Cells.Count, 1);
+            int flooded = (int)MathF.Round(comp.Water / Math.Max(perCell, 1e-6f));
+            for (int i = flooded; i < comp.Cells.Count; i++) rows[comp.Cells[i].Y - minY] += perCell;
+        }
+
+        return rows;
+    }
+
     /// <summary>Volume under water (m³) if the surface sits at <paramref name="waterY"/> meters in the design's frame.</summary>
-    private static float Submerged(List<(Int3 cell, float volume)> parts, float waterY)
+    private static float Submerged(float[] rows, int minY, float waterY)
     {
         float cs = Blueprint.CellSize, total = 0;
-        foreach ((Int3 c, float v) in parts)
+        for (int i = 0; i < rows.Length; i++)
         {
-            float bottom = c.Y * cs - cs / 2f;
-            total += v * Math.Clamp((waterY - bottom) / cs, 0f, 1f);
+            float bottom = (minY + i) * cs - cs / 2f;
+            total += rows[i] * Math.Clamp((waterY - bottom) / cs, 0f, 1f);
         }
 
         return total;
@@ -275,11 +347,17 @@ public static class Hydro
         var stats = new HydroStats { Compartments = comps.Count(c => !c.IsBallast) };
         if (cells.Count == 0) return stats;
         float cs = Blueprint.CellSize;
-        var parts = BuoyantVolumes(cells, comps).ToList();
-        float total = parts.Sum(p => p.volume);
+        int minY = int.MaxValue, maxY = int.MinValue;
+        foreach (Int3 c in cells.Keys)
+        {
+            minY = Math.Min(minY, c.Y);
+            maxY = Math.Max(maxY, c.Y);
+        }
+
+        float[] rows = VolumeByRow(cells, comps, minY, maxY);
+        float total = rows.Sum();
         stats.DisplacementT = total * WaterDensity / 1000f;
         stats.BallastT = comps.Where(c => c.IsBallast).Sum(c => c.CapacityM3) * WaterDensity / 1000f;
-        int minY = cells.Keys.Min(c => c.Y), maxY = cells.Keys.Max(c => c.Y);
         float bottom = minY * cs - cs / 2f, top = maxY * cs + cs / 2f;
         stats.Floats = total * WaterDensity > massKg;
         stats.CanSurface = stats.Floats;
@@ -296,7 +374,7 @@ public static class Hydro
             for (int i = 0; i < 40; i++)
             {
                 float mid = (lo + hi) / 2f;
-                if (Submerged(parts, mid) < needed) lo = mid;
+                if (Submerged(rows, minY, mid) < needed) lo = mid;
                 else hi = mid;
             }
 
