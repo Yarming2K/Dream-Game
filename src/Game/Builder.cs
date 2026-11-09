@@ -1504,7 +1504,7 @@ public partial class Builder : Node3D
                 ? StatTile("Tips over at", $"{a.TipAngleDeg:0}", "°", Ui.Grade(a.TipAngleDeg, 30, 40))
                 : StatTile("Tips over at", "-", "", Ui.Dim));
         grid.AddChild(StatTile("Fuel", $"{a.FuelL:0}", "L", a.FuelL > 0 ? Ui.Text : Ui.Bad));
-        grid.AddChild(StatTile("Blocks", $"{a.Cells.Count}", "", Ui.Text));
+        grid.AddChild(StatTile("Blocks", $"{a.Anchors.Count}", "", Ui.Text));
         _dash.AddChild(grid);
 
         if (a.IsNaval) HullSection(a);
