@@ -47,8 +47,16 @@ public partial class VehicleBody : RigidBody3D, IGridHost
         public float Pitch;
         public float ElevSpeedRad;
         public float AimError;
+
+        /// <summary>How far a big breech reaches forward of its anchor cell (0 for ordinary breeches).</summary>
+        public int BreechReach;
+
+        /// <summary>True while its own ship is in the way of its line of fire (it holds fire).</summary>
+        public bool Masked;
         public string Label => Info.Label;
-        public float MuzzleDistanceCells => Barrels + (HasBrake ? 1 : 0) + 0.5f;
+
+        /// <summary>From the breech's anchor to the end of the barrel, in cells.</summary>
+        public float MuzzleDistanceCells => BreechReach + Barrels + (HasBrake ? 1 : 0) + 0.5f;
     }
 
     public sealed class TurretRt
@@ -216,7 +224,10 @@ public partial class VehicleBody : RigidBody3D, IGridHost
         {
             GunInfo g = Analysis.Guns[i];
             if (!g.Valid || !Model.Blocks.TryGetValue(g.Breech, out BlockInstance breech)) continue;
-            Guns.Add(new GunRt { Info = g, Breech = breech, Index = i });
+            Guns.Add(new GunRt
+            {
+                Info = g, Breech = breech, Index = i, BreechReach = Footprint.Reach(breech.Def, breech.Orientation, g.Forward),
+            });
         }
 
         foreach (TurretInfo t in Analysis.Turrets)
@@ -570,7 +581,7 @@ public partial class VehicleBody : RigidBody3D, IGridHost
             Vector3 to = aim - pivot;
             var flat = new Vector3(to.X, 0, to.Z);
             float dist = flat.Length();
-            float v = ShellSpeed(g, SelectedAmmo);
+            float v = ShellSpeed(g, AmmoFor(g));
             if (!GunMath.SolveElevation(v, dist, to.Y, out float elev)) elev = Mathf.Pi / 4f;
             Vector3 dirW = dist > 0.01f ? flat / dist * Mathf.Cos(elev) + Vector3.Up * Mathf.Sin(elev) : Vector3.Up;
             Vector3 dirL = parent.Basis.Inverse() * dirW;
@@ -601,19 +612,39 @@ public partial class VehicleBody : RigidBody3D, IGridHost
     {
         int fired = 0;
         foreach (GunRt g in Guns)
-            if (PlayerDirects(g) && FireGun(g, true)) fired++;
+        {
+            if (!PlayerDirects(g)) continue;
+            // Crew following the player's aim hold fire until their own gun has come round onto it.
+            if (ControllerOf(g)?.Occupant == Occupant.Ai && g.AimError > 2.5f) continue;
+            if (FireGun(g, true)) fired++;
+        }
+
         return fired;
     }
 
+    /// <summary>
+    /// Whether a shot along <paramref name="dir"/> would clear the vehicle's own hull, turrets and
+    /// superstructure. Guns that can't bear hold fire instead of shooting their own ship.
+    /// </summary>
+    private bool LineOfFireClear(Vector3 muzzle, Vector3 dir)
+    {
+        var q = PhysicsRayQueryParameters3D.Create(muzzle + dir * 0.3f, muzzle + dir * (Radius * 2f + 20f), GridRegistry.Layers.Vehicles);
+        Godot.Collections.Dictionary hit = GetWorld3D().DirectSpaceState.IntersectRay(q);
+        return hit.Count == 0 || hit["rid"].AsRid() != GetRid();
+    }
+
     /// <summary>Fires one gun if it's loaded and has ammo.</summary>
-    public bool FireGun(GunRt g, bool byPlayer)
+    public bool FireGun(GunRt g, bool byPlayer, AmmoType? ammo = null)
     {
         if (Combat.Instance == null || !g.Alive || g.ReloadLeft > 0 || g.Info.GunSection < 0) return false;
-        AmmoType type = SelectedAmmo;
+        AmmoType type = ammo ?? SelectedAmmo;
         if (Rounds(g, type) == 0) type = ShellTypes.FirstOrDefault(t => Rounds(g, t) > 0, type);
-        if (!TakeRound(g, type)) return false;
+        if (Rounds(g, type) == 0) return false;
 
         (Vector3 muzzle, Vector3 dir) = Muzzle(g);
+        g.Masked = !LineOfFireClear(muzzle, dir);
+        if (g.Masked || !TakeRound(g, type)) return false;
+
         float spread = Mathf.DegToRad(g.Stats.SpreadDeg) * Mathf.Sqrt(_rng.Randf());
         Vector3 side = dir.Cross(Mathf.Abs(dir.Y) > 0.9f ? Vector3.Right : Vector3.Up).Normalized();
         dir = dir.Rotated(side, spread).Rotated(dir, _rng.RandfRange(0, Mathf.Tau)).Normalized();

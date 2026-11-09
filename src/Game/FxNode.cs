@@ -10,6 +10,12 @@ public partial class FxNode : Node3D
     public Action<float> Animate;
     private float _t;
 
+    /// <summary>How many effects are alive right now, so busy scenes can skip the small ones.</summary>
+    public static int Live { get; private set; }
+
+    public override void _EnterTree() => Live++;
+    public override void _ExitTree() => Live--;
+
     public override void _Process(double delta)
     {
         _t += (float)delta;

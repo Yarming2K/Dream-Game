@@ -86,16 +86,27 @@ public partial class VehicleBody
     private Vector3 _aiAim;
     private bool _aiHasAim;
 
+    // A second watch for anti-aircraft guns: while enemy aircraft are up, guns with flak go after them
+    // and the rest keep on ships and vehicles.
+    private VehicleBody _aaTarget;
+    private float _aaOnTarget;
+    private Vector3 _aaOffset, _aaAim;
+    private bool _aaHasAim;
+
     private readonly Dictionary<Int3, Node3D> _repairGhosts = new();
     private readonly Dictionary<Int3, float> _rebuildProgress = new();
     private static Material _ghostCan, _ghostCant;
+
+    private readonly Dictionary<Int3, SeatRt> _seatAt = new();
 
     private void SetupSeats()
     {
         foreach (SeatInfo si in Analysis.Seats)
         {
             if (!Model.Blocks.TryGetValue(si.Cell, out BlockInstance b)) continue;
-            Seats.Add(new SeatRt { Info = si, Block = b, Occupant = Occupant.Ai });
+            var seat = new SeatRt { Info = si, Block = b, Occupant = Occupant.Ai };
+            Seats.Add(seat);
+            _seatAt[si.Cell] = seat;
         }
     }
 
@@ -158,11 +169,8 @@ public partial class VehicleBody
     public SeatRt ControllerOf(GunRt g)
     {
         bool Manned(SeatRt s) => s != null && SeatAlive(s) && s.Occupant != Occupant.Empty;
-        if (Analysis.GunController.TryGetValue(g.Index, out Int3 cell))
-        {
-            SeatRt assigned = Seats.FirstOrDefault(s => s.Info.Cell == cell);
-            if (Manned(assigned)) return assigned;
-        }
+        if (Analysis.GunController.TryGetValue(g.Index, out Int3 cell) && _seatAt.TryGetValue(cell, out SeatRt assigned) && Manned(assigned))
+            return assigned;
 
         SeatRt gunner = Seats.FirstOrDefault(s => s.Role == SeatRole.Gunner && Manned(s));
         if (gunner != null) return gunner;
@@ -189,8 +197,30 @@ public partial class VehicleBody
             return PlayerInput.HasAim;
         }
 
+        if (OnAirWatch(g))
+        {
+            aim = _aaAim;
+            return _aaHasAim;
+        }
+
         aim = _aiAim;
         return _aiHasAim;
+    }
+
+    private bool AaTargetValid() =>
+        _aaTarget != null && IsInstanceValid(_aaTarget) && _aaTarget.IsInsideTree() && _aaTarget.Model.Blocks.Count > 0 && !_aaTarget.OnGround;
+
+    /// <summary>An AI-crewed gun on the anti-aircraft watch: it has flak (or there's nothing else to shoot) and there's an aircraft up.</summary>
+    private bool OnAirWatch(GunRt g) =>
+        !PlayerDirects(g) && AaTargetValid() && (g.Info.FlakRacks.Count > 0 || !AiTargetValid());
+
+    /// <summary>The shell a gun fires: the player's pick for guns they direct, otherwise the right one for the gunner's target.</summary>
+    public AmmoType AmmoFor(GunRt g)
+    {
+        if (PlayerDirects(g)) return SelectedAmmo;
+        if (OnAirWatch(g)) return g.Info.FlakRacks.Count > 0 ? AmmoType.Flak : AmmoType.HE;
+        if (_aiVehicleTarget == null) return AmmoType.HE;
+        return _aiVehicleTarget.IsAir && !_aiVehicleTarget.OnGround && g.Info.FlakRacks.Count > 0 ? AmmoType.Flak : AmmoType.AP;
     }
 
     // ---------- AI gunner ----------
@@ -200,9 +230,10 @@ public partial class VehicleBody
         bool aiGuns = AiCrewActive && Guns.Any(g => g.Alive && ControllerOf(g)?.Occupant == Occupant.Ai && !PlayerDirects(g));
         if (!aiGuns)
         {
-            _aiHasAim = false;
+            _aiHasAim = _aaHasAim = false;
             _aiVehicleTarget = null;
             _aiCharacterTarget = null;
+            _aaTarget = null;
             return;
         }
 
@@ -213,6 +244,7 @@ public partial class VehicleBody
             PickAiTarget();
         }
 
+        AirWatch(dt);
         if (!AiTargetValid())
         {
             _aiHasAim = false;
@@ -231,7 +263,7 @@ public partial class VehicleBody
             targetVel = _aiCharacterTarget.Velocity;
         }
 
-        GunRt lead = Guns.FirstOrDefault(g => g.Alive && g.Info.GunSection >= 0 && ControllerOf(g)?.Occupant == Occupant.Ai && !PlayerDirects(g));
+        GunRt lead = Guns.FirstOrDefault(g => g.Alive && g.Info.GunSection >= 0 && ControllerOf(g)?.Occupant == Occupant.Ai && !PlayerDirects(g) && !OnAirWatch(g));
         if (lead == null)
         {
             _aiHasAim = false;
@@ -245,7 +277,7 @@ public partial class VehicleBody
                 : _aiVehicleTarget.IsAir && !_aiVehicleTarget.OnGround && HasFlak ? AmmoType.Flak : AmmoType.AP;
 
         (Vector3 muzzle, _) = Muzzle(lead);
-        float speed = ShellSpeed(lead, SelectedAmmo);
+        float speed = ShellSpeed(lead, AmmoFor(lead));
         Vector3 aim = GunMath.LeadTarget(muzzle.N(), targetPos.N(), targetVel.N(), speed).G();
 
         // Gunners start a little off and settle in; a commander makes them quicker and steadier.
@@ -263,8 +295,37 @@ public partial class VehicleBody
         foreach (GunRt g in Guns)
         {
             if (!g.Alive || g.ReloadLeft > 0 || g.AimError > tolerance) continue;
-            if (ControllerOf(g)?.Occupant != Occupant.Ai || PlayerDirects(g)) continue;
-            FireGun(g, false);
+            if (ControllerOf(g)?.Occupant != Occupant.Ai || PlayerDirects(g) || OnAirWatch(g)) continue;
+            FireGun(g, false, AmmoFor(g));
+        }
+    }
+
+    /// <summary>Anti-aircraft guns: lead the aircraft, settle in, and fire flak bursts at it.</summary>
+    private void AirWatch(float dt)
+    {
+        GunRt lead = AaTargetValid()
+            ? Guns.FirstOrDefault(g => g.Alive && g.Info.GunSection >= 0 && ControllerOf(g)?.Occupant == Occupant.Ai && OnAirWatch(g))
+            : null;
+        if (lead == null)
+        {
+            _aaHasAim = false;
+            return;
+        }
+
+        Vector3 targetPos = _aaTarget.GlobalTransform * _aaTarget.CenterOfMass;
+        (Vector3 muzzle, _) = Muzzle(lead);
+        Vector3 aim = GunMath.LeadTarget(muzzle.N(), targetPos.N(), _aaTarget.LinearVelocity.N(), ShellSpeed(lead, AmmoFor(lead))).G();
+        bool commander = CommanderAlive;
+        _aaOnTarget += dt;
+        float k = Mathf.Clamp(_aaOnTarget / (commander ? 2f : 4f), 0, 1);
+        _aaAim = aim + _aaOffset * Mathf.Lerp(commander ? 6f : 12f, 2f, k);
+        _aaHasAim = true;
+        if (_aaOnTarget < (commander ? 0.4f : 0.9f)) return;
+        foreach (GunRt g in Guns)
+        {
+            if (!g.Alive || g.ReloadLeft > 0 || g.AimError > 2f) continue;
+            if (ControllerOf(g)?.Occupant != Occupant.Ai || !OnAirWatch(g)) continue;
+            FireGun(g, false, AmmoFor(g));
         }
     }
 
@@ -291,15 +352,37 @@ public partial class VehicleBody
             return hit.Count == 0 || hit["rid"].AsRid() == target;
         }
 
+        bool flak = HasFlak;
+        VehicleBody bestAir = null;
+        float bestAirD = float.MaxValue;
         foreach (IGridHost h in GridRegistry.Hosts)
         {
             if (h is not VehicleBody v || v == this || v.Faction == Faction || v.Model.Blocks.Count == 0) continue;
             Vector3 p = v.GlobalTransform * v.CenterOfMass;
             float d = eye.DistanceTo(p);
+            if (flak && v.IsAir && !v.OnGround)
+            {
+                // Aircraft are for the flak guns, which reach much further.
+                if (d < 2500f && d < bestAirD && Visible(p, v.GetRid()))
+                {
+                    bestAirD = d;
+                    bestAir = v;
+                }
+
+                continue;
+            }
+
             if (d > 800f || d >= best || !Visible(p, v.GetRid())) continue;
             best = d;
             bestVehicle = v;
             bestCharacter = null;
+        }
+
+        if (bestAir != _aaTarget)
+        {
+            _aaTarget = bestAir;
+            _aaOnTarget = 0;
+            _aaOffset = new Vector3(_rng.RandfRange(-1, 1), _rng.RandfRange(-0.5f, 0.5f), _rng.RandfRange(-1, 1)).Normalized();
         }
 
         foreach (ICharacter c in Hittables.Characters)

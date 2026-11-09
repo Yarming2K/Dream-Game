@@ -63,6 +63,10 @@ These three have to feel great, or the game fails:
 - Blueprints are versioned JSON files, so friends can share them as files.
 - **Box tools** (B cycles them): drag out a box to fill it with the selected block, build just its shell (walls, floor and roof, so a hull goes up in one go), or clear everything inside it. The mouse wheel makes the box taller while dragging. Big blocks tile the box. Mirror mode applies.
 - The build area is 320 m across and 80 m high, big enough for a 300 m battleship.
+- **Designs should look like machines, not stacks of cubes.**
+  - Plain armor, frames and gas cells merge into continuous surfaces: a wall of blocks reads as one plate. Only outside edges are chamfered, corners and creases are shaded darker, paint is weathered in soft blotches, worn lighter along the edges, and each block's panel is tinted very slightly so plating still shows.
+  - Everything else is a detailed model: tracks with links and road wheels, treaded tires with bolted hubs, engines with cooling fins and exhausts, breeches with recoil cylinders, racks of shells, twisted propeller and screw blades, turbines, stacked lead ingots.
+  - The dashboard groups guns that are built the same ("406 mm × 12"), so a big battery stays readable.
 
 ### Guns (built from components)
 A gun is a **breech** with **barrel** segments in a line in front of it. Parts attached around the breech change how it performs:
@@ -138,6 +142,13 @@ Guns inside a turret group traverse (turn left and right); every gun elevates.
 - A big block turns with the rotate keys like any other. The ghost shows its whole box, and it only fits if every cell in the box is free.
 - **The Colossus** is the example: a 300 m battleship of 51,000 t, with a watertight bulkhead every 20 m, twelve turbines on four great screws, a bridge tower, and two twin 406 mm turrets. It's too long for the buoy ring, so ships over 80 m start (and resupply) at a **fleet anchorage** further out to sea.
 - Big ships steer the same way small ones do, but the rudder pushes through the water's resistance to turning, so a 300 m ship still comes round in a few minutes.
+- **Big machines bristle with weapons.** The Colossus carries twelve 406 mm guns in four triple turrets (the inner two raised on barbettes to fire over the outer ones), twenty-four 203 mm guns in twelve twin turrets down her sides, forty-eight 40 mm flak guns in twenty-four mounts, eight torpedo tubes at the waterline and eight radar missiles. Her bow tapers to a point, and her bridge is stepped. The Zephyr airship carries a flak turret on top of its envelope, four guided missiles and eight bombs.
+- **Rules that make a lot of guns workable:**
+  - Every turret has its own gunner. With gunners following the player's aim, one click fires every gun that has come round onto the target. Guns still turning hold fire.
+  - A gun never fires into its own ship: if the hull, a turret or the superstructure is in its line of fire, it holds fire (the HUD says how many guns bear).
+  - Anti-aircraft guns keep their own watch. While enemy aircraft are up, guns with flak engage them (out to 2.5 km) and the rest stay on ships and vehicles.
+  - F fires torpedoes on anything with tubes; X fires missiles.
+  - The HUD shows one line per kind of gun. A broadside's sound, muzzle effects and camera kick are capped so it stays readable.
 
 ## Technical approach
 
@@ -150,6 +161,7 @@ Guns inside a turret group traverse (turn left and right); every gun elevates.
   - Buoyancy is worked out per "brick" of cells (sized so even a 300 m ship has a few thousand of them), instead of per block.
   - Flooding finds which compartments a hole opens to by joining destroyed hull blocks, instead of re-flooding the whole grid.
   - The builder analyzes big designs in the background, so placing blocks on a huge design stays smooth.
+- **Looks come from the core.** Each block's model is described in `src/Core/BlockModels.cs` as a list of simple shapes (boxes, cylinders, rings, tapered slabs), and hull surfaces are built by `src/Core/HullMesher.cs`. The game turns both into meshes, and so do the preview pictures, so what's drawn outside the engine matches the game's models exactly.
 - **Damping:** vehicles replace Godot's default damping (which pulls in proportion to mass) instead of adding to it. Ships and aircraft model their own drag and get almost none; land vehicles keep the amount they've always had.
 - **Water** is a flat surface for physics (the waves are only drawn). Every block and every compartment cell under it pushes up on the hull where it is, so trim, list and capsizing come out of the shape. Water drag on each piece gives a ship its keel and its roll damping. Submarine depth keeping and rudder steering have gentle assists, and a standalone simulation checks the example ships float level, right themselves, turn and dive before each change ships.
 - **Flight** uses the same approach: every panel's lift and drag is applied where it is, and the assists are rate controllers on each axis, capped by what the control surfaces can do at the current airspeed. A standalone flight simulation checks the examples take off within the airstrip, hold level flight, turn, recover from a zoom climb, and (for helicopters, drones and airships) hover and hold height.
@@ -175,6 +187,7 @@ Each milestone is playable on its own.
    - **Sea** *(built)*: ships and submarines, buoyancy from sealed compartments, flooding and bilge pumps, propellers, rudders, dive planes, ballast and depth keeping, torpedoes, the engine telegraph, swimming. The test range is now an island with open sea off the east coast, an enemy patrol boat and a surfaced submarine.
    - **Air** *(built)*: wing panels and self-mapping control surfaces, air propellers, aero engines, jets, rotors, lift fans and gas cells; planes (mouse aim), helicopters, VTOL and drones (flown by remote), airships; bombs with a bombsight, guided missiles built from parts (optical or radar), a 40 mm autocannon with air-burst flak; an airstrip, a helipad, and enemy aircraft on the range.
    - **Scale** *(built)*: colossal machines, 300 m and up. Big multi-cell blocks, chunked drawing and merged collision, bricked buoyancy, a 320 m build area, box fill / hollow / clear tools, background analysis, the Colossus battleship and the fleet anchorage.
+   - **Looks and firepower** *(built)*: merged hull surfaces with chamfers, shading and weathering; detailed block models; the Colossus armed with 84 guns, torpedoes and missiles; firing arcs, the anti-aircraft watch and a grouped weapons HUD.
    - Not yet: giant aircraft and land battleships. They can be built from the same blocks, but their wings and tracks are still worked out panel by panel, so a giant one costs more to fly than it needs to.
 4. **Terrain + industry:** deformable terrain, mining, machines you design, conveyors, power, assembly bays that print blueprints.
 5. **Planet war:** a generated planet, a rival faction that designs its own vehicles, territory, the supply network, research, salvage, captured sites, simplified far-off battles.
@@ -186,5 +199,5 @@ Each milestone is playable on its own.
 - **Scope.** This is a multi-year vision. We protect the pillars and cut everything else first.
 - **Art.** Blocks, terrain and lighting can look good. Characters and animation start from free art packs and get replaced later.
 - **Networking.** Keeping block damage in sync between players is the hardest technical problem. Game logic runs as if a server is in charge, and the rules are deterministic.
-- **Colossal machines.** A 300 m machine is 600 cells long and could hold hundreds of thousands of blocks. Big blocks, chunked drawing, merged colliders and bricked buoyancy keep the Colossus cheap. Still to prove on a real PC: frame rate with several of them in a fight, and the cost of heavy shell fire breaking pieces off a giant hull.
+- **Colossal machines.** A 300 m machine is 600 cells long and could hold hundreds of thousands of blocks. Big blocks, chunked drawing, merged colliders and bricked buoyancy keep the Colossus cheap. Still to prove on a real PC: frame rate with several of them in a fight, the cost of heavy shell fire breaking pieces off a giant hull, and a full broadside plus forty-eight flak guns firing at once.
 - **Testing.** Claude builds in a cloud container with no screen. Automated tests cover the core rules, and in-game feel needs playtesting on a real PC.

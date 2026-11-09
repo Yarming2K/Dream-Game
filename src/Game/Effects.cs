@@ -237,7 +237,17 @@ public static class Effects
     public static void MuzzleFlash(Node3D world, Vector3 pos, Vector3 dir, float caliber, bool brake)
     {
         if (world == null) return;
-        float s = Mathf.Clamp(caliber / 76f, 0.5f, 1.8f);
+        // Battleship guns get a blast to match (a 406 mm flash is about three times a tank gun's).
+        float s = Mathf.Clamp(caliber / 76f, 0.5f, 1.8f) * (caliber > 150f ? Mathf.Clamp(Mathf.Sqrt(caliber / 137f), 1f, 1.8f) : 1f);
+        float pitch = caliber > 150f ? Mathf.Clamp(Mathf.Pow(120f / caliber, 0.35f), 0.6f, 1f) : 1f;
+        // When a lot is already going off (a ship's whole flak battery), small guns just bang.
+        bool busy = FxNode.Live > BusyEffects;
+        if (busy && caliber < 60f)
+        {
+            Sfx.At(world, pos, Sfx.CannonFor(caliber), 2f, Rng.RandfRange(0.94f, 1.06f), 26f, delayByDistance: false);
+            return;
+        }
+
         FxNode fx = Spawn(world, pos, 4f);
         Flash(fx, new Color(1f, 0.82f, 0.55f), 2.4f * s, 0.07f, dir * 0.5f * s);
         Emit(fx, new Burst
@@ -265,7 +275,7 @@ public static class Effects
         Light(fx, new Color(1f, 0.72f, 0.42f), 14f * s, 10f + 6f * s, 0.12f);
 
         // The blast wave kicks up a ring of dust when the gun is close to the ground.
-        if (GroundBelow(world, pos, 4.5f, out Vector3 ground, out _))
+        if (!busy && GroundBelow(world, pos, 4.5f, out Vector3 ground, out _))
         {
             FxNode dust = Spawn(world, ground + Vector3.Up * 0.2f, 3.5f);
             Emit(dust, new Burst
@@ -276,8 +286,12 @@ public static class Effects
             });
         }
 
-        Sfx.At(world, pos, Sfx.CannonFor(caliber), 2f, Rng.RandfRange(0.94f, 1.06f), 26f, delayByDistance: false);
+        Sfx.At(world, pos, Sfx.CannonFor(caliber), caliber > 150f ? 5f : 2f, Rng.RandfRange(0.94f, 1.06f) * pitch, caliber > 150f ? 60f : 26f,
+            delayByDistance: false);
     }
+
+    /// <summary>Above this many live effects, small-caliber muzzle flashes are skipped.</summary>
+    private const int BusyEffects = 90;
 
     public static TracerFx Tracer(Node3D parent, float caliber, AmmoType type)
     {

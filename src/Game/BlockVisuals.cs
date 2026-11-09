@@ -259,358 +259,180 @@ public static class BlockVisuals
         return m;
     }
 
-    private static Mesh Cylinder(float radius, float height, float topRadius = -1)
+    public static float BarrelRadius(float caliberMm) => BlockModels.BarrelRadius(caliberMm);
+
+    /// <summary>
+    /// A flat-sided slab along Y whose far end is narrowed by <paramref name="taperX"/> across and
+    /// <paramref name="taperZ"/> through: blades, fins and flaps.
+    /// </summary>
+    private static Mesh Slab(Vector3 size, float taperX, float taperZ)
     {
-        string key = $"cyl:{radius}:{height}:{topRadius}";
-        if (!Meshes.TryGetValue(key, out Mesh m))
-            Meshes[key] = m = new CylinderMesh
+        string key = $"slab:{size}:{taperX}:{taperZ}";
+        if (Meshes.TryGetValue(key, out Mesh cached)) return cached;
+        float hx = size.X * 0.5f, hy = size.Y * 0.5f, hz = size.Z * 0.5f, tx = hx * taperX, tz = hz * taperZ;
+        Vector3[] c =
+        {
+            new(-hx, -hy, -hz), new(hx, -hy, -hz), new(hx, -hy, hz), new(-hx, -hy, hz),
+            new(-tx, hy, -tz), new(tx, hy, -tz), new(tx, hy, tz), new(-tx, hy, tz),
+        };
+        var st = new SurfaceTool();
+        st.Begin(Mesh.PrimitiveType.Triangles);
+        Vector3 mid = Vector3.Zero;
+
+        void Face(int a, int b, int d, int e)
+        {
+            Vector3 n = (c[b] - c[a]).Cross(c[d] - c[a]).Normalized();
+            Vector3 centroid = (c[a] + c[b] + c[d] + c[e]) * 0.25f;
+            if (n.Dot(centroid - mid) < 0) n = -n;
+            foreach ((Vector3 p0, Vector3 p1, Vector3 p2) in new[] { (c[a], c[b], c[d]), (c[a], c[d], c[e]) })
             {
-                BottomRadius = radius, TopRadius = topRadius < 0 ? radius : topRadius, Height = height, RadialSegments = 20,
-            };
+                // Clockwise when seen from outside, which is what Godot treats as the front face.
+                (Vector3 q1, Vector3 q2) = (p1 - p0).Cross(p2 - p0).Dot(n) > 0 ? (p2, p1) : (p1, p2);
+                st.SetNormal(n);
+                st.AddVertex(p0);
+                st.SetNormal(n);
+                st.AddVertex(q1);
+                st.SetNormal(n);
+                st.AddVertex(q2);
+            }
+        }
+
+        Face(0, 1, 2, 3);
+        Face(4, 5, 6, 7);
+        Face(0, 1, 5, 4);
+        Face(1, 2, 6, 5);
+        Face(2, 3, 7, 6);
+        Face(3, 0, 4, 7);
+        Mesh mesh = st.Commit();
+        Meshes[key] = mesh;
+        return mesh;
+    }
+
+    /// <summary>The engine mesh for one shape of a block model (shared by every part with the same shape).</summary>
+    private static Mesh MeshOf(in ModelPart p)
+    {
+        string key = p.MeshKey;
+        if (Meshes.TryGetValue(key, out Mesh m)) return m;
+        m = p.Prim switch
+        {
+            Prim.Bevel => Bevel(p.Size.G(), p.Detail),
+            Prim.Box => new BoxMesh { Size = p.Size.G() },
+            Prim.Cylinder => new CylinderMesh
+            {
+                BottomRadius = p.Size.X, Height = p.Size.Y, TopRadius = p.Size.Z, RadialSegments = Math.Max(3, (int)p.Detail), Rings = 1,
+            },
+            Prim.Torus => new TorusMesh { InnerRadius = p.Size.X - p.Size.Y, OuterRadius = p.Size.X + p.Size.Y, Rings = 32, RingSegments = 10 },
+            Prim.Sphere => new SphereMesh { Radius = p.Size.X, Height = p.Size.X * 2f, RadialSegments = 20, Rings = 10 },
+            Prim.Slab => Slab(p.Size.G(), p.Detail, p.Detail2),
+            _ => WedgeMesh(),
+        };
+        Meshes[key] = m;
         return m;
     }
 
-    public static float BarrelRadius(float caliberMm) => Math.Clamp(caliberMm / 1000f * 0.85f, 0.03f, 0.4f);
-
-    private static readonly Basis AlongX = new(Vector3.Back, Mathf.Pi / 2);
-    private static readonly Basis AlongZ = new(Vector3.Right, Mathf.Pi / 2);
-
-    private static void Add(Node3D parent, Mesh mesh, Material mat, Transform3D xf)
+    private static Material PaintOf(BlockDef def, in ModelPart p) => p.Paint switch
     {
-        parent.AddChild(new MeshInstance3D { Mesh = mesh, MaterialOverride = mat, Transform = xf });
-    }
+        Paint.Self => MaterialOf(def),
+        Paint.SelfDark => Material("darker:" + def.Id, new Color(def.ColorR * 0.6f, def.ColorG * 0.6f, def.ColorB * 0.6f), def.Metallic, def.Roughness + 0.05f),
+        Paint.Dark => Dark,
+        Paint.Steel => Steel,
+        Paint.Brass => Brass,
+        Paint.Red => RedTip,
+        Paint.Rubber => Rubber,
+        Paint.Glass => Material("glass", new Color(0.1f, 0.16f, 0.2f), 0.3f, 0.06f),
+        _ => Glow(new Color(p.GlowColor.X, p.GlowColor.Y, p.GlowColor.Z), p.GlowEnergy),
+    };
 
-    private static void Add(Node3D parent, Mesh mesh, Material mat, Vector3 pos) =>
-        Add(parent, mesh, mat, new Transform3D(Basis.Identity, pos));
+    private static Transform3D ToTransform(System.Numerics.Matrix4x4 m) =>
+        new(new Basis(new Vector3(m.M11, m.M12, m.M13), new Vector3(m.M21, m.M22, m.M23), new Vector3(m.M31, m.M32, m.M33)),
+            new Vector3(m.M41, m.M42, m.M43));
 
     /// <summary>
-    /// Builds the look of one block in its own local frame (centered, unrotated).
+    /// Builds the look of one block in its own local frame (centered, unrotated) from its model.
     /// <paramref name="caliberMm"/> sizes barrels; <paramref name="hints"/> adds builder-only markers like the gun's facing arrow.
+    /// Moving parts sit on child nodes named "Spinner", "Flap" or "Payload".
     /// </summary>
     public static Node3D Create(BlockDef def, float caliberMm = 76f, bool hints = false)
     {
         var root = new Node3D { Name = def.Id };
-        StandardMaterial3D mat = MaterialOf(def);
-        float full = Conv.CS;
-        if (def.IsMultiCell)
+        BlockModel model = BlockModels.For(def, caliberMm, hints);
+        var nodes = new Node3D[model.Nodes.Count];
+        for (int i = 0; i < nodes.Length; i++)
         {
-            BuildBig(def, root, mat, hints);
-            return root;
+            nodes[i] = new Node3D { Name = model.Nodes[i].Name, Position = model.Nodes[i].Position.G() };
+            root.AddChild(nodes[i]);
         }
 
-        switch (def.Kind)
+        foreach (ModelPart p in model.Parts)
         {
-            case BlockKind.Armor when def.Shape == BlockShape.Wedge:
-                Add(root, WedgeMesh(), mat, Vector3.Zero);
-                break;
-            case BlockKind.Armor:
-            case BlockKind.Frame:
-                Add(root, Bevel(new Vector3(full, full, full)), mat, Vector3.Zero);
-                break;
-            case BlockKind.Engine:
-                Add(root, Bevel(new Vector3(full, full, full)), mat, Vector3.Zero);
-                Add(root, Cylinder(0.045f, 0.16f), Dark, new Vector3(0.12f, 0.3f, 0.12f));
-                Add(root, Cylinder(0.045f, 0.16f), Dark, new Vector3(-0.12f, 0.3f, 0.12f));
-                Add(root, Box(new Vector3(0.36f, 0.04f, 0.2f)), Steel, new Vector3(0, 0.26f, -0.1f));
-                break;
-            case BlockKind.FuelTank:
-                Add(root, Cylinder(0.23f, full * 0.98f), mat, new Transform3D(AlongZ, Vector3.Zero));
-                Add(root, Box(new Vector3(full, 0.06f, full)), Dark, new Vector3(0, -0.22f, 0));
-                break;
-            case BlockKind.Wheel:
-            case BlockKind.SteerWheel:
-                Add(root, Cylinder(def.WheelRadiusM, 0.28f), mat, new Transform3D(AlongX, Vector3.Zero));
-                Add(root, Cylinder(def.WheelRadiusM * 0.45f, 0.3f),
-                    def.Kind == BlockKind.SteerWheel ? Brass : Steel, new Transform3D(AlongX, Vector3.Zero));
-                break;
-            case BlockKind.Track:
-                Add(root, Cylinder(def.WheelRadiusM * 0.85f, 0.32f), Dark, new Transform3D(AlongX, Vector3.Zero));
-                Add(root, Box(new Vector3(0.42f, 0.07f, full)), mat, new Vector3(0, -def.WheelRadiusM, 0));
-                Add(root, Box(new Vector3(0.42f, 0.07f, full)), mat, new Vector3(0, def.WheelRadiusM, 0));
-                break;
-            case BlockKind.DriverSeat:
-                Add(root, Bevel(new Vector3(full, full, full)), mat, Vector3.Zero);
-                Add(root, Box(new Vector3(0.3f, 0.07f, 0.04f)), Glow(new Color(0.4f, 0.85f, 1f), 1.5f), new Vector3(0, 0.15f, -0.25f));
-                break;
-            case BlockKind.GunnerSeat:
-                Add(root, Bevel(new Vector3(full, full, full)), mat, Vector3.Zero);
-                Add(root, Box(new Vector3(0.12f, 0.1f, 0.06f)), Dark, new Vector3(0.08f, 0.16f, -0.25f));
-                Add(root, Box(new Vector3(0.05f, 0.04f, 0.02f)), Glow(new Color(1f, 0.35f, 0.25f), 2f), new Vector3(0.08f, 0.16f, -0.285f));
-                break;
-            case BlockKind.CommanderSeat:
-                Add(root, Bevel(new Vector3(full, full, full)), mat, Vector3.Zero);
-                Add(root, Cylinder(0.07f, 0.16f), Dark, new Vector3(0, 0.32f, 0));
-                Add(root, Box(new Vector3(0.12f, 0.04f, 0.03f)), Glow(new Color(0.4f, 0.85f, 1f), 1.5f), new Vector3(0, 0.36f, -0.07f));
-                break;
-            case BlockKind.ShipPropeller:
-                Add(root, Cylinder(0.07f, 0.3f), Steel, new Transform3D(AlongZ, Vector3.Zero));
-                Add(root, Cylinder(0.09f, 0.12f, 0.02f), mat, new Transform3D(new Basis(Vector3.Right, -Mathf.Pi / 2), new Vector3(0, 0, -0.18f)));
-                for (int i = 0; i < 3; i++)
-                {
-                    var blade = new Basis(Vector3.Back, i * Mathf.Tau / 3f) * new Basis(Vector3.Up, 0.5f);
-                    Add(root, Box(new Vector3(0.09f, 0.42f, 0.03f)), mat, new Transform3D(blade, blade * new Vector3(0, 0.2f, 0)));
-                }
-
-                break;
-            case BlockKind.Rudder:
-                Add(root, Box(new Vector3(0.06f, full * 0.95f, full * 0.85f)), mat, Vector3.Zero);
-                Add(root, Cylinder(0.035f, full), Steel, new Vector3(0, 0, -0.2f));
-                break;
-            case BlockKind.BallastValve:
-                Add(root, Bevel(new Vector3(full, full, full)), mat, Vector3.Zero);
-                Add(root, Cylinder(0.14f, 0.04f), RedTip, new Vector3(0, 0.27f, 0));
-                Add(root, Cylinder(0.03f, 0.08f), Steel, new Vector3(0, 0.24f, 0));
-                break;
-            case BlockKind.BilgePump:
-                Add(root, Bevel(new Vector3(full, full * 0.7f, full)), mat, new Vector3(0, -0.075f, 0));
-                Add(root, Cylinder(0.06f, full), Steel, new Vector3(0.14f, 0.1f, 0));
-                Add(root, Cylinder(0.11f, 0.12f), Dark, new Vector3(-0.08f, 0.2f, 0));
-                break;
-            case BlockKind.LeadBallast:
-                Add(root, Bevel(new Vector3(full, full * 0.5f, full)), mat, new Vector3(0, -0.125f, 0));
-                Add(root, Bevel(new Vector3(full * 0.8f, full * 0.42f, full * 0.8f)), mat, new Vector3(0, 0.12f, 0));
-                break;
-            case BlockKind.TorpedoTube:
-                Add(root, Bevel(new Vector3(full, full * 0.4f, full)), Dark, new Vector3(0, -0.15f, 0));
-                Add(root, Cylinder(0.19f, full * 1.02f), mat, new Transform3D(AlongZ, new Vector3(0, 0.05f, 0)));
-                Add(root, Cylinder(0.12f, 0.05f), Dark, new Transform3D(AlongZ, new Vector3(0, 0.05f, -0.26f)));
-                break;
-            case BlockKind.TurretRing:
-                Add(root, Cylinder(0.25f, full), mat, Vector3.Zero);
-                Add(root, Cylinder(0.2f, 0.04f), Dark, new Vector3(0, 0.25f, 0));
-                break;
-            case BlockKind.Breech:
-                Add(root, Bevel(new Vector3(full, full, full)), mat, Vector3.Zero);
-                Add(root, Cylinder(BarrelRadius(def.Breech.CaliberMm) * 1.4f, 0.12f), Steel,
-                    new Transform3D(AlongZ, new Vector3(0, 0, -0.27f)));
-                break;
-            case BlockKind.Barrel:
-                Add(root, Cylinder(BarrelRadius(caliberMm), full * 1.01f), mat, new Transform3D(AlongZ, Vector3.Zero));
-                break;
-            case BlockKind.MuzzleBrake:
-                Add(root, Cylinder(BarrelRadius(caliberMm) * 1.7f, 0.3f), mat, new Transform3D(AlongZ, Vector3.Zero));
-                Add(root, Box(new Vector3(BarrelRadius(caliberMm) * 4.2f, 0.06f, 0.1f)), Dark, Vector3.Zero);
-                Add(root, Cylinder(BarrelRadius(caliberMm), full), mat, new Transform3D(AlongZ, Vector3.Zero));
-                break;
-            case BlockKind.Loader:
-                Add(root, Bevel(new Vector3(full, full, full)), mat, Vector3.Zero);
-                Add(root, Box(new Vector3(full * 1.01f, 0.06f, 0.3f)), Steel, Vector3.Zero);
-                break;
-            case BlockKind.Propellant:
-                Add(root, Bevel(new Vector3(full, full * 0.6f, full)), Dark, new Vector3(0, -0.1f, 0));
-                for (int i = 0; i < 4; i++)
-                    Add(root, Cylinder(0.08f, 0.36f), mat, new Vector3(i % 2 == 0 ? -0.11f : 0.11f, 0.05f, i < 2 ? -0.11f : 0.11f));
-                break;
-            case BlockKind.AmmoRack when def.Ammo == AmmoType.Torpedo:
-                Add(root, Bevel(new Vector3(full, full * 0.45f, full)), mat, new Vector3(0, -0.14f, 0));
-                Add(root, Cylinder(0.11f, full * 0.95f), Steel, new Transform3D(AlongZ, new Vector3(0, 0.15f, 0)));
-                Add(root, Cylinder(0.11f, 0.1f, 0.02f), RedTip, new Transform3D(new Basis(Vector3.Right, -Mathf.Pi / 2), new Vector3(0, 0.15f, -0.28f)));
-                break;
-            case BlockKind.AmmoRack:
-                Add(root, Bevel(new Vector3(full, full * 0.7f, full)), mat, new Vector3(0, -0.075f, 0));
-                for (int i = 0; i < 4; i++)
-                {
-                    var p = new Vector3(i % 2 == 0 ? -0.11f : 0.11f, 0.2f, i < 2 ? -0.11f : 0.11f);
-                    Add(root, Cylinder(0.07f, 0.1f, 0.02f), def.Ammo == AmmoType.HE ? RedTip : def.Ammo == AmmoType.Flak ? Steel : Brass, p);
-                }
-
-                break;
-            case BlockKind.Wing:
-                Add(root, Box(new Vector3(full, 0.07f, full)), mat, Vector3.Zero);
-                break;
-            case BlockKind.ControlSurface:
-            {
-                // A fixed strip at the front, and the flap hinged behind it (swings in flight).
-                Add(root, Box(new Vector3(full, 0.07f, 0.12f)), mat, new Vector3(0, 0, -0.19f));
-                var flap = new Node3D { Name = "Flap", Position = new Vector3(0, 0, -0.13f) };
-                root.AddChild(flap);
-                Add(flap, Box(new Vector3(full * 0.98f, 0.05f, 0.37f)), mat, new Vector3(0, 0, 0.19f));
-                Add(root, Cylinder(0.025f, full), Steel, new Transform3D(AlongX, new Vector3(0, 0, -0.13f)));
-                break;
-            }
-            case BlockKind.AirPropeller:
-            {
-                Add(root, Cylinder(0.12f, 0.3f), Dark, new Transform3D(AlongZ, new Vector3(0, 0, 0.05f)));
-                var spin = new Node3D { Name = "Spinner", Position = new Vector3(0, 0, -0.14f) };
-                root.AddChild(spin);
-                Add(spin, Cylinder(0.13f, 0.18f, 0.02f), mat, new Transform3D(new Basis(Vector3.Right, -Mathf.Pi / 2), new Vector3(0, 0, -0.08f)));
-                Add(spin, Box(new Vector3(0.16f, Aero.PropRadiusM * 2f, 0.03f)), mat, new Transform3D(new Basis(Vector3.Up, 0.25f), Vector3.Zero));
-                Add(spin, Box(new Vector3(Aero.PropRadiusM * 2f, 0.16f, 0.03f)), mat, new Transform3D(new Basis(Vector3.Right, 0.25f), Vector3.Zero));
-                break;
-            }
-            case BlockKind.JetEngine:
-                Add(root, Cylinder(0.24f, full * 0.98f), mat, new Transform3D(AlongZ, Vector3.Zero));
-                Add(root, Cylinder(0.25f, 0.06f), Dark, new Transform3D(AlongZ, new Vector3(0, 0, -0.23f)));
-                Add(root, Cylinder(0.18f, 0.1f, 0.14f), Dark, new Transform3D(AlongZ, new Vector3(0, 0, 0.27f)));
-                Add(root, Cylinder(0.12f, 0.02f), Glow(new Color(1f, 0.55f, 0.2f), 2.5f), new Transform3D(AlongZ, new Vector3(0, 0, 0.32f)));
-                break;
-            case BlockKind.Rotor:
-            {
-                Add(root, Cylinder(0.14f, full), Steel, Vector3.Zero);
-                var spin = new Node3D { Name = "Spinner", Position = new Vector3(0, 0.22f, 0) };
-                root.AddChild(spin);
-                Add(spin, Cylinder(0.22f, 0.1f), Dark, Vector3.Zero);
-                Add(spin, Box(new Vector3(0.32f, 0.05f, Aero.RotorRadiusM * 2f)), mat, Vector3.Zero);
-                Add(spin, Box(new Vector3(Aero.RotorRadiusM * 2f, 0.05f, 0.32f)), mat, Vector3.Zero);
-                break;
-            }
-            case BlockKind.LiftFan:
-            {
-                // Its arrow (forward) is the way it blows; the duct ring sits across that axis.
-                var duct = new TorusMesh { InnerRadius = Aero.FanRadiusM * 0.92f, OuterRadius = Aero.FanRadiusM * 1.05f, Rings = 32, RingSegments = 8 };
-                Add(root, duct, mat, new Transform3D(AlongZ, Vector3.Zero));
-                Add(root, Bevel(new Vector3(0.3f, 0.3f, full * 0.9f), 0.04f), Dark, Vector3.Zero);
-                var spin = new Node3D { Name = "Spinner" };
-                root.AddChild(spin);
-                Add(spin, Box(new Vector3(0.12f, Aero.FanRadiusM * 1.8f, 0.03f)), Steel, Vector3.Zero);
-                Add(spin, Box(new Vector3(Aero.FanRadiusM * 1.8f, 0.12f, 0.03f)), Steel, Vector3.Zero);
-                break;
-            }
-            case BlockKind.GasCell:
-                Add(root, Bevel(new Vector3(full * 0.99f, full * 0.99f, full * 0.99f), 0.09f), mat, Vector3.Zero);
-                break;
-            case BlockKind.DroneCore:
-                Add(root, Bevel(new Vector3(full, full * 0.7f, full)), mat, new Vector3(0, -0.075f, 0));
-                Add(root, Cylinder(0.015f, 0.3f), Steel, new Vector3(0.12f, 0.3f, 0.1f));
-                Add(root, Box(new Vector3(0.1f, 0.04f, 0.04f)), Glow(new Color(0.35f, 1f, 0.5f), 2f), new Vector3(0, 0.18f, -0.2f));
-                break;
-            case BlockKind.BombRack:
-            {
-                Add(root, Box(new Vector3(full * 0.7f, 0.05f, full)), Dark, new Vector3(0, 0.22f, 0));
-                Add(root, Box(new Vector3(0.04f, 0.12f, 0.04f)), Steel, new Vector3(0, 0.15f, -0.12f));
-                Add(root, Box(new Vector3(0.04f, 0.12f, 0.04f)), Steel, new Vector3(0, 0.15f, 0.12f));
-                var payload = new Node3D { Name = "Payload" };
-                root.AddChild(payload);
-                Add(payload, Cylinder(0.17f, 0.42f), mat, new Transform3D(AlongZ, new Vector3(0, -0.02f, 0)));
-                Add(payload, Cylinder(0.17f, 0.12f, 0.04f), mat, new Transform3D(new Basis(Vector3.Right, -Mathf.Pi / 2), new Vector3(0, -0.02f, -0.27f)));
-                Add(payload, Box(new Vector3(0.36f, 0.02f, 0.1f)), Dark, new Vector3(0, -0.02f, 0.26f));
-                Add(payload, Box(new Vector3(0.02f, 0.36f, 0.1f)), Dark, new Vector3(0, -0.02f, 0.26f));
-                break;
-            }
-            case BlockKind.MissileRail:
-                Add(root, Box(new Vector3(0.3f, 0.12f, 0.3f)), mat, new Vector3(0, -0.12f, 0));
-                Add(root, Box(new Vector3(0.1f, 0.06f, full)), Steel, new Vector3(0, -0.03f, 0));
-                break;
-            case BlockKind.MissileSeeker when def.Seeker == SeekerKind.Radar:
-                Add(root, Cylinder(0.13f, 0.36f, 0.01f), mat, new Transform3D(new Basis(Vector3.Right, -Mathf.Pi / 2), new Vector3(0, 0, -0.06f)));
-                Add(root, Cylinder(0.13f, 0.14f), Dark, new Transform3D(AlongZ, new Vector3(0, 0, 0.18f)));
-                break;
-            case BlockKind.MissileSeeker:
-                Add(root, Cylinder(0.13f, 0.3f), mat, new Transform3D(AlongZ, new Vector3(0, 0, 0.1f)));
-                Add(root, new SphereMesh { Radius = 0.12f, Height = 0.24f }, Glow(new Color(0.25f, 0.55f, 0.9f), 0.8f), new Vector3(0, 0, -0.07f));
-                break;
-            case BlockKind.MissileWarhead:
-                Add(root, Cylinder(0.13f, full * 1.01f), mat, new Transform3D(AlongZ, Vector3.Zero));
-                Add(root, Cylinder(0.135f, 0.06f), Brass, new Transform3D(AlongZ, new Vector3(0, 0, -0.1f)));
-                break;
-            case BlockKind.MissileMotor:
-                Add(root, Cylinder(0.13f, full * 1.01f), mat, new Transform3D(AlongZ, Vector3.Zero));
-                Add(root, Cylinder(0.08f, 0.08f, 0.11f), Dark, new Transform3D(AlongZ, new Vector3(0, 0, 0.27f)));
-                break;
-            case BlockKind.MissileFins:
-                Add(root, Cylinder(0.13f, full * 1.01f), mat, new Transform3D(AlongZ, Vector3.Zero));
-                Add(root, Box(new Vector3(0.56f, 0.025f, 0.22f)), Dark, new Vector3(0, 0, 0.1f));
-                Add(root, Box(new Vector3(0.025f, 0.56f, 0.22f)), Dark, new Vector3(0, 0, 0.1f));
-                break;
-            case BlockKind.AmmoFeed:
-                Add(root, Bevel(new Vector3(0.3f, 0.3f, 0.3f), 0.03f), mat, Vector3.Zero);
-                Add(root, Box(new Vector3(full, 0.12f, 0.12f)), Dark, Vector3.Zero);
-                Add(root, Box(new Vector3(0.12f, full, 0.12f)), Dark, Vector3.Zero);
-                Add(root, Box(new Vector3(0.12f, 0.12f, full)), Dark, Vector3.Zero);
-                break;
-            default:
-                Add(root, Bevel(new Vector3(full, full, full)), mat, Vector3.Zero);
-                break;
+            Material mat = PaintOf(def, p);
+            var mi = new MeshInstance3D { Mesh = MeshOf(p), MaterialOverride = mat, Transform = ToTransform(p.Transform) };
+            if (p.Paint == Paint.Glow) mi.CastShadow = GeometryInstance3D.ShadowCastingSetting.Off;
+            (p.Node < 0 ? root : nodes[p.Node]).AddChild(mi);
         }
 
-        if (hints && def.Kind is BlockKind.Breech or BlockKind.TorpedoTube or BlockKind.ShipPropeller or BlockKind.AirPropeller
-                or BlockKind.JetEngine or BlockKind.LiftFan or BlockKind.MissileRail)
-        {
-            // Arrow showing which way the gun fires (where the barrels go).
-            Add(root, Cylinder(0.09f, 0.2f, 0f), Glow(new Color(1f, 0.85f, 0.2f), 2f),
-                new Transform3D(new Basis(Vector3.Right, -Mathf.Pi / 2), new Vector3(0, 0.32f, -0.12f)));
-        }
-
-        foreach (Node n in root.GetChildren())
-            if (n is MeshInstance3D mi && mi.MaterialOverride is StandardMaterial3D sm && sm.ShadingMode == BaseMaterial3D.ShadingModeEnum.Unshaded)
-                mi.CastShadow = GeometryInstance3D.ShadowCastingSetting.Off;
         return root;
     }
 
-    /// <summary>
-    /// A big block: its shape is built to its full size, centered on the middle of its box (its anchor cell
-    /// isn't the middle when a size is even).
-    /// </summary>
-    private static void BuildBig(BlockDef def, Node3D root, StandardMaterial3D mat, bool hints)
+    // ---------------------------------------------------------------- hull surfaces
+
+    /// <summary>The material for a merged hull surface: the block's own, shaded by the surface's vertex colors.</summary>
+    public static StandardMaterial3D SurfaceMaterial(BlockDef def)
     {
-        float full = Conv.CS;
-        var ext = new Vector3(def.Size.X, def.Size.Y, def.Size.Z) * full;
-        var body = new Node3D { Name = "Body", Position = Footprint.LocalCenter(def).G() * full };
-        root.AddChild(body);
-        float bevel = Mathf.Min(0.06f, ext[(int)ext.MinAxisIndex()] * 0.1f);
-        switch (def.Kind)
+        string key = "surface:" + def.Id;
+        if (Materials.TryGetValue(key, out StandardMaterial3D m)) return m;
+        m = (StandardMaterial3D)MaterialOf(def).Duplicate();
+        m.VertexColorUseAsAlbedo = true;
+        float k = HullMesher.ShadeCompensation;
+        m.AlbedoColor = new Color(Mathf.Min(1f, def.ColorR * k), Mathf.Min(1f, def.ColorG * k), Mathf.Min(1f, def.ColorB * k));
+        m.CullMode = BaseMaterial3D.CullModeEnum.Back;
+        Materials[key] = m;
+        return m;
+    }
+
+    /// <summary>Turns a merged hull surface into a mesh (the core winds triangles the other way round from Godot).</summary>
+    public static ArrayMesh HullMesh(HullMesher.Surface s)
+    {
+        int n = s.Positions.Count;
+        var verts = new Vector3[n];
+        var normals = new Vector3[n];
+        var colors = new Color[n];
+        for (int i = 0; i < n; i++)
         {
-            case BlockKind.Engine:
-                Add(body, Bevel(ext, bevel), mat, Vector3.Zero);
-                for (int i = -1; i <= 1; i++)
-                    Add(body, Cylinder(0.12f, 0.4f), Dark, new Vector3(i * ext.X * 0.25f, ext.Y * 0.5f + 0.15f, 0));
-                Add(body, Box(new Vector3(ext.X * 0.8f, 0.08f, ext.Z * 0.9f)), Steel, new Vector3(0, ext.Y * 0.5f, 0));
-                break;
-            case BlockKind.FuelTank:
-                Add(body, Cylinder(Mathf.Min(ext.X, ext.Y) * 0.47f, ext.Z * 0.98f), mat, new Transform3D(AlongZ, Vector3.Zero));
-                Add(body, Box(new Vector3(ext.X, 0.08f, ext.Z)), Dark, new Vector3(0, -ext.Y * 0.45f, 0));
-                break;
-            case BlockKind.Track:
-            {
-                float r = def.WheelRadiusM;
-                Add(body, Cylinder(r * 0.85f, ext.X * 0.9f), Dark, new Transform3D(AlongX, Vector3.Zero));
-                Add(body, Box(new Vector3(ext.X * 0.95f, 0.12f, ext.Z)), mat, new Vector3(0, -r, 0));
-                Add(body, Box(new Vector3(ext.X * 0.95f, 0.12f, ext.Z)), mat, new Vector3(0, r, 0));
-                break;
-            }
-            case BlockKind.ShipPropeller:
-            {
-                float r = Mathf.Min(ext.X, ext.Y) * 0.5f;
-                Add(body, Cylinder(r * 0.2f, ext.Z * 1.6f), Steel, new Transform3D(AlongZ, Vector3.Zero));
-                for (int i = 0; i < 4; i++)
-                {
-                    var blade = new Basis(Vector3.Back, i * Mathf.Tau / 4f) * new Basis(Vector3.Up, 0.5f);
-                    Add(body, Box(new Vector3(r * 0.35f, r * 0.95f, 0.06f)), mat, new Transform3D(blade, blade * new Vector3(0, r * 0.5f, 0)));
-                }
-
-                break;
-            }
-            case BlockKind.Rudder:
-                Add(body, Box(new Vector3(Mathf.Max(ext.X * 0.25f, 0.1f), ext.Y * 0.96f, ext.Z * 0.9f)), mat, Vector3.Zero);
-                Add(body, Cylinder(0.08f, ext.Y), Steel, new Vector3(0, 0, -ext.Z * 0.4f));
-                break;
-            case BlockKind.Breech:
-                Add(body, Bevel(ext, bevel), mat, Vector3.Zero);
-                Add(body, Cylinder(BarrelRadius(def.Breech.CaliberMm) * 1.5f, 0.3f), Steel,
-                    new Transform3D(AlongZ, new Vector3(0, 0, -ext.Z * 0.5f - 0.1f)));
-                Add(body, Box(new Vector3(ext.X * 1.02f, 0.1f, ext.Z * 0.3f)), Dark, new Vector3(0, ext.Y * 0.2f, ext.Z * 0.2f));
-                break;
-            case BlockKind.AmmoRack:
-                Add(body, Bevel(ext, bevel), mat, Vector3.Zero);
-                for (int i = 0; i < 4; i++)
-                {
-                    var p = new Vector3((i % 2 == 0 ? -0.25f : 0.25f) * ext.X, ext.Y * 0.5f + 0.05f, (i < 2 ? -0.25f : 0.25f) * ext.Z);
-                    Add(body, Cylinder(0.15f, 0.12f, 0.04f), def.Ammo == AmmoType.HE ? RedTip : Brass, p);
-                }
-
-                break;
-            case BlockKind.GasCell:
-                Add(body, Bevel(ext * 0.99f, Mathf.Min(0.35f, ext.X * 0.12f)), mat, Vector3.Zero);
-                Add(body, Box(new Vector3(ext.X * 1.005f, 0.04f, ext.Z * 1.005f)), Dark, Vector3.Zero);
-                break;
-            default:
-                Add(body, Bevel(ext, bevel), mat, Vector3.Zero);
-                break;
+            verts[i] = s.Positions[i].G();
+            normals[i] = s.Normals[i].G();
+            float k = s.Shade[i];
+            colors[i] = new Color(k, k, k);
         }
 
-        if (hints && def.Kind is BlockKind.Breech or BlockKind.ShipPropeller)
-            Add(body, Cylinder(0.18f, 0.4f, 0f), Glow(new Color(1f, 0.85f, 0.2f), 2f),
-                new Transform3D(new Basis(Vector3.Right, -Mathf.Pi / 2), new Vector3(0, ext.Y * 0.5f + 0.3f, -ext.Z * 0.3f)));
+        var idx = new int[s.Indices.Count];
+        for (int t = 0; t < idx.Length; t += 3)
+        {
+            idx[t] = s.Indices[t];
+            idx[t + 1] = s.Indices[t + 2];
+            idx[t + 2] = s.Indices[t + 1];
+        }
+
+        var arrays = new Godot.Collections.Array();
+        arrays.Resize((int)Mesh.ArrayType.Max);
+        arrays[(int)Mesh.ArrayType.Vertex] = verts;
+        arrays[(int)Mesh.ArrayType.Normal] = normals;
+        arrays[(int)Mesh.ArrayType.Color] = colors;
+        arrays[(int)Mesh.ArrayType.Index] = idx;
+        var mesh = new ArrayMesh();
+        mesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays);
+        return mesh;
+    }
+
+    /// <summary>
+    /// Whether a block fills its whole face on side <paramref name="dir"/>, so a hull surface touching it
+    /// there can be left out: plain blocks on every side, slopes on their base and back.
+    /// </summary>
+    public static bool CoversFace(BlockDef def, int orientation, Int3 dir)
+    {
+        if (BlockModels.IsSurface(def)) return true;
+        if (def.Shape != BlockShape.Wedge || def.IsMultiCell) return false;
+        return Orientations.Apply(orientation, new Int3(0, -1, 0)) == dir || Orientations.Apply(orientation, new Int3(0, 0, 1)) == dir;
     }
 
     /// <summary>Blocks that move on their own (spinning, swinging, rolling, dropping their load): drawn one by one.</summary>
@@ -625,20 +447,8 @@ public static class BlockVisuals
         string key = $"{def.Id}:{Mathf.RoundToInt(caliberMm)}:{hints}";
         if (PartsCache.TryGetValue(key, out List<(Mesh, Material, Transform3D)> parts)) return parts;
         parts = new List<(Mesh, Material, Transform3D)>();
-        Node3D root = Create(def, caliberMm, hints);
-        void Walk(Node3D n, Transform3D parent)
-        {
-            foreach (Node child in n.GetChildren())
-            {
-                if (child is not Node3D c) continue;
-                Transform3D xf = parent * c.Transform;
-                if (c is MeshInstance3D mi && mi.Mesh != null) parts.Add((mi.Mesh, mi.MaterialOverride, xf));
-                Walk(c, xf);
-            }
-        }
-
-        Walk(root, Transform3D.Identity);
-        root.Free();
+        BlockModel model = BlockModels.For(def, caliberMm, hints);
+        foreach (ModelPart p in model.Parts) parts.Add((MeshOf(p), PaintOf(def, p), ToTransform(model.PlacementOf(p))));
         PartsCache[key] = parts;
         return parts;
     }

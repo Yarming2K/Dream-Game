@@ -49,7 +49,7 @@ public partial class TestRange : Node3D
     private float _airFogDensity;
     private Color _airFogColor;
     private ColorRect _underwaterTint;
-    private bool _torpedoQueued;
+    private bool _torpedoQueued, _missileQueued;
 
     private Blueprint _bp;
     private VehicleBody _vehicle;
@@ -92,9 +92,11 @@ public partial class TestRange : Node3D
     private float _hurtFlash;
     private readonly List<(string text, float age)> _feedLines = new();
 
+    /// <summary>One line of the weapons HUD: every gun of one kind.</summary>
     private sealed class GunRow
     {
-        public VehicleBody.GunRt Gun;
+        public List<VehicleBody.GunRt> Guns = new();
+        public Label Name;
         public Label State;
         public Label Ammo;
         public StatBar Reload;
@@ -652,11 +654,18 @@ public partial class TestRange : Node3D
                 if (Input.IsActionPressed("brake")) _mount.ChangeDepth(-5f, dt);
             }
 
+            // F fires torpedoes from anything with tubes, otherwise missiles; X always fires missiles.
             if (_torpedoQueued)
             {
                 _torpedoQueued = false;
-                if (_mount.MissilesReady > 0) LaunchMissile();
+                if (_mount.Tubes.Count == 0 && _mount.Analysis.Missiles.Count > 0) LaunchMissile();
                 else LaunchTorpedo();
+            }
+
+            if (_missileQueued)
+            {
+                _missileQueued = false;
+                LaunchMissile();
             }
 
             if (_bombQueued)
@@ -686,7 +695,7 @@ public partial class TestRange : Node3D
         else
         {
             _impacts.Clear();
-            _torpedoQueued = _bombQueued = _vtolQueued = false;
+            _torpedoQueued = _missileQueued = _bombQueued = _vtolQueued = false;
             _bombImpact = null;
             _lock = null;
         }
@@ -725,7 +734,12 @@ public partial class TestRange : Node3D
     private void PredictImpacts(PhysicsDirectSpaceState3D space, Godot.Collections.Array<Rid> exclude)
     {
         _impacts.Clear();
-        foreach (VehicleBody.GunRt g in _mount.Guns)
+        // With a lot of guns, mark where a few of each kind will land (the ones nearest to being on target).
+        const int perKind = 3;
+        IEnumerable<VehicleBody.GunRt> shown = _mount.Guns.Count <= 6
+            ? _mount.Guns
+            : _gunRows.SelectMany(r => r.Guns.Where(g => g.Alive && g.Info.GunSection >= 0 && _mount.PlayerDirects(g)).OrderBy(g => g.AimError).Take(perKind));
+        foreach (VehicleBody.GunRt g in shown)
         {
             if (!g.Alive || g.Info.GunSection < 0 || !_mount.PlayerDirects(g)) continue;
             (Vector3 p, Vector3 dir) = _mount.Muzzle(g);
@@ -874,6 +888,7 @@ public partial class TestRange : Node3D
         else if (e.IsActionPressed("recover") && Mounted) _mount.Recover();
         else if (e.IsActionPressed("gunner_mode") && Mounted) ToggleGunnerMode();
         else if (e.IsActionPressed("torpedo") && Mounted) _torpedoQueued = true;
+        else if (e.IsActionPressed("missile") && Mounted) _missileQueued = true;
         else if (e.IsActionPressed("bomb") && Mounted) _bombQueued = true;
         else if (e.IsActionPressed("vtol") && Mounted) _vtolQueued = true;
         else if (e.IsActionPressed("respawn")) RespawnAll();
@@ -1138,13 +1153,13 @@ public partial class TestRange : Node3D
             "[b][color=#ffb845]At sea[/color][/b]\n" +
             "Ships and submarines start off the east coast. W / S move the engine telegraph a notch (it holds the speed, so you can leave the wheel for a gun) · A / D rudder · Space all stop\n" +
             "Submarines: hold C to order the boat deeper, hold Space to come up. The crew floods and blows the ballast tanks to hold the depth you order.\n" +
-            "F fires a torpedo from any seat. It turns onto the bearing you're aiming at, then runs straight just under the surface. Torpedoes sink ships by flooding them.\n" +
+            "F fires a torpedo from any seat. It turns onto the bearing you're aiming at, then runs straight just under the surface. Torpedoes sink ships by flooding them. X fires missiles, if the ship carries any.\n" +
             "Holes below the waterline flood compartments: get out, weld them shut (3), and the bilge pumps clear the water. Stop inside the buoy ring to rearm and refuel.\n" +
             "In the water you swim: Space up, C down, E to climb into a boat you're looking at.\n\n" +
             "[b][color=#ffb845]In the air[/color][/b]\n" +
             "Planes start on the airstrip in the western hills: W / S set the throttle, and the plane flies toward wherever you point the mouse (A / D roll, Space brakes on the ground). Open the throttle, let it run, and climb once you're past stall speed.\n" +
             "Helicopters and drones start on the helipad: W A S D move, Space / C climb and descend, and they turn to face where you look. Let go and they stop and hover. V switches a VTOL between hovering and wing-borne flight.\n" +
-            "Airships: W / S telegraph, A / D turn, Space / C order it higher or lower. B drops a bomb where the diamond is. F fires a missile: optical ones fly to your crosshair, radar ones chase the aircraft in the red box.\n" +
+            "Airships: W / S telegraph, A / D turn, Space / C order it higher or lower. B drops a bomb where the diamond is. F (or X) fires a missile: optical ones fly to your crosshair, radar ones chase the aircraft in the red box.\n" +
             "Q cycles AP, HE and FLAK: flak bursts near aircraft, or at the range you're aiming at. Drones are flown by remote: you stay standing where you were.\n\n" +
             "[b][color=#ffb845]On foot[/color][/b]\n" +
             "W A S D move · Shift sprint · Space jump · Mouse look · Right click aim\n" +
@@ -1182,15 +1197,18 @@ public partial class TestRange : Node3D
         foreach (Node n in _gunList.GetChildren()) n.QueueFree();
         _gunRows.Clear();
         if (!Mounted) return;
-        foreach (VehicleBody.GunRt g in _mount.Guns)
+        // One row per kind of gun, biggest first, so a battleship's 84 guns take three lines.
+        foreach (IGrouping<string, VehicleBody.GunRt> kind in _mount.Guns.GroupBy(g => g.Label).OrderByDescending(k => k.First().Stats.CaliberMm))
         {
             PanelContainer card = Ui.Card();
             VBoxContainer col = Ui.Column(4);
             card.AddChild(col);
             HBoxContainer top = Ui.Row(10);
             col.AddChild(top);
-            top.AddChild(Ui.Heading(g.Label));
-            var row = new GunRow { Gun = g, State = Ui.Caption("READY", Ui.Good), Ammo = Ui.Small(""), Reload = new StatBar() };
+            var row = new GunRow { Name = Ui.Heading(kind.Key), State = Ui.Caption("READY", Ui.Good), Ammo = Ui.Small(""), Reload = new StatBar() };
+            row.Guns.AddRange(kind);
+            if (row.Guns.Count > 1) row.Name.Text = $"{kind.Key} × {row.Guns.Count}";
+            top.AddChild(row.Name);
             top.AddChild(row.State);
             top.AddChild(Ui.Spacer());
             top.AddChild(row.Ammo);
@@ -1301,17 +1319,46 @@ public partial class TestRange : Node3D
 
         foreach (GunRow row in _gunRows)
         {
-            VehicleBody.GunRt g = row.Gun;
-            int apRounds = v.Rounds(g, AmmoType.AP), heRounds = v.Rounds(g, AmmoType.HE), flakRounds = v.Rounds(g, AmmoType.Flak);
-            SeatRt who = v.ControllerOf(g);
-            if (!g.Alive) Paint(row.State, "DESTROYED", Ui.Bad);
-            else if (who == null) Paint(row.State, "NO GUNNER", Ui.Bad);
+            int apRounds = 0, heRounds = 0, flakRounds = 0, alive = 0, crewed = 0, loaded = 0, ready = 0, mine = 0, masked = 0;
+            float nextReload = float.MaxValue, progress = 0;
+            bool hasFlak = false;
+            var counted = new HashSet<Int3>();
+            foreach (VehicleBody.GunRt g in row.Guns)
+            {
+                hasFlak |= g.Info.FlakRacks.Count > 0;
+                if (!g.Alive) continue;
+                alive++;
+                // Guns that share racks share their rounds: count each rack once.
+                if (counted.Add(g.Info.ApRacks.Count > 0 ? g.Info.ApRacks[0] : g.Info.Breech)) apRounds += v.Rounds(g, AmmoType.AP);
+                if (counted.Add(g.Info.HeRacks.Count > 0 ? g.Info.HeRacks[0] : g.Info.Breech + Int3.Up)) heRounds += v.Rounds(g, AmmoType.HE);
+                if (counted.Add(g.Info.FlakRacks.Count > 0 ? g.Info.FlakRacks[0] : g.Info.Breech + Int3.Down)) flakRounds += v.Rounds(g, AmmoType.Flak);
+                if (v.ControllerOf(g) == null) continue;
+                crewed++;
+                bool directs = v.PlayerDirects(g);
+                if (directs) mine++;
+                progress += 1f - g.ReloadLeft / Mathf.Max(g.Stats.ReloadS, 0.01f);
+                if (g.ReloadLeft > 0)
+                {
+                    nextReload = Mathf.Min(nextReload, g.ReloadLeft);
+                    continue;
+                }
+
+                loaded++;
+                if (g.Masked) masked++;
+                else if (!directs || g.AimError <= 2.5f) ready++;
+            }
+
+            bool one = row.Guns.Count == 1;
+            if (alive == 0) Paint(row.State, "DESTROYED", Ui.Bad);
+            else if (crewed == 0) Paint(row.State, one ? "NO GUNNER" : "NO GUNNERS", Ui.Bad);
             else if (apRounds + heRounds + flakRounds == 0) Paint(row.State, "OUT OF AMMO", Ui.Bad);
-            else if (g.ReloadLeft > 0) Paint(row.State, $"RELOADING {g.ReloadLeft:0.0}s", Ui.Warn);
-            else Paint(row.State, v.PlayerDirects(g) ? "READY" : "AI GUNNER", v.PlayerDirects(g) ? Ui.Good : Ui.Info);
-            float progress = g.Alive ? 1f - g.ReloadLeft / Mathf.Max(g.Stats.ReloadS, 0.01f) : 0f;
-            row.Reload.Set(progress, 1f, g.ReloadLeft > 0 ? Ui.Warn : Ui.Good);
-            row.Ammo.Text = $"AP {apRounds}   HE {heRounds}{(g.Info.FlakRacks.Count > 0 ? $"   FLAK {flakRounds}" : "")}   ·   {g.Stats.ApPenMm:0} mm pen";
+            else if (one && loaded == 0) Paint(row.State, $"RELOADING {nextReload:0.0}s", Ui.Warn);
+            else if (one) Paint(row.State, masked > 0 ? "BLOCKED BY OWN HULL" : mine > 0 ? "READY" : "AI GUNNER", masked > 0 ? Ui.Warn : mine > 0 ? Ui.Good : Ui.Info);
+            else if (loaded == 0) Paint(row.State, $"RELOADING {nextReload:0.0}s", Ui.Warn);
+            else Paint(row.State, mine > 0 ? $"{ready} BEAR · {loaded} LOADED" : $"AI GUNNERS · {loaded} LOADED", mine > 0 ? (ready > 0 ? Ui.Good : Ui.Warn) : Ui.Info);
+            row.Reload.Set(crewed > 0 ? progress / crewed : 0f, 1f, loaded == 0 ? Ui.Warn : Ui.Good);
+            float pen = row.Guns[0].Stats.ApPenMm;
+            row.Ammo.Text = $"AP {apRounds}   HE {heRounds}{(hasFlak ? $"   FLAK {flakRounds}" : "")}   ·   {pen:0} mm pen";
         }
     }
 
@@ -1348,7 +1395,7 @@ public partial class TestRange : Node3D
         if (v.Analysis.BombRacks.Count > 0) sb.Append($"Bombs [b]{v.BombsLeft}[/b] [color={dim}]B drops · the diamond shows where[/color]   ");
         if (v.Analysis.Missiles.Count > 0)
         {
-            sb.Append($"Missiles [b]{v.MissilesReady}[/b] [color={dim}]F fires[/color]");
+            sb.Append($"Missiles [b]{v.MissilesReady}[/b] [color={dim}]{(v.Tubes.Count > 0 ? "X" : "F or X")} fires[/color]");
             if (_lock != null) sb.Append($"   [color={Ui.Hex(Ui.Bad)}]LOCK {_lock.DisplayName}[/color]");
         }
 
@@ -1456,7 +1503,8 @@ public partial class TestRange : Node3D
     {
         float c = g.Stats.CaliberMm;
         _trauma = Mathf.Min(1f, _trauma + 0.22f + c / 450f);
-        _fovKick += 2f + c / 28f;
+        // A whole broadside going off at once kicks no harder than its biggest gun twice over.
+        _fovKick = Mathf.Min(_fovKick + 2f + c / 28f, Mathf.Max(_fovKick, 2f * (2f + c / 28f)));
     }
 
     private void OnBlast(Vector3 pos, float radius, float damage)

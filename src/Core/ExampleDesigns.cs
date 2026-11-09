@@ -589,7 +589,11 @@ public static class ExampleDesigns
         return d.Build("Wasp (drone)");
     }
 
-    /// <summary>Airship: a long envelope of gas cells over a gondola with the crew, a 37 mm gun, four bombs, and two propellers on outriggers.</summary>
+    /// <summary>
+    /// Airship: a long envelope of gas cells over a gondola with the crew, two propellers on outriggers, a
+    /// 37 mm gun in the nose, eight bombs, four optical missiles on the gondola's flanks, and a twin 40 mm
+    /// flak turret on top of the envelope.
+    /// </summary>
     public static Blueprint Zephyr()
     {
         var d = new Draft();
@@ -604,8 +608,19 @@ public static class ExampleDesigns
         d.Set(-1, 1, -4, "ammo_he");
         d.Set(1, 1, -4, "ammo_ap");
         foreach (int x in new[] { -1, 1 })
-        foreach (int z in new[] { -1, 1 })
+        foreach (int z in new[] { -3, -1, 1, 3 })
             d.Set(x, 0, z, "bomb_rack");
+
+        // Missiles along the gondola's flanks, pointing forward.
+        foreach (int x in new[] { -2, 2 })
+        foreach (int y in new[] { 1, 2 })
+        {
+            d.Set(x, y, -1, "missile_rail");
+            d.Set(x, y, -2, "missile_motor");
+            d.Set(x, y, -3, "missile_fins");
+            d.Set(x, y, -4, "missile_warhead");
+            d.Set(x, y, -5, "seeker_optical");
+        }
         d.Fill(-1, 1, 1, 2, -4, 4, "airframe");
         d.Fill(0, 0, 3, 3, -3, 3, "frame"); // struts up to the envelope
 
@@ -617,13 +632,26 @@ public static class ExampleDesigns
         }
 
         // The envelope: a long rounded body of gas cells.
-        const int half = 12;
+        const int half = 13;
         for (int z = -half; z <= half; z++)
         {
-            float r = 2.7f * MathF.Sqrt(1f - z * z / (float)((half + 1) * (half + 1)));
+            float r = 3.05f * MathF.Sqrt(1f - z * z / (float)((half + 1) * (half + 1)));
             for (int x = -3; x <= 3; x++)
             for (int y = 3; y <= 9; y++)
                 if (x * x + (y - 6) * (y - 6) <= r * r + 0.3f) d.Set(x, y, z, "gas_cell");
+        }
+
+        // A flak turret on top of the envelope: twin 40 mm autocannons, a gunner, and racks.
+        d.Set(0, 10, -2, "turret_ring");
+        d.Set(0, 11, -2, "frame");
+        d.Set(0, 11, -1, "gunner_seat");
+        foreach (int x in new[] { -1, 1 })
+        {
+            d.Set(x, 11, -2, "breech_40ac");
+            d.Set(x, 11, -3, "barrel");
+            d.Set(x, 11, -4, "barrel");
+            d.Set(2 * x, 11, -2, "ammo_flak");
+            d.Set(x, 11, -1, "ammo_he");
         }
 
         // Tail surfaces.
@@ -638,50 +666,163 @@ public static class ExampleDesigns
 
     /// <summary>
     /// A 300 m battleship, built from big blocks: a hull of hull plates and belt armor split into
-    /// compartments by a bulkhead every 20 m, a bed of lead along the keel, twelve turbines on four great screws, a bridge
-    /// tower, and two twin 406 mm turrets, one forward and one aft.
+    /// compartments by a bulkhead every 20 m, a bed of lead along the keel, twelve turbines on four great
+    /// screws, and a bridge tower. She bristles with guns: four triple 406 mm turrets (the inner two raised
+    /// to fire over the outer ones), twelve twin 203 mm turrets down her sides, twenty-four twin 40 mm flak
+    /// mounts along the deck edges and on the bridge, eight torpedo tubes at the waterline, and eight radar
+    /// missiles on rails beside the bridge.
     /// </summary>
     public static Blueprint Colossus()
     {
         var d = new Draft();
-        const int half = 24, deck = 25, bow = -300, stern = 299;
+        const int half = 24, deck = 25, bow = -300, stern = 299, taper = 64;
         int sideWall = Orientations.RotateAroundZ(0, 1), endWall = Orientations.RotateAroundX(0, 1), beltTurn = Orientations.RotateAroundY(0, 1);
 
-        // Turrets first, so the deck is laid around their rings.
-        void Turret(int zt, int f)
+        // The bow narrows to a point over its first 32 m; the rest of her is full beam.
+        int HalfAt(int z) => z >= bow + taper ? half : (int)MathF.Round(3 + (half - 3) * MathF.Pow((z - bow) / (float)taper, 0.7f));
+
+        // Main battery: triple 406 mm turrets. f is the way the guns face along the ship (-1 forward, +1 aft);
+        // a raised turret stands on an armored barbette so it can fire over the one in front.
+        void MainTurret(int zt, int f, int lift)
         {
+            int ring = deck + lift, y0 = ring + 1, front = zt + f * 2, back = zt - f * 6;
             int ob = f < 0 ? 0 : Pointing(Int3.Back);
-            d.Set(0, deck, zt, "turret_ring");
-            d.Fill(-6, 6, deck + 1, deck + 1, zt - 5, zt + 5, "armor_light");
-            foreach (int sx in new[] { -3, 3 })
+            d.Set(0, ring, zt, "turret_ring");
+            foreach (int sx in new[] { -5, 0, 5 })
             {
-                d.Set(sx, deck + 3, zt, "breech_406", ob);
-                for (int k = 0; k < 20; k++) d.Set(sx, deck + 3, zt + f * (2 + k), "heavy_barrel");
+                d.Set(sx, y0 + 2, zt, "breech_406", ob);
+                for (int k = 0; k < 20; k++) d.Set(sx, y0 + 2, zt + f * (2 + k), "heavy_barrel");
                 int mx = sx > 0 ? sx : sx - 1, mz = f < 0 ? zt + 2 : zt - 3;
-                d.Set(mx, deck + 2, mz, "magazine_ap");
-                d.Set(mx, deck + 4, mz, "magazine_he");
-                d.Set(Math.Sign(sx), deck + 3, zt, "loader");
+                d.Set(mx, y0, mz, "magazine_ap");
+                d.Set(mx, y0 + 2, mz, "magazine_he");
             }
 
-            d.Set(0, deck + 2, zt - f * 2, "gunner_seat");
-            d.Fill(-6, -6, deck + 2, deck + 6, zt - 5, zt + 5, "armor_heavy");
-            d.Fill(6, 6, deck + 2, deck + 6, zt - 5, zt + 5, "armor_heavy");
-            d.Fill(-5, 5, deck + 2, deck + 6, zt + f * 2, zt + f * 2, "armor_heavy");
-            d.Fill(-5, 5, deck + 2, deck + 6, zt - f * 5, zt - f * 5, "armor_heavy");
-            d.Fill(-6, 6, deck + 7, deck + 7, zt - 5, zt + 5, "armor_heavy");
+            foreach (int x in new[] { -3, -2, 2, 3 }) d.Set(x, y0 + 2, zt, "loader");
+            d.Set(0, y0, zt - f * 5, "gunner_seat");
+            d.Fill(-8, 8, y0, y0, Math.Min(front, back), Math.Max(front, back), "armor_light");
+            d.Fill(-8, -8, y0 + 1, y0 + 5, Math.Min(front, back), Math.Max(front, back), "armor_heavy");
+            d.Fill(8, 8, y0 + 1, y0 + 5, Math.Min(front, back), Math.Max(front, back), "armor_heavy");
+            d.Fill(-7, 7, y0 + 1, y0 + 5, front, front, "armor_heavy");
+            d.Fill(-7, 7, y0 + 1, y0 + 5, back, back, "armor_heavy");
+            d.Fill(-8, 8, y0 + 6, y0 + 6, Math.Min(front, back), Math.Max(front, back), "armor_heavy");
+            if (lift > 0)
+            {
+                // The barbette: armored walls up from the deck, capped round the ring.
+                d.Fill(-7, 7, ring, ring, zt - 6, zt + 6, "armor_heavy");
+                d.Fill(-7, -7, deck + 1, ring - 1, zt - 6, zt + 6, "armor_heavy");
+                d.Fill(7, 7, deck + 1, ring - 1, zt - 6, zt + 6, "armor_heavy");
+                d.Fill(-6, 6, deck + 1, ring - 1, zt - 6, zt - 6, "armor_heavy");
+                d.Fill(-6, 6, deck + 1, ring - 1, zt + 6, zt + 6, "armor_heavy");
+            }
         }
 
-        Turret(-230, -1);
-        Turret(230, 1);
+        MainTurret(-240, -1, 0);
+        MainTurret(-198, -1, 6);
+        MainTurret(198, 1, 6);
+        MainTurret(240, 1, 0);
 
-        // Bridge tower amidships-forward, with the helm and the commander up top.
-        d.Set(0, deck + 19, -109, "driver_seat");
-        d.Set(1, deck + 19, -109, "commander_seat");
-        d.Tile(-6, 6, deck + 1, deck + 20, -110, -110, "hull_plate", endWall, "armor_light");
-        d.Tile(-6, 6, deck + 1, deck + 20, -90, -90, "hull_plate", endWall, "armor_light");
-        d.Tile(-6, -6, deck + 1, deck + 20, -109, -91, "hull_plate", sideWall, "armor_light");
-        d.Tile(6, 6, deck + 1, deck + 20, -109, -91, "hull_plate", sideWall, "armor_light");
-        d.Tile(-5, 5, deck + 20, deck + 20, -109, -91, "hull_plate", 0, "armor_light");
+        // Secondary battery: twin 203 mm turrets down each side, fed from magazines below deck through the ring.
+        void Secondary(int x0, int z0, int sx)
+        {
+            int o = Pointing(new Int3(sx, 0, 0)), y = deck + 1;
+            d.Set(x0, deck, z0, "turret_ring");
+            d.Set(x0, deck - 1, z0, "ammo_feed");
+            d.Set(x0 + 1, deck - 2, z0, "magazine_ap");
+            d.Set(x0 - 2, deck - 2, z0 - 1, "magazine_he");
+            d.Set(x0, y, z0, "ammo_feed");
+            foreach (int dz in new[] { -1, 1 })
+            {
+                d.Set(x0, y, z0 + dz, "breech_203", o);
+                for (int k = 1; k <= 7; k++) d.Set(x0 + sx * k, y, z0 + dz, "barrel");
+                d.Set(x0 - sx, y, z0 + dz, "loader");
+            }
+
+            d.Set(x0 - sx, y, z0, "gunner_seat");
+            d.Fill(x0 - 2, x0 + 2, y, y, z0 - 2, z0 - 2, "armor_heavy");
+            d.Fill(x0 - 2, x0 + 2, y, y, z0 + 2, z0 + 2, "armor_heavy");
+            d.Fill(x0 - 2 * sx, x0 - 2 * sx, y, y, z0 - 1, z0 + 1, "armor_heavy");
+            d.Set(x0 + sx, y, z0, "armor_heavy");
+            d.Fill(Math.Min(x0, x0 - 2 * sx), Math.Max(x0, x0 - 2 * sx), y + 1, y + 1, z0 - 2, z0 + 2, "armor_heavy");
+        }
+
+        foreach (int z in new[] { -150, -90, -30, 30, 90, 150 })
+        {
+            Secondary(16, z, 1);
+            Secondary(-16, z, -1);
+        }
+
+        // Flak: twin 40 mm autocannons on small turrets, each with its own gunner and racks.
+        void Flak(int x0, int ring, int z0)
+        {
+            d.Set(x0, ring, z0, "turret_ring");
+            int y = ring + 1;
+            d.Set(x0, y, z0, "frame");
+            d.Set(x0, y, z0 + 1, "gunner_seat");
+            foreach (int x in new[] { -1, 1 })
+            {
+                d.Set(x0 + x, y, z0, "breech_40ac");
+                d.Set(x0 + x, y, z0 - 1, "barrel");
+                d.Set(x0 + x, y, z0 - 2, "barrel");
+                d.Set(x0 + 2 * x, y, z0, "ammo_flak");
+                d.Set(x0 + x, y, z0 + 1, "ammo_he");
+            }
+        }
+
+        foreach (int z in new[] { -270, -220, -175, -120, -60, 0, 60, 120, 175, 220, 270 })
+        {
+            int x = Math.Min(21, HalfAt(z - 2) - 3);
+            Flak(x, deck, z);
+            Flak(-x, deck, z);
+        }
+
+        Flak(-3, deck + 20, -100);
+        Flak(3, deck + 20, -100);
+
+        // Torpedo tubes in the belt at the waterline, four a side, each with two racks behind it.
+        foreach (int z in new[] { -50, -44, 40, 46 })
+        foreach (int sx in new[] { -1, 1 })
+        {
+            d.Set(sx * half, 12, z, "torpedo_tube", Pointing(new Int3(sx, 0, 0)));
+            d.Set(sx * (half - 1), 12, z, "ammo_torpedo");
+            d.Set(sx * (half - 2), 12, z, "ammo_torpedo");
+        }
+
+        // Radar missiles on rails either side of the bridge, pointing forward.
+        foreach (int sx in new[] { -1, 1 })
+        foreach (int y in new[] { deck + 3, deck + 5, deck + 7, deck + 9 })
+        {
+            int x = sx * 7;
+            d.Set(x, y, -96, "missile_rail");
+            d.Set(x, y, -97, "missile_motor");
+            d.Set(x, y, -98, "missile_fins");
+            d.Set(x, y, -99, "missile_warhead");
+            d.Set(x, y, -100, "seeker_radar");
+        }
+
+        // A funnel aft of the bridge.
+        d.Fill(-3, 3, deck + 1, deck + 16, -80, -80, "armor_light");
+        d.Fill(-3, 3, deck + 1, deck + 16, -72, -72, "armor_light");
+        d.Fill(-3, -3, deck + 1, deck + 16, -79, -73, "armor_light");
+        d.Fill(3, 3, deck + 1, deck + 16, -79, -73, "armor_light");
+        d.Fill(-4, 4, deck + 17, deck + 17, -81, -80, "armor_heavy");
+        d.Fill(-4, 4, deck + 17, deck + 17, -72, -71, "armor_heavy");
+        d.Fill(-4, -3, deck + 17, deck + 17, -79, -73, "armor_heavy");
+        d.Fill(3, 4, deck + 17, deck + 17, -79, -73, "armor_heavy");
+
+        // Bridge tower amidships-forward, stepped in two tiers, with the helm and the commander up top.
+        d.Set(0, deck + 19, -107, "driver_seat");
+        d.Set(1, deck + 19, -107, "commander_seat");
+        void Box(int x, int y0, int y1, int z0, int z1)
+        {
+            d.Tile(-x, x, y0, y1, z0, z0, "hull_plate", endWall, "armor_light");
+            d.Tile(-x, x, y0, y1, z1, z1, "hull_plate", endWall, "armor_light");
+            d.Tile(-x, -x, y0, y1, z0 + 1, z1 - 1, "hull_plate", sideWall, "armor_light");
+            d.Tile(x, x, y0, y1, z0 + 1, z1 - 1, "hull_plate", sideWall, "armor_light");
+            d.Tile(-x + 1, x - 1, y1, y1, z0 + 1, z1 - 1, "hull_plate", 0, "armor_light");
+        }
+
+        Box(6, deck + 1, deck + 10, -110, -90);
+        Box(4, deck + 11, deck + 20, -108, -94);
 
         // Machinery aft of amidships: twelve turbines and their fuel.
         foreach (int x in new[] { -14, -8, 7, 13 })
@@ -702,6 +843,7 @@ public static class ExampleDesigns
         for (int x = 1; x <= 19; x += 2)
         for (int z = bow + 2; z <= stern - 3; z += 4)
         {
+            if (x + 3 > HalfAt(z)) continue;
             d.Set(x, 1, z, "ballast_block");
             d.Set(-x - 1, 1, z, "ballast_block");
         }
@@ -710,22 +852,47 @@ public static class ExampleDesigns
         foreach (int x in new[] { -16, -8, 8, 16 }) d.Set(x, 6, stern + 1, "great_screw");
         foreach (int x in new[] { -8, 8 }) d.Set(x, 6, stern + 3, "great_rudder");
 
-        // The hull: keel and deck plates, belt armor along the waterline band, plates above and below it,
-        // closed ends, and watertight bulkheads every 20 m.
-        d.Tile(-half, half, 0, 0, bow, stern, "hull_plate", 0, "armor_light");
-        d.Tile(-half, half, deck, deck, bow, stern, "hull_plate", 0, "armor_light");
+        // The hull amidships and aft: keel and deck plates, belt armor along the waterline band, plates
+        // above and below it, and a square stern.
+        int mid = bow + taper;
+        d.Tile(-half, half, 0, 0, mid, stern, "hull_plate", 0, "armor_light");
+        d.Tile(-half, half, deck, deck, mid, stern, "hull_plate", 0, "armor_light");
         foreach (int sgn in new[] { -1, 1 })
         {
             int outer = sgn * half, inner = sgn * (half - 1);
-            d.Tile(Math.Min(outer, inner), Math.Max(outer, inner), 2, 17, bow, stern, "belt_armor", beltTurn, "armor_heavy");
-            d.Fill(outer, outer, 1, 1, bow, stern, "armor_light");
-            d.Tile(outer, outer, 18, deck - 1, bow, stern, "hull_plate", sideWall, "armor_light");
+            d.Tile(Math.Min(outer, inner), Math.Max(outer, inner), 2, 17, mid, stern, "belt_armor", beltTurn, "armor_heavy");
+            d.Fill(outer, outer, 1, 1, mid, stern, "armor_light");
+            d.Tile(outer, outer, 18, deck - 1, mid, stern, "hull_plate", sideWall, "armor_light");
         }
 
-        d.Tile(-half + 1, half - 1, 1, deck - 1, bow, bow, "hull_plate", endWall, "armor_light");
         d.Tile(-half + 1, half - 1, 1, deck - 1, stern, stern, "hull_plate", endWall, "armor_light");
+
+        // The bow: each row narrower than the one behind it, walled in heavy plate, with slopes smoothing the
+        // steps so the sides read as one sweep.
+        for (int z = bow; z < mid; z++)
+        {
+            int w = HalfAt(z), next = HalfAt(z + 1);
+            d.Fill(-w, w, 0, 0, z, z, "armor_light");
+            d.Fill(-w, w, deck, deck, z, z, "armor_light");
+            foreach (int sgn in new[] { -1, 1 })
+            {
+                int prev = z == bow ? 0 : HalfAt(z - 1);
+                for (int x = Math.Min(w, prev + 1); x <= w; x++) d.Fill(sgn * x, sgn * x, 1, deck - 1, z, z, "armor_heavy");
+                for (int x = w + 1; x <= next; x++)
+                for (int y = 0; y <= deck; y++)
+                    d.Slope(sgn * x, y, z, "armor_heavy_slope", new Int3(sgn, 0, -1));
+            }
+        }
+
+        d.Fill(-HalfAt(bow), HalfAt(bow), 1, deck - 1, bow, bow, "armor_heavy");
+
+        // Watertight bulkheads every 20 m.
         for (int z = bow + 40; z < stern; z += 40)
-            d.Tile(-half + 1, half - 1, 1, deck - 1, z, z, "hull_plate", endWall, "armor_light");
+        {
+            int w = HalfAt(z) - 1;
+            if (z >= mid) d.Tile(-w, w, 1, deck - 1, z, z, "hull_plate", endWall, "armor_light");
+            else d.Fill(-w, w, 1, deck - 1, z, z, "armor_light");
+        }
 
         return d.Build("Colossus (battleship)");
     }

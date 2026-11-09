@@ -129,6 +129,9 @@ public static class Sfx
     public static SoundId ExplosionFor(float radiusM) =>
         radiusM < 1.8f ? SoundId.ExplosionSmall : radiusM < 2.8f ? SoundId.ExplosionMedium : SoundId.ExplosionLarge;
 
+    private const int MaxOfOneSound = 12;
+    private static readonly System.Collections.Generic.Dictionary<SoundId, int> Playing = new();
+
     /// <summary>
     /// Plays a sound at a point in the world. Far-away sounds arrive late (sound is slower than light) and
     /// lose their highs, which sells distance.
@@ -137,6 +140,9 @@ public static class Sfx
         bool delayByDistance = true)
     {
         if (world == null || !GodotObject.IsInstanceValid(world) || !world.IsInsideTree()) return;
+        // A broadside or a flak battery asks for dozens of the same sound at once: a handful is as loud as it gets.
+        if (Playing.GetValueOrDefault(id) >= MaxOfOneSound) return;
+        Playing[id] = Playing.GetValueOrDefault(id) + 1;
         float delay = 0f;
         if (delayByDistance)
         {
@@ -144,9 +150,16 @@ public static class Sfx
             if (cam != null) delay = cam.GlobalPosition.DistanceTo(pos) / SpeedOfSound;
         }
 
+        void Done() => Playing[id] = System.Math.Max(0, Playing.GetValueOrDefault(id) - 1);
+
         void Start()
         {
-            if (!GodotObject.IsInstanceValid(world) || !world.IsInsideTree()) return;
+            if (!GodotObject.IsInstanceValid(world) || !world.IsInsideTree())
+            {
+                Done();
+                return;
+            }
+
             var p = new AudioStreamPlayer3D
             {
                 Stream = Get(id), VolumeDb = volumeDb, PitchScale = pitch, UnitSize = unitSize, Bus = "World",
@@ -155,6 +168,7 @@ public static class Sfx
             world.AddChild(p);
             p.GlobalPosition = pos;
             p.Finished += p.QueueFree;
+            p.TreeExiting += Done;
             p.Play();
         }
 

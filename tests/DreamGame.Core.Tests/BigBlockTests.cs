@@ -174,11 +174,25 @@ public class ColossusTests
     }
 
     [Fact]
-    public void ItCarriesFourBattleshipGunsInTwoTurrets()
+    public void ItBristlesWithGuns()
     {
-        Assert.Equal(2, A.Turrets.Count);
-        Assert.Equal(4, A.Guns.Count(g => g.Valid && g.Stats.CaliberMm == 406f));
-        Assert.All(A.Guns, g => Assert.True(g.ApRounds > 0 && g.HeRounds > 0));
+        Assert.Equal(12, A.Guns.Count(g => g.Valid && g.Stats.CaliberMm == 406f));
+        Assert.Equal(24, A.Guns.Count(g => g.Valid && g.Stats.CaliberMm == 203f));
+        Assert.Equal(48, A.Guns.Count(g => g.Valid && g.Stats.CaliberMm == 40f));
+        Assert.Equal(4 + 12 + 24, A.Turrets.Count);
+
+        // Every gun has rounds to fire and someone to fire it, and every turret turns on its own.
+        Assert.All(A.Guns, g => Assert.True(g.HeRounds > 0 && (g.ApRounds > 0 || g.FlakRounds > 0)));
+        Assert.Equal(A.Guns.Count, A.GunController.Count);
+        Assert.All(A.Turrets, t => Assert.True(t.Blocks < 1000));
+    }
+
+    [Fact]
+    public void ItCarriesTorpedoesAndMissiles()
+    {
+        Assert.Equal(8, A.TorpedoTubes.Count);
+        Assert.All(A.TorpedoTubes, t => Assert.True(t.Rounds > 0));
+        Assert.Equal(8, A.Missiles.Count(m => m.Valid && m.Stats.Seeker == SeekerKind.Radar));
     }
 
     [Fact]

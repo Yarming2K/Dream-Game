@@ -24,6 +24,7 @@ public static class GameInput
         AddKeys("live_fire", Key.L);
         AddKeys("gunner_mode", Key.G);
         AddKeys("torpedo", Key.F);
+        AddKeys("missile", Key.X);
         AddKeys("dive", Key.C);
         AddKeys("bomb", Key.B);
         AddKeys("vtol", Key.V);

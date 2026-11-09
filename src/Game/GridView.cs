@@ -12,6 +12,8 @@ namespace DreamGame.Game;
 /// <item>One node per section, so turrets and guns can turn.</item>
 /// <item>Blocks are drawn in batches: per chunk of 16³ cells, one MultiMesh for each mesh and material.
 /// Blocks that animate (wheels, propellers, rotors, control surfaces, bomb racks) keep their own nodes.</item>
+/// <item>Plain armor, frames and gas cells are merged into continuous hull surfaces (see <see cref="HullMesher"/>),
+/// so a wall of blocks reads as one plate with chamfered outer edges and shaded corners.</item>
 /// <item>Colliders are merged: each chunk's solid cells become as few boxes as possible. Wedges keep their
 /// own shapes.</item>
 /// </list>
@@ -45,7 +47,39 @@ public sealed class GridView
     private readonly Dictionary<BlockInstance, Chunk> _chunkOf = new();
     private readonly HashSet<Chunk> _dirty = new();
     private readonly Func<Int3, float> _caliberOf;
+    private readonly List<BlockDef> _surfaceDefs = new();
+    private readonly Dictionary<BlockDef, int> _surfaceIndex = new();
     private bool _flushQueued;
+
+    /// <summary>One section of the grid, as the hull mesher sees it.</summary>
+    private sealed class SectionGrid : IHullGrid
+    {
+        private readonly GridView _v;
+        private readonly Dictionary<Int3, BlockInstance> _cells;
+
+        public SectionGrid(GridView v, int section)
+        {
+            _v = v;
+            _cells = v.Model.Sections[section].Cells;
+        }
+
+        private BlockInstance At(Int3 c) => _cells.TryGetValue(c, out BlockInstance b) && b.Alive ? b : null;
+        public int SurfaceAt(Int3 c) => At(c) is { } b && BlockModels.IsSurface(b.Def) ? _v.SurfaceIndex(b.Def) : -1;
+        public int PanelAt(Int3 c) => At(c) is { } b ? Panel(b.Cell) : 0;
+        public bool CoversFace(Int3 c, Int3 dir) => At(c) is { } b && BlockVisuals.CoversFace(b.Def, b.Orientation, dir);
+        public bool Occupied(Int3 c) => At(c) != null;
+        public float BevelOf(int material) => BlockModels.SurfaceBevel(_v._surfaceDefs[material]);
+    }
+
+    /// <summary>A stable number per block, so each panel gets its own slight tint.</summary>
+    public static int Panel(Int3 anchor) => anchor.X * 73856093 ^ anchor.Y * 19349663 ^ anchor.Z * 83492791;
+
+    private int SurfaceIndex(BlockDef def)
+    {
+        if (_surfaceIndex.TryGetValue(def, out int i)) return i;
+        _surfaceDefs.Add(def);
+        return _surfaceIndex[def] = _surfaceDefs.Count - 1;
+    }
 
     public GridView(PhysicsBody3D body, GridModel model, Func<Int3, float> caliberOf = null)
     {
@@ -87,6 +121,7 @@ public sealed class GridView
     {
         if (_chunkOf.ContainsKey(b)) return;
         Place(b);
+        TouchNeighbors(b);
         QueueFlush();
     }
 
@@ -151,9 +186,29 @@ public sealed class GridView
         if (!_chunkOf.Remove(b, out Chunk chunk)) return;
         chunk.Blocks.Remove(b);
         if (!BlockVisuals.IsAnimated(b.Def)) chunk.VisualDirty = true;
+        TouchNeighbors(b);
         if (b.Def.HasCollider && b.Def.Shape != BlockShape.Wedge) chunk.ColliderDirty = true;
         _dirty.Add(chunk);
         QueueFlush();
+    }
+
+    /// <summary>
+    /// Marks for redrawing every chunk holding a block next to this one (diagonals too): their hull
+    /// surfaces, chamfers and corner shading change when a neighbor comes or goes.
+    /// </summary>
+    private void TouchNeighbors(BlockInstance b)
+    {
+        Dictionary<Int3, BlockInstance> cells = Model.Sections[b.Section].Cells;
+        foreach (Int3 c in b.Cells)
+        for (int x = -1; x <= 1; x++)
+        for (int y = -1; y <= 1; y++)
+        for (int z = -1; z <= 1; z++)
+        {
+            if (!cells.TryGetValue(c + new Int3(x, y, z), out BlockInstance nb) || nb == b) continue;
+            if (!_chunkOf.TryGetValue(nb, out Chunk ch) || ch.VisualDirty || !BlockModels.IsSurface(nb.Def)) continue;
+            ch.VisualDirty = true;
+            _dirty.Add(ch);
+        }
     }
 
     private void QueueFlush()
@@ -193,9 +248,16 @@ public sealed class GridView
         }
 
         var groups = new Dictionary<(Mesh, Material), List<Transform3D>>();
+        var surface = new List<Int3>();
         foreach (BlockInstance b in c.Blocks)
         {
             if (!b.Alive || BlockVisuals.IsAnimated(b.Def)) continue;
+            if (BlockModels.IsSurface(b.Def))
+            {
+                surface.AddRange(b.Cells);
+                continue;
+            }
+
             Transform3D at = Conv.BlockTransform(b.Cell, b.Orientation);
             foreach ((Mesh mesh, Material mat, Transform3D local) in BlockVisuals.Parts(b.Def, CaliberOf(b)))
             {
@@ -212,6 +274,13 @@ public sealed class GridView
             if (mat is StandardMaterial3D sm && sm.ShadingMode == BaseMaterial3D.ShadingModeEnum.Unshaded)
                 mmi.CastShadow = GeometryInstance3D.ShadowCastingSetting.Off;
             c.Node.AddChild(mmi);
+        }
+
+        if (surface.Count == 0) return;
+        foreach ((int mat, HullMesher.Surface s) in HullMesher.Build(surface, new SectionGrid(this, c.Section), Conv.CS))
+        {
+            if (s.Indices.Count == 0) continue;
+            c.Node.AddChild(new MeshInstance3D { Mesh = BlockVisuals.HullMesh(s), MaterialOverride = BlockVisuals.SurfaceMaterial(_surfaceDefs[mat]) });
         }
     }
 

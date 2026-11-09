@@ -1392,8 +1392,11 @@ public partial class Builder : Node3D
     private void MissileSection(VehicleAnalysis a)
     {
         _dash.AddChild(Ui.Section("Missiles"));
-        foreach (MissileInfo m in a.Missiles)
+        // Missiles built the same share a card.
+        foreach (var same in a.Missiles.GroupBy(x => (x.Valid, Parts: x.Parts.Count, x.Stats.Seeker, x.Stats.BurnoutSpeed, x.Stats.Damage, x.Problem)))
         {
+            MissileInfo m = same.First();
+            int n = same.Count();
             PanelContainer card = Ui.Card();
             VBoxContainer col = Ui.Column(6);
             card.AddChild(col);
@@ -1404,7 +1407,7 @@ public partial class Builder : Node3D
                 SeekerKind.Radar => "Radar: chases aircraft",
                 _ => "Unguided rocket",
             };
-            top.AddChild(Ui.Heading($"{m.Parts.Count}-part missile"));
+            top.AddChild(Ui.Heading(n > 1 ? $"{m.Parts.Count}-part missile × {n}" : $"{m.Parts.Count}-part missile"));
             top.AddChild(Ui.Spacer());
             top.AddChild(Ui.Caption(kind, m.Valid ? Ui.Info : Ui.Bad));
             col.AddChild(top);
@@ -1523,15 +1526,21 @@ public partial class Builder : Node3D
         if (a.Guns.Count > 0)
         {
             _dash.AddChild(Ui.Section("Weapons"));
-            foreach (GunInfo g in a.Guns)
+            // Guns that are built the same share a card ("406 mm × 12"), so a battleship's battery stays readable.
+            var kinds = a.Guns.GroupBy(g => (g.Label, g.Valid, Barrels: g.Barrels.Count, Brake: g.Brake.HasValue, g.Loaders, g.Propellants,
+                    Fixed: g.Section == 0, g.ApRounds, g.HeRounds, g.FlakRounds))
+                .OrderByDescending(k => k.First().BreechDef.Breech.CaliberMm);
+            foreach (var kind in kinds)
             {
+                GunInfo g = kind.First();
+                int n = kind.Count();
                 PanelContainer card = Ui.Card();
                 VBoxContainer col = Ui.Column(6);
                 card.AddChild(col);
                 HBoxContainer top = Ui.Row(8);
-                top.AddChild(Ui.Heading(g.Label));
+                top.AddChild(Ui.Heading(n > 1 ? $"{g.Label} × {n}" : g.Label));
                 top.AddChild(Ui.Spacer());
-                top.AddChild(Ui.Caption(g.Section == 0 ? "Fixed in hull" : "Turret"));
+                top.AddChild(Ui.Caption(g.Section == 0 ? "Fixed in hull" : n > 1 ? "Turrets" : "Turret"));
                 col.AddChild(top);
                 if (!g.Valid)
                 {
@@ -1543,14 +1552,16 @@ public partial class Builder : Node3D
                 GunStats s = g.Stats;
                 float pen500 = GunMath.PenAtSpeed(g.BreechDef.Breech, GunMath.SpeedAtRange(s.MuzzleVelocity, s.DragK, 500));
                 col.AddChild(Ui.Small($"{g.Barrels.Count} barrel{(g.Barrels.Count == 1 ? "" : "s")}{(g.Brake.HasValue ? " + brake" : "")} · " +
-                                      $"{g.Loaders} loader{(g.Loaders == 1 ? "" : "s")} · {g.Propellants} propellant"));
+                                      $"{g.Loaders} loader{(g.Loaders == 1 ? "" : "s")} · {g.Propellants} propellant{(n > 1 ? " (each)" : "")}"));
                 HFlowContainer chips = ChipFlow();
                 chips.AddChild(Ui.Chip("Pen", $"{s.ApPenMm:0} mm", Ui.Accent));
                 chips.AddChild(Ui.Chip("At 500 m", $"{pen500:0} mm"));
                 chips.AddChild(Ui.Chip("Speed", $"{s.MuzzleVelocity:0} m/s"));
                 chips.AddChild(Ui.Chip("Reload", $"{s.ReloadS:0.0} s"));
-                chips.AddChild(Ui.Chip("AP", $"{g.ApRounds}", g.ApRounds > 0 ? Ui.Text : Ui.Bad));
+                bool flakOnly = g.FlakRounds > 0 && g.ApRounds == 0;
+                if (!flakOnly) chips.AddChild(Ui.Chip("AP", $"{g.ApRounds}", g.ApRounds > 0 ? Ui.Text : Ui.Bad));
                 chips.AddChild(Ui.Chip("HE", $"{g.HeRounds}", g.HeRounds > 0 ? Ui.Text : Ui.Dim));
+                if (g.FlakRounds > 0) chips.AddChild(Ui.Chip("Flak", $"{g.FlakRounds}"));
                 col.AddChild(chips);
                 _dash.AddChild(card);
             }
@@ -1559,10 +1570,19 @@ public partial class Builder : Node3D
         if (a.Turrets.Count > 0)
         {
             _dash.AddChild(Ui.Section("Turrets"));
-            for (int i = 0; i < a.Turrets.Count; i++)
+            if (a.Turrets.Count <= 4)
             {
-                TurretInfo t = a.Turrets[i];
-                _dash.AddChild(Ui.Small($"Turret {i + 1}: {t.Blocks} blocks · {t.MassKg / 1000f:0.0} t · turns {t.TraverseDegPerSec:0}°/s"));
+                for (int i = 0; i < a.Turrets.Count; i++)
+                {
+                    TurretInfo t = a.Turrets[i];
+                    _dash.AddChild(Ui.Small($"Turret {i + 1}: {t.Blocks} blocks · {t.MassKg / 1000f:0.0} t · turns {t.TraverseDegPerSec:0}°/s"));
+                }
+            }
+            else
+            {
+                foreach (var same in a.Turrets.GroupBy(t => (t.Blocks, Tonnes: MathF.Round(t.MassKg / 100f) / 10f, Turn: MathF.Round(t.TraverseDegPerSec)))
+                             .OrderByDescending(k => k.Key.Tonnes))
+                    _dash.AddChild(Ui.Small($"{same.Count()} × {same.Key.Blocks} blocks · {same.Key.Tonnes:0.0} t · turn{(same.Count() == 1 ? "s" : "")} {same.Key.Turn:0}°/s"));
             }
         }
 
