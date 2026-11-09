@@ -43,6 +43,10 @@ public static class GridRegistry
         public const uint Vehicles = 2;
         public const uint Structures = 4;
         public const uint Debris = 8;
+
+        /// <summary>Little chunks from destroyed blocks. Shells, wheels and the camera ignore them.</summary>
+        public const uint Fragments = 16;
+
         public const uint All = World | Vehicles | Structures | Debris;
     }
 }

@@ -3,8 +3,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using DreamGame.Core;
+using DreamGame.Game.Audio;
 using Godot;
-using NVec = System.Numerics.Vector3;
 
 namespace DreamGame.Game;
 
@@ -27,20 +27,22 @@ public partial class Builder : Node3D
     private string _name = "Untitled";
     private VehicleAnalysis _analysis;
     private bool _dirty = true;
+    private bool _paletteDirty;
 
-    // Camera
+    // Camera: the goal values follow input; the current values glide toward them.
     private Camera3D _cam;
-    private Vector3 _target = new(0, 0.8f, 0);
-    private float _yaw = Mathf.DegToRad(140f);
-    private float _pitch = Mathf.DegToRad(28f);
-    private float _dist = 14f;
+    private Vector3 _target = new(0, 0.8f, 0), _goalTarget = new(0, 0.8f, 0);
+    private float _yaw = Mathf.DegToRad(140f), _goalYaw = Mathf.DegToRad(140f);
+    private float _pitch = Mathf.DegToRad(28f), _goalPitch = Mathf.DegToRad(28f);
+    private float _dist = 14f, _goalDist = 14f;
 
     // Tools
     private BlockDef _selected;
     private int _orientation;
     private bool _mirror = true;
     private int _category;
-    private Node3D _ghost, _ghostMirror, _comMarker;
+    private Node3D _ghost, _ghostMirror, _comMarker, _outline;
+    private StandardMaterial3D _outlineMat;
     private string _ghostKey = "";
 
     // Mouse state
@@ -49,7 +51,6 @@ public partial class Builder : Node3D
     private Int3 _paintStart, _paintNormal;
     private List<Change> _stroke;
 
-    // Undo
     private struct Change
     {
         public Int3 Cell;
@@ -62,41 +63,52 @@ public partial class Builder : Node3D
 
     // UI
     private LineEdit _nameEdit;
-    private RichTextLabel _stats;
-    private HBoxContainer _blockBar;
-    private HBoxContainer _categoryBar;
-    private RichTextLabel _info;
-    private Label _toast;
+    private VBoxContainer _dash;
+    private HFlowContainer _categoryFlow;
+    private GridContainer _tileGrid;
+    private VBoxContainer _partCard;
+    private PanelContainer _toast;
+    private Label _toastLabel;
     private float _toastTime;
     private PanelContainer _help;
     private Button _mirrorButton;
     private MenuButton _loadButton;
     private readonly List<Action> _loadActions = new();
+    private readonly RandomNumberGenerator _rng = new();
 
     public override void _Ready()
     {
         Scenery.AddSkyAndSun(this, false);
         BuildFloor();
-        _cam = new Camera3D { Fov = 55f, Far = 800f };
+        _cam = new Camera3D { Fov = 50f, Far = 800f };
         AddChild(_cam);
         _cam.MakeCurrent();
         _comMarker = new MeshInstance3D
         {
-            Mesh = new SphereMesh { Radius = 0.14f, Height = 0.28f },
+            Mesh = new SphereMesh { Radius = 0.12f, Height = 0.24f },
             MaterialOverride = new StandardMaterial3D
             {
-                AlbedoColor = new Color(1f, 0.2f, 0.6f), ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+                AlbedoColor = new Color(1f, 0.25f, 0.6f), ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
                 NoDepthTest = true, RenderPriority = 10,
             },
             CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
         };
         AddChild(_comMarker);
+        _outline = BuildOutline();
+        AddChild(_outline);
+
+        var icons = new Node { Name = "Icons" };
+        AddChild(icons);
+        PartIcons.Init(icons);
+        PartIcons.Updated += () => _paletteDirty = true;
+        foreach (BlockDef d in BlockCatalog.All) PartIcons.Get(d);
+
         BuildUi();
         _selected = BlockCatalog.All[0];
         RefreshPalette();
-        LoadBlueprint(ExampleDesigns.Warden(), recordUndo: false);
+        LoadBlueprint(ExampleDesigns.Warden(), recordUndo: false, animate: false);
         Toast("Loaded the example Warden tank. Press Tab to drive it, or start changing it.");
-        UpdateCamera();
+        SnapCamera();
     }
 
     public override void _EnterTree()
@@ -110,54 +122,73 @@ public partial class Builder : Node3D
 
     private void BuildFloor()
     {
-        var img = Image.CreateEmpty(64, 64, false, Image.Format.Rgba8);
-        img.Fill(new Color(0.2f, 0.21f, 0.22f));
-        for (int i = 0; i < 64; i++)
-        {
-            img.SetPixel(i, 0, new Color(0.32f, 0.34f, 0.36f));
-            img.SetPixel(0, i, new Color(0.32f, 0.34f, 0.36f));
-        }
-
-        float size = (Reach * 2 + 1) * Conv.CS;
-        var floor = new MeshInstance3D
+        const float size = 120f;
+        AddChild(new MeshInstance3D
         {
             Mesh = new PlaneMesh { Size = new Vector2(size, size) },
             Position = new Vector3(0, -Conv.CS * 0.5f - 0.002f, 0),
-            MaterialOverride = new StandardMaterial3D
-            {
-                AlbedoTexture = ImageTexture.CreateFromImage(img),
-                Uv1Scale = new Vector3(Reach * 2 + 1, Reach * 2 + 1, 1),
-                Roughness = 0.9f,
-                TextureFilter = BaseMaterial3D.TextureFilterEnum.LinearWithMipmapsAnisotropic,
-            },
-        };
-        AddChild(floor);
-
-        // Line along X = 0 so the mirror plane is visible.
-        AddChild(new MeshInstance3D
-        {
-            Mesh = new BoxMesh { Size = new Vector3(0.03f, 0.005f, size) },
-            Position = new Vector3(0, -Conv.CS * 0.5f, 0),
-            MaterialOverride = BlockVisuals.Emissive(new Color(0.3f, 0.6f, 1f), 1f),
+            MaterialOverride = Shaders.GridFloor(),
         });
-        // Arrow at the front of the build area: vehicles face -Z.
         AddChild(new Label3D
         {
-            Text = "FRONT", FontSize = 96, PixelSize = 0.01f, Position = new Vector3(0, -0.2f, -9f),
-            RotationDegrees = new Vector3(-90, 0, 0), Modulate = new Color(0.4f, 0.65f, 1f, 0.6f),
+            Text = "FRONT", FontSize = 110, PixelSize = 0.008f, Position = new Vector3(0, -0.24f, -8.5f), Font = Ui.HeadingBoldFont,
+            RotationDegrees = new Vector3(-90, 0, 0), Modulate = new Color(0.45f, 0.7f, 1f, 0.55f), OutlineSize = 0,
         });
+        AddChild(new Label3D
+        {
+            Text = "^", FontSize = 160, PixelSize = 0.008f, Position = new Vector3(0, -0.24f, -7.2f), Font = Ui.HeadingBoldFont,
+            RotationDegrees = new Vector3(-90, 0, 0), Modulate = new Color(0.45f, 0.7f, 1f, 0.45f), OutlineSize = 0,
+        });
+    }
+
+    /// <summary>A crisp box outline (twelve thin bars) that shows which block is under the cursor.</summary>
+    private Node3D BuildOutline()
+    {
+        _outlineMat = new StandardMaterial3D
+        {
+            ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded, AlbedoColor = new Color(1, 1, 1, 0.9f),
+            Transparency = BaseMaterial3D.TransparencyEnum.Alpha, RenderPriority = 5,
+        };
+        var root = new Node3D { Name = "Outline", Visible = false };
+        float h = Conv.CS * 0.52f, t = 0.012f;
+        for (int axis = 0; axis < 3; axis++)
+        for (int a = -1; a <= 1; a += 2)
+        for (int b = -1; b <= 1; b += 2)
+        {
+            var size = new Vector3(t, t, t);
+            size[axis] = h * 2f + t;
+            var pos = Vector3.Zero;
+            pos[(axis + 1) % 3] = a * h;
+            pos[(axis + 2) % 3] = b * h;
+            root.AddChild(new MeshInstance3D
+            {
+                Mesh = new BoxMesh { Size = size }, MaterialOverride = _outlineMat, Position = pos,
+                CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
+            });
+        }
+
+        return root;
     }
 
     // ---------- Editing ----------
 
-    private void SetCell(Int3 c, BlueprintBlock b)
+    private void SetCell(Int3 c, BlueprintBlock b, bool animate)
     {
         if (_visuals.TryGetValue(c, out Node3D old))
         {
-            old.QueueFree();
             _visuals.Remove(c);
             _visualCaliber.Remove(c);
             _tinted.Remove(c);
+            if (animate && old.IsInsideTree())
+            {
+                Tween tw = old.CreateTween();
+                tw.TweenProperty(old, "scale", Vector3.One * 0.05f, 0.1).SetTrans(Tween.TransitionType.Quad).SetEase(Tween.EaseType.In);
+                tw.TweenCallback(Callable.From(old.QueueFree));
+            }
+            else
+            {
+                old.QueueFree();
+            }
         }
 
         if (b == null)
@@ -167,50 +198,62 @@ public partial class Builder : Node3D
         else
         {
             _cells[c] = b;
-            MakeVisual(c, b, 76f);
+            Node3D v = MakeVisual(c, b, 76f);
+            if (animate)
+            {
+                Tween tw = v.CreateTween();
+                tw.TweenProperty(v, "scale", Vector3.One, 0.18).From(Vector3.One * 0.55f)
+                    .SetTrans(Tween.TransitionType.Back).SetEase(Tween.EaseType.Out);
+            }
         }
 
         _dirty = true;
     }
 
-    private void MakeVisual(Int3 c, BlueprintBlock b, float caliber)
+    private Node3D MakeVisual(Int3 c, BlueprintBlock b, float caliber)
     {
         Node3D v = BlockVisuals.Create(BlockCatalog.Get(b.Id), caliber, hints: true);
         v.Transform = Conv.BlockTransform(c, b.O);
         AddChild(v);
         _visuals[c] = v;
         _visualCaliber[c] = caliber;
+        return v;
     }
 
     private bool InBounds(Int3 c) => Math.Abs(c.X) <= Reach && Math.Abs(c.Z) <= Reach && c.Y >= 0 && c.Y <= MaxHeight;
 
-    private void Place(Int3 c, List<Change> into)
+    private bool Place(Int3 c, List<Change> into)
     {
-        PlaceOne(c, _orientation, into);
+        bool placed = PlaceOne(c, _orientation, into);
         if (_mirror && c.X != 0) PlaceOne(new Int3(-c.X, c.Y, c.Z), Orientations.MirrorX(_orientation), into);
+        if (placed)
+            Sfx.Play2D(this, _selected.MassKg >= 200 ? SoundId.PlaceHeavy : SoundId.PlaceLight, -4f, _rng.RandfRange(0.92f, 1.08f));
+        return placed;
     }
 
-    private void PlaceOne(Int3 c, int o, List<Change> into)
+    private bool PlaceOne(Int3 c, int o, List<Change> into)
     {
-        if (!InBounds(c) || _cells.ContainsKey(c)) return;
+        if (!InBounds(c) || _cells.ContainsKey(c)) return false;
         var b = new BlueprintBlock(_selected.Id, c, o);
         into.Add(new Change { Cell = c, Before = null, After = b });
-        SetCell(c, b);
+        SetCell(c, b, animate: true);
+        return true;
     }
 
     private void Remove(Int3 c)
     {
         var changes = new List<Change>();
-        RemoveOne(c, changes);
-        if (_mirror && c.X != 0) RemoveOne(new Int3(-c.X, c.Y, c.Z), changes);
+        RemoveOne(c, changes, true);
+        if (_mirror && c.X != 0) RemoveOne(new Int3(-c.X, c.Y, c.Z), changes, true);
+        if (changes.Count > 0) Sfx.Play2D(this, SoundId.Remove, -5f, _rng.RandfRange(0.92f, 1.1f));
         Commit(changes);
     }
 
-    private void RemoveOne(Int3 c, List<Change> into)
+    private void RemoveOne(Int3 c, List<Change> into, bool animate)
     {
         if (!_cells.TryGetValue(c, out BlueprintBlock old)) return;
         into.Add(new Change { Cell = c, Before = old, After = null });
-        SetCell(c, null);
+        SetCell(c, null, animate);
     }
 
     private void Commit(List<Change> changes)
@@ -226,24 +269,27 @@ public partial class Builder : Node3D
         if (from.Count == 0)
         {
             Toast(redo ? "Nothing to redo." : "Nothing to undo.");
+            Sfx.Play2D(this, SoundId.Error, -12f);
             return;
         }
 
         List<Change> changes = from.Pop();
+        bool animate = changes.Count <= 24;
         IEnumerable<Change> order = redo ? changes : Enumerable.Reverse(changes);
-        foreach (Change ch in order) SetCell(ch.Cell, redo ? ch.After : ch.Before);
+        foreach (Change ch in order) SetCell(ch.Cell, redo ? ch.After : ch.Before, animate);
         to.Push(changes);
+        Sfx.Play2D(this, SoundId.Tick, -6f, redo ? 1.15f : 0.9f);
     }
 
-    private void LoadBlueprint(Blueprint bp, bool recordUndo = true)
+    private void LoadBlueprint(Blueprint bp, bool recordUndo = true, bool animate = false)
     {
         var changes = new List<Change>();
-        foreach (Int3 c in _cells.Keys.ToList()) RemoveOne(c, changes);
+        foreach (Int3 c in _cells.Keys.ToList()) RemoveOne(c, changes, false);
         foreach (BlueprintBlock b in bp.Blocks)
         {
             var copy = new BlueprintBlock(b.Id, b.Cell, b.O);
             changes.Add(new Change { Cell = b.Cell, Before = null, After = copy });
-            SetCell(b.Cell, copy);
+            SetCell(b.Cell, copy, animate);
         }
 
         if (recordUndo) Commit(changes);
@@ -299,23 +345,24 @@ public partial class Builder : Node3D
 
     private bool OverUi() => GetViewport().GuiGetHoveredControl() != null;
 
+    private bool Typing() => GetViewport().GuiGetFocusOwner() is LineEdit;
+
     // ---------- Input ----------
 
     public override void _UnhandledInput(InputEvent e)
     {
-        if (e is InputEventMouseButton mb)
+        switch (e)
         {
-            HandleMouseButton(mb);
-            return;
+            case InputEventMouseButton mb:
+                HandleMouseButton(mb);
+                break;
+            case InputEventMouseMotion mm:
+                HandleMouseMotion(mm);
+                break;
+            case InputEventKey { Pressed: true } key:
+                HandleKey(key);
+                break;
         }
-
-        if (e is InputEventMouseMotion mm)
-        {
-            HandleMouseMotion(mm);
-            return;
-        }
-
-        if (e is InputEventKey { Pressed: true } key) HandleKey(key);
     }
 
     private void HandleMouseButton(InputEventMouseButton mb)
@@ -325,12 +372,10 @@ public partial class Builder : Node3D
         switch (mb.ButtonIndex)
         {
             case MouseButton.WheelUp when mb.Pressed:
-                _dist = Mathf.Clamp(_dist * 0.9f, 3f, 90f);
-                UpdateCamera();
+                _goalDist = Mathf.Clamp(_goalDist * 0.88f, 3f, 90f);
                 break;
             case MouseButton.WheelDown when mb.Pressed:
-                _dist = Mathf.Clamp(_dist * 1.1f, 3f, 90f);
-                UpdateCamera();
+                _goalDist = Mathf.Clamp(_goalDist * 1.12f, 3f, 90f);
                 break;
             case MouseButton.Left:
                 if (mb.Pressed)
@@ -343,6 +388,10 @@ public partial class Builder : Node3D
                         _paintStart = target;
                         _paintNormal = faceNormal;
                         Place(target, _stroke);
+                    }
+                    else if (PickCell(out _, out _, out _))
+                    {
+                        Sfx.Play2D(this, SoundId.Error, -10f);
                     }
                 }
                 else
@@ -382,7 +431,7 @@ public partial class Builder : Node3D
                         BlueprintBlock b = _cells[pickCell];
                         Select(BlockCatalog.Get(b.Id));
                         _orientation = b.O;
-                        Toast($"Picked {_selected.Name}.");
+                        Toast($"Copied {_selected.Name}.");
                     }
                 }
 
@@ -395,15 +444,13 @@ public partial class Builder : Node3D
         if ((_rmbDown || _mmbDown) && mm.Position.DistanceTo(_pressPos) > 4f) _dragged = true;
         if (_rmbDown && _dragged)
         {
-            _yaw -= mm.Relative.X * 0.006f;
-            _pitch = Mathf.Clamp(_pitch + mm.Relative.Y * 0.006f, Mathf.DegToRad(-10f), Mathf.DegToRad(88f));
-            UpdateCamera();
+            _goalYaw -= mm.Relative.X * 0.006f;
+            _goalPitch = Mathf.Clamp(_goalPitch + mm.Relative.Y * 0.006f, Mathf.DegToRad(-10f), Mathf.DegToRad(88f));
         }
         else if (_mmbDown && _dragged)
         {
             Basis b = _cam.GlobalTransform.Basis;
-            _target += (-b.X * mm.Relative.X + b.Y * mm.Relative.Y) * _dist * 0.0016f;
-            UpdateCamera();
+            _goalTarget += (-b.X * mm.Relative.X + b.Y * mm.Relative.Y) * _dist * 0.0016f;
         }
         else if (_lmbDown && _stroke != null && PlacementTarget(out Int3 c))
         {
@@ -430,16 +477,17 @@ public partial class Builder : Node3D
                 Save();
                 break;
             case Key.R:
-                _orientation = Orientations.RotateAroundY(_orientation, dir);
+                Rotate(Orientations.RotateAroundY(_orientation, dir));
                 break;
             case Key.T:
-                _orientation = Orientations.RotateAroundX(_orientation, dir);
+                Rotate(Orientations.RotateAroundX(_orientation, dir));
                 break;
             case Key.G:
-                _orientation = Orientations.RotateAroundZ(_orientation, dir);
+                Rotate(Orientations.RotateAroundZ(_orientation, dir));
                 break;
             case Key.M:
                 SetMirror(!_mirror);
+                Sfx.Play2D(this, SoundId.Tick, -6f);
                 break;
             case Key.F:
                 FocusCamera();
@@ -471,52 +519,113 @@ public partial class Builder : Node3D
         }
     }
 
+    private void Rotate(int orientation)
+    {
+        _orientation = orientation;
+        Sfx.Play2D(this, SoundId.Tick, -8f, _rng.RandfRange(1f, 1.15f));
+        if (_ghost != null)
+        {
+            _ghost.Scale = Vector3.One * 0.85f;
+            _ghost.CreateTween().TweenProperty(_ghost, "scale", Vector3.One, 0.12).SetTrans(Tween.TransitionType.Back)
+                .SetEase(Tween.EaseType.Out);
+        }
+    }
+
     // ---------- Frame ----------
 
     public override void _Process(double delta)
     {
+        float dt = (float)delta;
         if (_dirty)
         {
             _dirty = false;
             Reanalyze();
         }
 
+        if (_paletteDirty)
+        {
+            _paletteDirty = false;
+            RefreshPalette();
+        }
+
+        MoveCamera(dt);
         UpdateGhost();
         if (_toastTime > 0)
         {
-            _toastTime -= (float)delta;
-            _toast.Modulate = new Color(1, 1, 1, Mathf.Clamp(_toastTime, 0, 1));
+            _toastTime -= dt;
+            _toast.Modulate = new Color(1, 1, 1, Mathf.Clamp(_toastTime * 2f, 0, 1));
+            _toast.Visible = _toastTime > 0;
         }
     }
 
-    private void UpdateCamera()
+    private void MoveCamera(float dt)
     {
-        var offset = new Vector3(
-            Mathf.Cos(_pitch) * Mathf.Sin(_yaw), Mathf.Sin(_pitch), Mathf.Cos(_pitch) * Mathf.Cos(_yaw));
+        if (!Typing() && !Input.IsKeyPressed(Key.Ctrl))
+        {
+            var fwd = new Vector3(-Mathf.Sin(_goalYaw), 0, -Mathf.Cos(_goalYaw));
+            var right = new Vector3(Mathf.Cos(_goalYaw), 0, -Mathf.Sin(_goalYaw));
+            Vector3 move = Vector3.Zero;
+            if (Input.IsPhysicalKeyPressed(Key.W)) move += fwd;
+            if (Input.IsPhysicalKeyPressed(Key.S)) move -= fwd;
+            if (Input.IsPhysicalKeyPressed(Key.D)) move += right;
+            if (Input.IsPhysicalKeyPressed(Key.A)) move -= right;
+            if (Input.IsPhysicalKeyPressed(Key.E)) move += Vector3.Up;
+            if (Input.IsPhysicalKeyPressed(Key.Q)) move -= Vector3.Up;
+            if (move != Vector3.Zero) _goalTarget += move.Normalized() * Mathf.Max(_goalDist * 0.9f, 4f) * dt;
+        }
+
+        float k = 1f - Mathf.Exp(-dt * 14f);
+        _target = _target.Lerp(_goalTarget, k);
+        _yaw = Mathf.Lerp(_yaw, _goalYaw, k);
+        _pitch = Mathf.Lerp(_pitch, _goalPitch, k);
+        _dist = Mathf.Lerp(_dist, _goalDist, k);
+        ApplyCamera();
+    }
+
+    private void ApplyCamera()
+    {
+        var offset = new Vector3(Mathf.Cos(_pitch) * Mathf.Sin(_yaw), Mathf.Sin(_pitch), Mathf.Cos(_pitch) * Mathf.Cos(_yaw));
         _cam.Position = _target + offset * _dist;
         _cam.LookAt(_target, Vector3.Up);
+    }
+
+    private void SnapCamera()
+    {
+        _target = _goalTarget;
+        _yaw = _goalYaw;
+        _pitch = _goalPitch;
+        _dist = _goalDist;
+        ApplyCamera();
     }
 
     private void FocusCamera()
     {
         if (_cells.Count == 0)
         {
-            _target = new Vector3(0, 0.8f, 0);
+            _goalTarget = new Vector3(0, 0.8f, 0);
         }
         else
         {
             Int3 min = _cells.Keys.Aggregate(Int3.Min), max = _cells.Keys.Aggregate(Int3.Max);
-            _target = (min.G() + max.G()) * 0.5f * Conv.CS;
-            _dist = Mathf.Clamp((max - min).ToVector3().Length() * Conv.CS * 1.6f + 4f, 6f, 60f);
+            _goalTarget = (min.G() + max.G()) * 0.5f * Conv.CS;
+            _goalDist = Mathf.Clamp((max - min).ToVector3().Length() * Conv.CS * 1.7f + 4f, 6f, 60f);
         }
-
-        if (_cam != null) UpdateCamera();
     }
 
     private void UpdateGhost()
     {
-        bool picked = PickCell(out Int3 hit, out Int3 n, out _);
-        bool show = picked && !OverUi() && !_rmbDown && !_mmbDown;
+        bool picked = PickCell(out Int3 hit, out Int3 n, out bool onBlock);
+        bool free = picked && !OverUi() && !_mmbDown && !(_rmbDown && _dragged);
+
+        // Outline the block under the cursor; it turns red while right-click would remove it.
+        _outline.Visible = free && onBlock;
+        if (_outline.Visible)
+        {
+            _outline.Position = Conv.CellPos(hit);
+            _outlineMat.AlbedoColor = _rmbDown ? new Color(1f, 0.35f, 0.3f, 1f) : new Color(1, 1, 1, 0.75f);
+        }
+
+        bool show = free && !_rmbDown;
         Int3 cell = show ? hit + n : default;
         string key = $"{_selected.Id}:{_orientation}";
         if (key != _ghostKey)
@@ -534,7 +643,8 @@ public partial class Builder : Node3D
         _ghost.Visible = show;
         if (show)
         {
-            _ghost.Transform = Conv.BlockTransform(cell, _orientation);
+            _ghost.Position = Conv.CellPos(cell);
+            _ghost.Basis = Conv.BasisOf(_orientation).Scaled(_ghost.Basis.Scale);
             BlockVisuals.SetOverride(_ghost, ok ? BlockVisuals.GhostOk : BlockVisuals.GhostBad);
         }
 
@@ -587,133 +697,184 @@ public partial class Builder : Node3D
 
         _comMarker.Visible = _cells.Count > 0;
         _comMarker.Position = _analysis.CenterOfMass.G();
-        _stats.Text = StatsText(_analysis);
+        RebuildDashboard(_analysis);
     }
 
-    // ---------- UI ----------
+    // ---------- UI: layout ----------
 
     private void BuildUi()
     {
         Control root = Ui.Root(this);
 
-        var top = new PanelContainer();
+        PanelContainer top = Ui.Card("TopBar");
         root.AddChild(top);
         top.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.TopWide);
-        var topRow = new HBoxContainer();
-        topRow.AddThemeConstantOverride("separation", 8);
-        top.AddChild(topRow);
-        topRow.AddChild(Ui.Label("BUILDER", 17, Ui.Accent));
-        _nameEdit = new LineEdit { Text = _name, CustomMinimumSize = new Vector2(260, 0), PlaceholderText = "Design name" };
+        HBoxContainer bar = Ui.Row(8);
+        top.AddChild(bar);
+        Label title = Ui.Title("BUILDER");
+        title.AddThemeColorOverride("font_color", Ui.Accent);
+        bar.AddChild(title);
+        bar.AddChild(new Control { CustomMinimumSize = new Vector2(6, 0) });
+        _nameEdit = new LineEdit { Text = _name, CustomMinimumSize = new Vector2(260, 0), PlaceholderText = "Name your design" };
         _nameEdit.TextChanged += t => _name = string.IsNullOrWhiteSpace(t) ? "Untitled" : t.Trim();
         _nameEdit.TextSubmitted += _ => _nameEdit.ReleaseFocus();
-        topRow.AddChild(_nameEdit);
-        topRow.AddChild(Ui.Button("New", NewDesign, "Start an empty design (undo brings it back)"));
-        topRow.AddChild(Ui.Button("Save", Save, "Save to your blueprints folder (Ctrl+S)"));
-        _loadButton = new MenuButton { Text = "Load", TooltipText = "Open an example or one of your saved designs" };
+        bar.AddChild(_nameEdit);
+        bar.AddChild(Ui.Button("Undo", () => Undo(false), "Undo (Ctrl+Z)", "GhostButton"));
+        bar.AddChild(Ui.Button("Redo", () => Undo(true), "Redo (Ctrl+Y)", "GhostButton"));
+        bar.AddChild(new VSeparator());
+        bar.AddChild(Ui.Button("New", NewDesign, "Start an empty design (Undo brings the old one back)"));
+        bar.AddChild(Ui.Button("Save", Save, "Save to your blueprints folder (Ctrl+S)"));
+        _loadButton = new MenuButton
+        {
+            Text = "Load", TooltipText = "Open an example or one of your saved designs", ThemeTypeVariation = "Button",
+            FocusMode = Control.FocusModeEnum.None,
+        };
         _loadButton.AboutToPopup += FillLoadMenu;
         _loadButton.GetPopup().IdPressed += id =>
         {
             if (id >= 0 && id < _loadActions.Count) _loadActions[(int)id]();
         };
-        topRow.AddChild(_loadButton);
-        topRow.AddChild(Ui.Button("Folder", OpenFolder, "Open the folder with your saved blueprint files, to share them"));
-        _mirrorButton = Ui.Button("", () => SetMirror(!_mirror), "Build both sides at once (M)");
-        topRow.AddChild(_mirrorButton);
+        bar.AddChild(_loadButton);
+        bar.AddChild(Ui.Button("Folder", OpenFolder, "Open the folder with your blueprint files, to share them with friends"));
+        bar.AddChild(Ui.Spacer());
+        _mirrorButton = Ui.Button("MIRROR", () => SetMirror(!_mirror), "Build both sides at once (M)", "Pill");
+        _mirrorButton.ToggleMode = true;
+        bar.AddChild(_mirrorButton);
         SetMirror(_mirror);
-        topRow.AddChild(Ui.Spacer());
-        topRow.AddChild(Ui.Button("Help (F1)", () => _help.Visible = !_help.Visible));
-        Button drive = Ui.Button("  Test drive  (Tab)  ", RequestTestDrive, "Drive this design on the test range");
-        drive.AddThemeColorOverride("font_color", Ui.Accent);
-        topRow.AddChild(drive);
+        bar.AddChild(Ui.Button("Help", () => _help.Visible = !_help.Visible, "Controls and how designs work (F1)", "GhostButton"));
+        bar.AddChild(Ui.Button("TEST DRIVE", RequestTestDrive, "Drive this design on the test range (Tab)", "PrimaryButton"));
 
-        var side = new PanelContainer();
-        root.AddChild(side);
-        side.SetAnchorsPreset(Control.LayoutPreset.RightWide);
-        side.OffsetLeft = -360;
-        side.OffsetRight = -8;
-        side.OffsetTop = 60;
-        side.OffsetBottom = -190;
-        side.GrowHorizontal = Control.GrowDirection.Begin;
+        // Parts drawer on the left.
+        var left = new PanelContainer();
+        root.AddChild(left);
+        left.SetAnchorsPreset(Control.LayoutPreset.LeftWide);
+        left.OffsetLeft = 12;
+        left.OffsetRight = 12 + 300;
+        left.OffsetTop = 72;
+        left.OffsetBottom = -12;
+        VBoxContainer lcol = Ui.Column(10);
+        left.AddChild(lcol);
+        lcol.AddChild(Ui.Section("Parts"));
+        _categoryFlow = new HFlowContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
+        _categoryFlow.AddThemeConstantOverride("h_separation", 5);
+        _categoryFlow.AddThemeConstantOverride("v_separation", 5);
+        lcol.AddChild(_categoryFlow);
+        _tileGrid = new GridContainer { Columns = 3, MouseFilter = Control.MouseFilterEnum.Ignore };
+        _tileGrid.AddThemeConstantOverride("h_separation", 6);
+        _tileGrid.AddThemeConstantOverride("v_separation", 6);
+        lcol.AddChild(_tileGrid);
+        lcol.AddChild(new HSeparator());
+        _partCard = Ui.Column(8);
+        _partCard.SizeFlagsVertical = Control.SizeFlags.ExpandFill;
+        lcol.AddChild(_partCard);
+
+        // Design dashboard on the right.
+        var right = new PanelContainer();
+        root.AddChild(right);
+        right.SetAnchorsPreset(Control.LayoutPreset.RightWide);
+        right.OffsetLeft = -352;
+        right.OffsetRight = -12;
+        right.OffsetTop = 72;
+        right.OffsetBottom = -12;
+        right.GrowHorizontal = Control.GrowDirection.Begin;
         var scroll = new ScrollContainer { HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled };
-        side.AddChild(scroll);
-        _stats = Ui.Rich();
-        _stats.CustomMinimumSize = new Vector2(330, 0);
-        _stats.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
-        scroll.AddChild(_stats);
+        right.AddChild(scroll);
+        _dash = Ui.Column(10);
+        _dash.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+        _dash.CustomMinimumSize = new Vector2(310, 0);
+        scroll.AddChild(_dash);
 
-        var bottom = new PanelContainer();
-        root.AddChild(bottom);
-        bottom.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.BottomWide);
-        bottom.GrowVertical = Control.GrowDirection.Begin;
-        var col = new VBoxContainer();
-        bottom.AddChild(col);
-        _categoryBar = new HBoxContainer();
-        col.AddChild(_categoryBar);
-        _blockBar = new HBoxContainer();
-        col.AddChild(_blockBar);
-        _info = Ui.Rich();
-        _info.CustomMinimumSize = new Vector2(0, 44);
-        col.AddChild(_info);
+        // Key hints along the bottom.
+        var hints = new PanelContainer();
+        root.AddChild(hints);
+        hints.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.CenterBottom);
+        hints.GrowHorizontal = Control.GrowDirection.Both;
+        hints.GrowVertical = Control.GrowDirection.Begin;
+        hints.OffsetBottom = -14;
+        HBoxContainer hintRow = Ui.Row(14);
+        hints.AddChild(hintRow);
+        foreach ((string key, string what) in new[]
+                 {
+                     ("LMB", "place"), ("RMB", "remove"), ("MMB", "copy"), ("R T G", "rotate"), ("WASD Q E", "move"),
+                     ("M", "mirror"), ("F1", "help"),
+                 })
+        {
+            HBoxContainer pair = Ui.Row(5);
+            pair.AddChild(Ui.Chip(null, key, Ui.Accent));
+            pair.AddChild(Ui.Small(what));
+            hintRow.AddChild(pair);
+        }
 
-        _toast = Ui.Label("", 16, Ui.Accent);
+        _toast = Ui.Card("Toast");
+        _toast.Visible = false;
+        _toast.MouseFilter = Control.MouseFilterEnum.Ignore;
         root.AddChild(_toast);
         _toast.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.CenterTop);
-        _toast.OffsetTop = 64;
         _toast.GrowHorizontal = Control.GrowDirection.Both;
-        _toast.HorizontalAlignment = HorizontalAlignment.Center;
+        _toast.OffsetTop = 80;
+        _toastLabel = Ui.Label("", 16);
+        _toast.AddChild(_toastLabel);
 
         _help = new PanelContainer { Visible = false };
         root.AddChild(_help);
         _help.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.Center);
         _help.GrowHorizontal = Control.GrowDirection.Both;
         _help.GrowVertical = Control.GrowDirection.Both;
+        VBoxContainer helpCol = Ui.Column(10);
+        _help.AddChild(helpCol);
+        helpCol.AddChild(Ui.Title("HOW TO BUILD"));
         RichTextLabel helpText = Ui.Rich();
-        helpText.CustomMinimumSize = new Vector2(560, 0);
+        helpText.CustomMinimumSize = new Vector2(600, 0);
         helpText.Text = HelpText;
-        _help.AddChild(helpText);
+        helpCol.AddChild(helpText);
+        helpCol.AddChild(Ui.Button("Got it", () => _help.Visible = false, null, "PrimaryButton"));
     }
 
     private const string HelpText =
-        "[b][color=#ffc74d]Building[/color][/b]\n" +
+        "[b][color=#ffb845]Building[/color][/b]\n" +
         "[table=2]" +
-        "[cell]Left click[/cell][cell]place a block (hold and drag to paint a row)[/cell]" +
+        "[cell]Left click  [/cell][cell]place a block (hold and drag to paint a row)[/cell]" +
         "[cell]Right click[/cell][cell]remove a block[/cell]" +
         "[cell]Middle click[/cell][cell]copy the block under the cursor[/cell]" +
-        "[cell]R / T / G   [/cell][cell]rotate around the up / side / front axis (Shift turns the other way)[/cell]" +
+        "[cell]R / T / G[/cell][cell]rotate around the up / side / front axis (Shift turns the other way)[/cell]" +
         "[cell]M[/cell][cell]mirror mode: build both sides at once[/cell]" +
         "[cell]1-9,  [ ][/cell][cell]pick a block / switch category[/cell]" +
         "[cell]Ctrl+Z / Ctrl+Y[/cell][cell]undo / redo[/cell]" +
         "[/table]\n" +
-        "[b][color=#ffc74d]Camera[/color][/b]\n" +
+        "[b][color=#ffb845]Camera[/color][/b]\n" +
         "[table=2]" +
         "[cell]Right drag[/cell][cell]orbit[/cell]" +
         "[cell]Middle drag[/cell][cell]pan[/cell]" +
+        "[cell]W A S D, Q / E[/cell][cell]move around, down / up[/cell]" +
         "[cell]Mouse wheel[/cell][cell]zoom[/cell]" +
         "[cell]F[/cell][cell]focus on the design[/cell]" +
         "[/table]\n" +
-        "[b][color=#ffc74d]How designs work[/color][/b]\n" +
-        "The front of the vehicle is toward the FRONT marker (-Z). Every vehicle needs a driver seat, an engine, a fuel tank, " +
+        "[b][color=#ffb845]How designs work[/color][/b]\n" +
+        "The front of the vehicle faces the FRONT arrow. Every vehicle needs a driver seat, an engine, a fuel tank, " +
         "and wheels or tracks on the bottom row.\n" +
         "A gun is a breech with barrel segments in a line in front of it (the yellow arrow). Loaders and propellant must touch " +
         "the breech. Ammo racks must touch it too, or connect through ammo feeds, other racks or a turret ring.\n" +
         "Everything you build on top of a turret ring, connected to the block on top of it, turns as a turret.\n" +
-        "The pink dot is the center of mass. Red blocks aren't attached and will fall off.\n\n" +
-        "Tab: test drive    Ctrl+S: save    F1: close this help";
+        "The pink dot is the center of mass. Red blocks aren't attached and will fall off.";
 
     private void SetMirror(bool on)
     {
         _mirror = on;
-        if (_mirrorButton != null) _mirrorButton.Text = on ? "Mirror: ON (M)" : "Mirror: off (M)";
+        if (_mirrorButton == null) return;
+        _mirrorButton.SetPressedNoSignal(on);
+        _mirrorButton.Text = on ? "MIRROR ON" : "MIRROR OFF";
     }
 
     private void SetCategory(int i)
     {
         _category = i;
+        Sfx.Play2D(this, SoundId.Tick, -9f, 1.1f);
         RefreshPalette();
     }
 
     private void Select(BlockDef def)
     {
+        if (def != _selected) Sfx.Play2D(this, SoundId.Tick, -8f);
         _selected = def;
         _category = Array.IndexOf(BlockCatalog.Categories, def.Category);
         RefreshPalette();
@@ -721,121 +882,255 @@ public partial class Builder : Node3D
 
     private void RefreshPalette()
     {
-        foreach (Node n in _categoryBar.GetChildren()) n.QueueFree();
-        foreach (Node n in _blockBar.GetChildren()) n.QueueFree();
+        foreach (Node n in _categoryFlow.GetChildren()) n.QueueFree();
+        foreach (Node n in _tileGrid.GetChildren()) n.QueueFree();
 
         var catGroup = new ButtonGroup();
         for (int i = 0; i < BlockCatalog.Categories.Length; i++)
         {
             int idx = i;
-            Button b = Ui.Button(BlockCatalog.Categories[i], () => SetCategory(idx));
+            Button b = Ui.Button(BlockCatalog.Categories[i].ToUpperInvariant(), () => SetCategory(idx), "[ and ] switch category", "Pill");
             b.ToggleMode = true;
             b.ButtonGroup = catGroup;
-            b.ButtonPressed = i == _category;
-            _categoryBar.AddChild(b);
+            b.SetPressedNoSignal(i == _category);
+            _categoryFlow.AddChild(b);
         }
-
-        _categoryBar.AddChild(Ui.Label("    [ and ] switch category, 1-9 pick a block", 13, Ui.Dim));
 
         var group = new ButtonGroup();
         List<BlockDef> defs = BlockCatalog.InCategory(BlockCatalog.Categories[_category]);
         for (int i = 0; i < defs.Count; i++)
         {
             BlockDef d = defs[i];
-            Button b = Ui.Button($"{i + 1}  {d.Name}", () => Select(d), d.Description);
-            b.ToggleMode = true;
-            b.ButtonGroup = group;
-            b.ButtonPressed = d == _selected;
-            _blockBar.AddChild(b);
+            var tile = new Button
+            {
+                ToggleMode = true, ButtonGroup = group, ThemeTypeVariation = "Tile", FocusMode = Control.FocusModeEnum.None,
+                CustomMinimumSize = new Vector2(86, 106), TooltipText = d.Description,
+            };
+            tile.SetPressedNoSignal(d == _selected);
+            tile.Pressed += () => Select(d);
+
+            var icon = new TextureRect
+            {
+                Texture = PartIcons.Get(d), ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
+                StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered, MouseFilter = Control.MouseFilterEnum.Ignore,
+            };
+            tile.AddChild(icon);
+            icon.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
+            icon.OffsetLeft = 6;
+            icon.OffsetRight = -6;
+            icon.OffsetTop = 4;
+            icon.OffsetBottom = -32;
+
+            Label name = Ui.Label(d.Name, 12, d == _selected ? Ui.AccentBright : Ui.Text);
+            name.HorizontalAlignment = HorizontalAlignment.Center;
+            name.VerticalAlignment = VerticalAlignment.Center;
+            name.AutowrapMode = TextServer.AutowrapMode.WordSmart;
+            tile.AddChild(name);
+            name.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.BottomWide);
+            name.OffsetTop = -34;
+            name.OffsetBottom = -3;
+            name.OffsetLeft = 3;
+            name.OffsetRight = -3;
+
+            if (i < 9)
+            {
+                Label num = Ui.Caption((i + 1).ToString());
+                tile.AddChild(num);
+                num.Position = new Vector2(7, 4);
+            }
+
+            _tileGrid.AddChild(tile);
         }
 
-        _info.Text = BlockInfo(_selected);
+        BuildPartCard(_selected);
     }
 
-    private static string BlockInfo(BlockDef d)
+    private void BuildPartCard(BlockDef d)
     {
-        var sb = new StringBuilder();
-        sb.Append($"[b]{d.Name}[/b]   [color={Ui.Hex(Ui.Dim)}]{d.MassKg:0} kg · {d.Hp:0} HP · {d.ArmorMm:0} mm armor");
-        if (d.PowerKw > 0) sb.Append($" · {d.PowerKw:0} kW");
-        if (d.FuelL > 0) sb.Append($" · {d.FuelL:0} L");
+        foreach (Node n in _partCard.GetChildren()) n.QueueFree();
+        HBoxContainer head = Ui.Row(8);
+        head.AddChild(Ui.Heading(d.Name, Ui.AccentBright));
+        head.AddChild(Ui.Spacer());
+        head.AddChild(Ui.Caption(d.Category));
+        _partCard.AddChild(head);
+        _partCard.AddChild(Ui.Wrapped(d.Description, 14, Ui.Dim));
+
+        var chips = new HFlowContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
+        chips.AddThemeConstantOverride("h_separation", 5);
+        chips.AddThemeConstantOverride("v_separation", 5);
+        chips.AddChild(Ui.Chip("Mass", $"{d.MassKg:0} kg"));
+        chips.AddChild(Ui.Chip("HP", $"{d.Hp:0}"));
+        chips.AddChild(Ui.Chip("Armor", $"{d.ArmorMm:0} mm"));
+        if (d.PowerKw > 0) chips.AddChild(Ui.Chip("Power", $"{d.PowerKw:0} kW", Ui.Accent));
+        if (d.FuelL > 0) chips.AddChild(Ui.Chip("Fuel", $"{d.FuelL:0} L"));
         if (d.Breech != null)
-            sb.Append($" · {d.Breech.CaliberMm:0} mm, {d.Breech.ReloadS:0.0} s base reload, {d.Breech.BasePenMm:0} mm base penetration");
-        if (d.AmmoUnits > 0) sb.Append($" · holds {d.AmmoUnits} units (37 mm shell = 1, 76 mm = 4, 120 mm = 8)");
-        if (d.HeVulnerability > 1) sb.Append(" · weak to HE");
-        sb.Append("[/color]\n").Append(d.Description);
-        return sb.ToString();
+        {
+            chips.AddChild(Ui.Chip("Caliber", $"{d.Breech.CaliberMm:0} mm", Ui.Accent));
+            chips.AddChild(Ui.Chip("Reload", $"{d.Breech.ReloadS:0.0} s"));
+            chips.AddChild(Ui.Chip("Base pen", $"{d.Breech.BasePenMm:0} mm"));
+        }
+
+        if (d.AmmoUnits > 0) chips.AddChild(Ui.Chip("Holds", $"{d.AmmoUnits} units"));
+        if (d.HeVulnerability > 1) chips.AddChild(Ui.Chip("Weak to", "HE", Ui.Warn));
+        if (d.DeathExplosionDamage > 0 || d.Kind == BlockKind.AmmoRack) chips.AddChild(Ui.Chip(null, "Explodes", Ui.Bad));
+        _partCard.AddChild(chips);
+        if (d.AmmoUnits > 0) _partCard.AddChild(Ui.Small("One 37 mm shell takes 1 unit, 76 mm takes 4, 120 mm takes 8."));
     }
 
-    private static string Line(Color c, string text) => $"[color={Ui.Hex(c)}]{text}[/color]\n";
+    // ---------- UI: dashboard ----------
 
-    private static string Armor(string label, ArmorProfile p) =>
-        p.Samples == 0
-            ? $"{label}  -\n"
-            : $"{label}  [b]{p.AvgMm:0}[/b] mm   [color={Ui.Hex(Ui.Dim)}](weakest spot {p.MinMm:0})[/color]\n";
-
-    private string StatsText(VehicleAnalysis a)
+    private static Control StatTile(string caption, string value, string unit, Color color)
     {
-        var sb = new StringBuilder();
-        sb.Append($"[b][font_size=17]{_name}[/font_size][/b]\n");
-        sb.Append($"{a.Cells.Count} blocks · [b]{a.MassKg / 1000f:0.0} t[/b]\n");
-        sb.Append($"Engines {a.PowerKw:0} kW · [b]{a.PowerToWeight:0.0}[/b] kW/t\n");
-        sb.Append($"Top speed about [b]{a.TopSpeedKmh:0} km/h[/b] · fuel {a.FuelL:0} L\n");
-        if (a.Wheels.Count > 0) sb.Append($"Tips over at about [b]{a.TipAngleDeg:0}°[/b]\n");
+        PanelContainer card = Ui.Card();
+        card.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+        VBoxContainer col = Ui.Column(0);
+        card.AddChild(col);
+        col.AddChild(Ui.Caption(caption));
+        HBoxContainer row = Ui.Row(4);
+        row.AddChild(Ui.Value(value, color));
+        Label u = Ui.Small(unit);
+        u.SizeFlagsVertical = Control.SizeFlags.ShrinkEnd;
+        row.AddChild(u);
+        col.AddChild(row);
+        return card;
+    }
 
-        sb.Append("\n[b][color=#ffc74d]Armor[/color][/b]  [color=" + Ui.Hex(Ui.Dim) + "](what a shell must get through to reach the insides)[/color]\n");
-        sb.Append(Armor("Front", a.Front));
-        sb.Append(Armor("Sides", a.LeftSide.AvgMm <= a.RightSide.AvgMm ? a.LeftSide : a.RightSide));
-        sb.Append(Armor("Rear ", a.Rear));
-        sb.Append(Armor("Top  ", a.Top));
+    private static Control ArmorRow(string side, ArmorProfile p)
+    {
+        HBoxContainer row = Ui.Row(8);
+        Label name = Ui.Small(side);
+        name.CustomMinimumSize = new Vector2(48, 0);
+        row.AddChild(name);
+        var bar = new StatBar();
+        if (p.Samples > 0) bar.Set(p.AvgMm, 200f, Ui.Grade(p.AvgMm, 40, 90), p.MinMm);
+        row.AddChild(bar);
+        Label v = Ui.Label(p.Samples > 0 ? $"{p.AvgMm:0} mm" : "-", 14);
+        v.AddThemeFontOverride("font", Ui.BodyBoldFont);
+        v.CustomMinimumSize = new Vector2(62, 0);
+        v.HorizontalAlignment = HorizontalAlignment.Right;
+        row.AddChild(v);
+        return row;
+    }
+
+    private static HFlowContainer ChipFlow()
+    {
+        var f = new HFlowContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
+        f.AddThemeConstantOverride("h_separation", 5);
+        f.AddThemeConstantOverride("v_separation", 5);
+        return f;
+    }
+
+    private void RebuildDashboard(VehicleAnalysis a)
+    {
+        foreach (Node n in _dash.GetChildren()) n.QueueFree();
+
+        HBoxContainer head = Ui.Row(8);
+        Label title = Ui.Title(_name);
+        title.ClipText = true;
+        title.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+        head.AddChild(title);
+        int errors = a.ErrorCount, warnings = a.Warnings.Count(w => w.Severity == Severity.Warning);
+        if (a.Cells.Count == 0) head.AddChild(Ui.Chip(null, "EMPTY", Ui.Dim));
+        else if (errors > 0) head.AddChild(Ui.Chip(null, $"{errors} TO FIX", Ui.Bad));
+        else if (warnings > 0) head.AddChild(Ui.Chip(null, "DRIVABLE", Ui.Warn));
+        else head.AddChild(Ui.Chip(null, "READY", Ui.Good));
+        _dash.AddChild(head);
+
+        var grid = new GridContainer { Columns = 2, MouseFilter = Control.MouseFilterEnum.Ignore };
+        grid.AddThemeConstantOverride("h_separation", 6);
+        grid.AddThemeConstantOverride("v_separation", 6);
+        grid.AddChild(StatTile("Mass", $"{a.MassKg / 1000f:0.0}", "t", Ui.Text));
+        grid.AddChild(StatTile("Top speed", $"{a.TopSpeedKmh:0}", "km/h", Ui.Grade(a.TopSpeedKmh, 20, 35)));
+        grid.AddChild(StatTile("Power", $"{a.PowerToWeight:0.0}", "kW/t", Ui.Grade(a.PowerToWeight, 8, 12)));
+        grid.AddChild(a.Wheels.Count > 0
+            ? StatTile("Tips over at", $"{a.TipAngleDeg:0}", "°", Ui.Grade(a.TipAngleDeg, 30, 40))
+            : StatTile("Tips over at", "-", "", Ui.Dim));
+        grid.AddChild(StatTile("Fuel", $"{a.FuelL:0}", "L", a.FuelL > 0 ? Ui.Text : Ui.Bad));
+        grid.AddChild(StatTile("Blocks", $"{a.Cells.Count}", "", Ui.Text));
+        _dash.AddChild(grid);
+
+        _dash.AddChild(Ui.Section("Armor"));
+        _dash.AddChild(Ui.Small("How much armor a shell must get through to reach the insides. The tick is the weakest spot."));
+        VBoxContainer armor = Ui.Column(5);
+        armor.AddChild(ArmorRow("Front", a.Front));
+        armor.AddChild(ArmorRow("Sides", a.LeftSide.AvgMm <= a.RightSide.AvgMm ? a.LeftSide : a.RightSide));
+        armor.AddChild(ArmorRow("Rear", a.Rear));
+        armor.AddChild(ArmorRow("Top", a.Top));
+        _dash.AddChild(armor);
 
         if (a.Guns.Count > 0)
         {
-            sb.Append("\n[b][color=#ffc74d]Guns[/color][/b]\n");
+            _dash.AddChild(Ui.Section("Weapons"));
             foreach (GunInfo g in a.Guns)
             {
-                string mount = g.Section == 0 ? "fixed in hull" : "turret";
+                PanelContainer card = Ui.Card();
+                VBoxContainer col = Ui.Column(6);
+                card.AddChild(col);
+                HBoxContainer top = Ui.Row(8);
+                top.AddChild(Ui.Heading(g.Label));
+                top.AddChild(Ui.Spacer());
+                top.AddChild(Ui.Caption(g.Section == 0 ? "Fixed in hull" : "Turret"));
+                col.AddChild(top);
                 if (!g.Valid)
                 {
-                    sb.Append(Line(Ui.Bad, $"{g.Label} breech: not a working gun yet"));
+                    col.AddChild(Ui.Wrapped("Not a working gun yet: it needs barrel segments in front of the breech.", 14, Ui.Bad));
+                    _dash.AddChild(card);
                     continue;
                 }
 
                 GunStats s = g.Stats;
-                float v500 = GunMath.SpeedAtRange(s.MuzzleVelocity, s.DragK, 500);
-                sb.Append($"[b]{g.Label}[/b] · {mount} · {g.Barrels.Count} barrel{(g.Barrels.Count == 1 ? "" : "s")}" +
-                          $"{(g.Brake.HasValue ? " + brake" : "")}\n");
-                sb.Append($"  {s.MuzzleVelocity:0} m/s · AP pen [b]{s.ApPenMm:0}[/b] mm ({GunMath.PenAtSpeed(g.BreechDef.Breech, v500):0} at 500 m)\n");
-                sb.Append($"  Reload {s.ReloadS:0.0} s · {g.Loaders} loader{(g.Loaders == 1 ? "" : "s")} · {g.Propellants} propellant\n");
-                sb.Append($"  Ammo: [b]{g.ApRounds}[/b] AP · [b]{g.HeRounds}[/b] HE\n");
+                float pen500 = GunMath.PenAtSpeed(g.BreechDef.Breech, GunMath.SpeedAtRange(s.MuzzleVelocity, s.DragK, 500));
+                col.AddChild(Ui.Small($"{g.Barrels.Count} barrel{(g.Barrels.Count == 1 ? "" : "s")}{(g.Brake.HasValue ? " + brake" : "")} · " +
+                                      $"{g.Loaders} loader{(g.Loaders == 1 ? "" : "s")} · {g.Propellants} propellant"));
+                HFlowContainer chips = ChipFlow();
+                chips.AddChild(Ui.Chip("Pen", $"{s.ApPenMm:0} mm", Ui.Accent));
+                chips.AddChild(Ui.Chip("At 500 m", $"{pen500:0} mm"));
+                chips.AddChild(Ui.Chip("Speed", $"{s.MuzzleVelocity:0} m/s"));
+                chips.AddChild(Ui.Chip("Reload", $"{s.ReloadS:0.0} s"));
+                chips.AddChild(Ui.Chip("AP", $"{g.ApRounds}", g.ApRounds > 0 ? Ui.Text : Ui.Bad));
+                chips.AddChild(Ui.Chip("HE", $"{g.HeRounds}", g.HeRounds > 0 ? Ui.Text : Ui.Dim));
+                col.AddChild(chips);
+                _dash.AddChild(card);
             }
         }
 
-        foreach (TurretInfo t in a.Turrets)
-            sb.Append($"\nTurret: {t.Blocks} blocks · {t.MassKg / 1000f:0.0} t · turns {t.TraverseDegPerSec:0}°/s\n");
-
-        if (a.Warnings.Count > 0)
+        if (a.Turrets.Count > 0)
         {
-            sb.Append("\n[b][color=#ffc74d]Problems[/color][/b]\n");
-            foreach (DesignWarning w in a.Warnings.OrderBy(w => w.Severity))
+            _dash.AddChild(Ui.Section("Turrets"));
+            for (int i = 0; i < a.Turrets.Count; i++)
             {
-                Color c = w.Severity switch { Severity.Error => Ui.Bad, Severity.Warning => Ui.Warn, _ => Ui.Dim };
-                string tag = w.Severity switch { Severity.Error => "Must fix: ", Severity.Warning => "", _ => "" };
-                sb.Append(Line(c, "- " + tag + w.Text));
+                TurretInfo t = a.Turrets[i];
+                _dash.AddChild(Ui.Small($"Turret {i + 1}: {t.Blocks} blocks · {t.MassKg / 1000f:0.0} t · turns {t.TraverseDegPerSec:0}°/s"));
             }
         }
-        else
+
+        _dash.AddChild(Ui.Section("Problems"));
+        if (a.Warnings.Count == 0)
         {
-            sb.Append("\n" + Line(Ui.Good, "Ready to drive. Press Tab."));
+            _dash.AddChild(Ui.Wrapped("None. Ready to drive: press Tab.", 14, Ui.Good));
+            return;
         }
 
-        return sb.ToString();
+        foreach (DesignWarning w in a.Warnings.OrderBy(w => w.Severity))
+        {
+            Color c = w.Severity switch { Severity.Error => Ui.Bad, Severity.Warning => Ui.Warn, _ => Ui.Info };
+            HBoxContainer row = Ui.Row(8);
+            row.AddChild(new ColorRect { Color = c, CustomMinimumSize = new Vector2(3, 0), SizeFlagsVertical = Control.SizeFlags.Fill });
+            Label text = Ui.Wrapped(w.Text, 14, w.Severity == Severity.Info ? Ui.Dim : Ui.Text);
+            text.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+            row.AddChild(text);
+            _dash.AddChild(row);
+        }
     }
+
+    // ---------- Actions ----------
 
     private void Toast(string text)
     {
         if (_toast == null) return;
-        _toast.Text = text;
+        _toastLabel.Text = text;
         _toastTime = 4f;
+        _toast.Visible = true;
         _toast.Modulate = Colors.White;
     }
 
@@ -862,11 +1157,13 @@ public partial class Builder : Node3D
         if (f == null)
         {
             Toast($"Couldn't save: {FileAccess.GetOpenError()}");
+            Sfx.Play2D(this, SoundId.Error, -8f);
             return;
         }
 
         f.StoreString(CurrentBlueprint().ToJson());
-        Toast($"Saved \"{_name}\". (Folder button opens the blueprints folder.)");
+        Sfx.Play2D(this, SoundId.Reload, -8f);
+        Toast($"Saved \"{_name}\". The Folder button opens your blueprints.");
     }
 
     private void OpenFolder()
@@ -880,13 +1177,14 @@ public partial class Builder : Node3D
         PopupMenu menu = _loadButton.GetPopup();
         menu.Clear();
         _loadActions.Clear();
+        menu.AddSeparator("Examples");
         foreach (Blueprint ex in ExampleDesigns.All)
         {
             Blueprint copy = ex;
-            menu.AddItem("Example: " + ex.Name, _loadActions.Count);
+            menu.AddItem(ex.Name, _loadActions.Count);
             _loadActions.Add(() =>
             {
-                LoadBlueprint(copy);
+                LoadBlueprint(copy, animate: true);
                 Toast($"Loaded example \"{copy.Name}\". Undo (Ctrl+Z) to go back.");
             });
         }
@@ -908,12 +1206,13 @@ public partial class Builder : Node3D
         {
             var problems = new List<string>();
             Blueprint bp = Blueprint.FromJson(FileAccess.GetFileAsString(path), problems);
-            LoadBlueprint(bp);
+            LoadBlueprint(bp, animate: true);
             Toast(problems.Count > 0 ? string.Join(" ", problems) : $"Loaded \"{bp.Name}\".");
         }
         catch (FormatException e)
         {
             Toast(e.Message);
+            Sfx.Play2D(this, SoundId.Error, -8f);
         }
     }
 
@@ -925,6 +1224,7 @@ public partial class Builder : Node3D
         if (!a.CanDrive || a.ErrorCount > 0)
         {
             Toast("Can't drive yet: " + (firstError.Text ?? "it needs a driver seat, engine, fuel and wheels."));
+            Sfx.Play2D(this, SoundId.Error, -6f);
             return;
         }
 

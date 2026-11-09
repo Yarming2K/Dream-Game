@@ -3,32 +3,10 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using DreamGame.Core;
+using DreamGame.Game.Audio;
 using Godot;
 
 namespace DreamGame.Game;
-
-/// <summary>Draws the crosshair and where each gun will actually hit.</summary>
-public partial class ReticleOverlay : Control
-{
-    public readonly List<(Vector2 pos, bool ready)> Marks = new();
-
-    public override void _Draw()
-    {
-        Vector2 c = Size / 2f;
-        var col = new Color(1, 1, 1, 0.85f);
-        const float gap = 6f, len = 10f;
-        DrawLine(c + new Vector2(-gap - len, 0), c + new Vector2(-gap, 0), col, 2f);
-        DrawLine(c + new Vector2(gap, 0), c + new Vector2(gap + len, 0), col, 2f);
-        DrawLine(c + new Vector2(0, -gap - len), c + new Vector2(0, -gap), col, 2f);
-        DrawLine(c + new Vector2(0, gap), c + new Vector2(0, gap + len), col, 2f);
-        foreach ((Vector2 pos, bool ready) in Marks)
-        {
-            Color m = ready ? new Color(0.45f, 1f, 0.5f, 0.95f) : new Color(1f, 0.6f, 0.3f, 0.9f);
-            DrawArc(pos, 9f, 0, Mathf.Tau, 28, m, 2f);
-            DrawCircle(pos, 1.6f, m);
-        }
-    }
-}
 
 /// <summary>
 /// The test range: drive your design, shoot armor walls, a bunker and parked vehicles, and see exactly
@@ -53,6 +31,7 @@ public partial class TestRange : Node3D
     private float _dist = 13f;
     private bool _zoom;
     private bool _holdFire;
+    private float _lastKick;
     private readonly List<(Vector3 point, bool ready)> _impacts = new();
 
     private RichTextLabel _status;
@@ -65,10 +44,28 @@ public partial class TestRange : Node3D
     private ReticleOverlay _reticle;
     private readonly List<(string text, float age)> _feedLines = new();
 
+    // Camera feel
+    private float _trauma;
+    private float _fovKick;
+    private float _shakeTime;
+    private readonly FastNoiseLite _shakeNoise = new() { Frequency = 2.2f, Seed = 9 };
+
+    private sealed class GunRow
+    {
+        public VehicleBody.GunRt Gun;
+        public Label State;
+        public Label Ammo;
+        public StatBar Reload;
+    }
+
+    private VBoxContainer _gunList;
+    private readonly List<GunRow> _gunRows = new();
+
     public void Setup(Blueprint bp) => _bp = bp;
 
     public override void _Ready()
     {
+        Sfx.Prewarm();
         Scenery.AddSkyAndSun(this, true);
         AddChild(Terrain.Build());
         AddRamps();
@@ -76,6 +73,7 @@ public partial class TestRange : Node3D
         _combat = new Combat { Name = "Combat" };
         AddChild(_combat);
         _combat.Event += OnCombatEvent;
+        _combat.Blast += OnBlast;
 
         _pivot = new Node3D { Name = "CameraPivot" };
         AddChild(_pivot);
@@ -182,7 +180,9 @@ public partial class TestRange : Node3D
         var where = new Transform3D(Basis.Identity, SpawnPoint + Vector3.Up * VehicleBody.SpawnHeight(a));
         _player = VehicleBody.Create(_bp, where, true);
         _player.Status += Big;
+        _player.Fired += OnFired;
         AddChild(_player);
+        BuildGunRows();
         _arm.ClearExcludedObjects();
         _arm.AddExcludedObject(_player.GetRid());
         _pivot.GlobalPosition = where.Origin + Vector3.Up * 2f;
@@ -259,7 +259,20 @@ public partial class TestRange : Node3D
 
         _pivot.Rotation = new Vector3(_pitch, _yaw, 0);
         _arm.SpringLength = _zoom ? Mathf.Min(_dist, 8f) : _dist;
-        _cam.Fov = Mathf.Lerp(_cam.Fov, _zoom ? 18f : 70f, Mathf.Min(1f, dt * 10f));
+
+        // Shake comes from "trauma" that fades; squaring it keeps small bumps subtle and big blasts violent.
+        _trauma = Mathf.Max(0, _trauma - dt * 1.4f);
+        _fovKick = Mathf.Max(0, _fovKick - dt * 22f);
+        _shakeTime += dt;
+        float shake = _trauma * _trauma * (_zoom ? 0.35f : 1f);
+        float n1 = _shakeNoise.GetNoise2D(_shakeTime * 60f, 0), n2 = _shakeNoise.GetNoise2D(0, _shakeTime * 60f);
+        float n3 = _shakeNoise.GetNoise2D(_shakeTime * 60f, 100f);
+        _cam.HOffset = n1 * 0.35f * shake;
+        _cam.VOffset = n2 * 0.35f * shake;
+        _cam.Rotation = new Vector3(n2 * 0.03f * shake, n1 * 0.03f * shake, n3 * 0.05f * shake);
+        float baseFov = Mathf.Lerp(_cam.Fov - _lastKick, _zoom ? 18f : 70f, Mathf.Min(1f, dt * 10f));
+        _lastKick = _fovKick * (_zoom ? 0.3f : 1f);
+        _cam.Fov = baseFov + _lastKick;
         UpdateHud(dt);
     }
 
@@ -331,9 +344,13 @@ public partial class TestRange : Node3D
         gunPanel.GrowHorizontal = Control.GrowDirection.Both;
         gunPanel.GrowVertical = Control.GrowDirection.Begin;
         gunPanel.OffsetBottom = -12;
+        var gunCol = Ui.Column(6);
+        gunPanel.AddChild(gunCol);
         _guns = Ui.Rich();
         _guns.CustomMinimumSize = new Vector2(480, 0);
-        gunPanel.AddChild(_guns);
+        gunCol.AddChild(_guns);
+        _gunList = Ui.Column(4);
+        gunCol.AddChild(_gunList);
 
         var feedPanel = new PanelContainer();
         root.AddChild(feedPanel);
@@ -428,6 +445,7 @@ public partial class TestRange : Node3D
             return;
         }
 
+        _reticle.HitFlash = Mathf.Max(0, _reticle.HitFlash - dt * 3f);
         foreach ((Vector3 p, bool ready) in _impacts)
             if (!_cam.IsPositionBehind(p)) _reticle.Marks.Add((_cam.UnprojectPosition(p), ready));
         _reticle.QueueRedraw();
@@ -447,23 +465,74 @@ public partial class TestRange : Node3D
         bool ap = _player.SelectedAmmo == AmmoType.AP;
         gs.Append($"Ammo: {(ap ? "[b][color=#ffc74d][AP][/color][/b]  HE" : "AP  [b][color=#ffc74d][HE][/color][/b]")}   [color={Ui.Hex(Ui.Dim)}](Q switches)[/color]\n");
         if (_player.Guns.Count == 0) gs.Append($"[color={Ui.Hex(Ui.Dim)}]No guns on this design.[/color]");
+        _guns.Text = gs.ToString().TrimEnd('\n');
+
+        foreach (GunRow row in _gunRows)
+        {
+            VehicleBody.GunRt g = row.Gun;
+            int apRounds = _player.Rounds(g, AmmoType.AP), heRounds = _player.Rounds(g, AmmoType.HE);
+            if (!g.Alive) Paint(row.State, "DESTROYED", Ui.Bad);
+            else if (apRounds + heRounds == 0) Paint(row.State, "OUT OF AMMO", Ui.Bad);
+            else if (g.ReloadLeft > 0) Paint(row.State, $"RELOADING {g.ReloadLeft:0.0}s", Ui.Warn);
+            else Paint(row.State, "READY", Ui.Good);
+            float progress = g.Alive ? 1f - g.ReloadLeft / Mathf.Max(g.Stats.ReloadS, 0.01f) : 0f;
+            row.Reload.Set(progress, 1f, g.ReloadLeft > 0 ? Ui.Warn : Ui.Good);
+            row.Ammo.Text = $"AP {apRounds}   HE {heRounds}   ·   {g.Stats.ApPenMm:0} mm pen";
+        }
+    }
+
+    private static void Paint(Label l, string text, Color c)
+    {
+        l.Text = text;
+        l.AddThemeColorOverride("font_color", c);
+    }
+
+    private void BuildGunRows()
+    {
+        foreach (Node n in _gunList.GetChildren()) n.QueueFree();
+        _gunRows.Clear();
         foreach (VehicleBody.GunRt g in _player.Guns)
         {
-            int apRounds = _player.Rounds(g, AmmoType.AP), heRounds = _player.Rounds(g, AmmoType.HE);
-            string state;
-            if (!g.Alive) state = $"[color={Ui.Hex(Ui.Bad)}]destroyed[/color]";
-            else if (apRounds + heRounds == 0) state = $"[color={Ui.Hex(Ui.Bad)}]out of ammo[/color]";
-            else if (g.ReloadLeft > 0) state = $"[color={Ui.Hex(Ui.Warn)}]reloading {g.ReloadLeft:0.0} s[/color]";
-            else state = $"[color={Ui.Hex(Ui.Good)}]READY[/color]";
-            gs.Append($"[b]{g.Label}[/b]  {state}   AP {apRounds} · HE {heRounds}   [color={Ui.Hex(Ui.Dim)}]{g.Stats.ApPenMm:0} mm pen[/color]\n");
+            PanelContainer card = Ui.Card();
+            VBoxContainer col = Ui.Column(4);
+            card.AddChild(col);
+            HBoxContainer top = Ui.Row(10);
+            col.AddChild(top);
+            top.AddChild(Ui.Heading(g.Label));
+            var row = new GunRow { Gun = g, State = Ui.Caption("READY", Ui.Good), Ammo = Ui.Small(""), Reload = new StatBar() };
+            top.AddChild(row.State);
+            top.AddChild(Ui.Spacer());
+            top.AddChild(row.Ammo);
+            col.AddChild(row.Reload);
+            _gunList.AddChild(card);
+            _gunRows.Add(row);
         }
+    }
 
-        _guns.Text = gs.ToString().TrimEnd('\n');
+    private void OnFired(VehicleBody.GunRt g)
+    {
+        float c = g.Stats.CaliberMm;
+        _trauma = Mathf.Min(1f, _trauma + 0.22f + c / 450f);
+        _fovKick += 2f + c / 28f;
+    }
+
+    private void OnBlast(Vector3 pos, float radius, float damage)
+    {
+        float d = _cam.GlobalPosition.DistanceTo(pos);
+        float reach = Mathf.Max(radius * 18f, 12f);
+        float k = Mathf.Clamp(damage / 450f, 0.15f, 1.2f) * Mathf.Clamp(1f - d / reach, 0, 1);
+        _trauma = Mathf.Min(1f, _trauma + k * 0.75f);
     }
 
     private void OnCombatEvent(CombatEvent e)
     {
         if (!e.ByPlayer) return;
+        if (e.Report.Kind == HitKind.Penetration || e.BlocksDestroyed > 0)
+        {
+            _reticle.HitFlash = 1f;
+            Sfx.Play2D(this, SoundId.Tick, -6f, 1.35f);
+        }
+
         HitReport r = e.Report;
         string destroyed = e.BlocksDestroyed > 0 ? $"  · {e.BlocksDestroyed} destroyed" : "";
         (string word, string line, Color c) = r.Kind switch

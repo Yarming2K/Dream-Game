@@ -35,7 +35,7 @@ public partial class Combat : Node3D
         public bool ByPlayer;
         public bool HitSomething;
         public float Age;
-        public MeshInstance3D Tracer;
+        public TracerFx Tracer;
     }
 
     private struct PendingBlast
@@ -53,9 +53,13 @@ public partial class Combat : Node3D
     private readonly List<OrderedHit> _hits = new();
     private readonly List<RayCellHit> _cellHits = new();
     private readonly Dictionary<OrderedHit, Vector3> _hitPoints = new(new HitComparer());
+    private readonly Dictionary<OrderedHit, Vector3> _hitNormals = new(new HitComparer());
     private readonly RandomNumberGenerator _rng = new();
 
     public event Action<CombatEvent> Event;
+
+    /// <summary>Every explosion (position, radius, damage), for camera shake.</summary>
+    public event Action<Vector3, float, float> Blast;
 
     public override void _EnterTree() => Instance = this;
 
@@ -104,7 +108,7 @@ public partial class Combat : Node3D
 
             if (done)
             {
-                if (IsInstanceValid(p.Tracer)) p.Tracer.QueueFree();
+                Effects.EndTracer(p.Tracer);
                 _shells.RemoveAt(i);
             }
         }
@@ -143,8 +147,11 @@ public partial class Combat : Node3D
                 p.HitSomething = true;
                 if (reports.Count > 0)
                 {
-                    Vector3 at = _hitPoints[damaged[0].Item1];
-                    Effects.Impact(this, at, -dir, reports[0].Kind);
+                    OrderedHit first = damaged[0].Item1;
+                    Vector3 at = _hitPoints[first];
+                    var firstHost = (IGridHost)first.Owner;
+                    Node3D surface = IsInstanceValid(firstHost.Body) ? firstHost.View.SectionNode(first.Block.Section) : null;
+                    Effects.Impact(this, at, _hitNormals[first], dir, reports[0].Kind, p.Shell.CaliberMm, surface);
                     Event?.Invoke(new CombatEvent
                     {
                         Report = reports[0], Position = at, ByPlayer = p.ByPlayer, BlocksHit = reports.Count,
@@ -152,13 +159,13 @@ public partial class Combat : Node3D
                     });
                 }
 
-                ApplyDestruction(damaged.Where(d => d.Item2).Select(d => d.Item1), from, dir * p.Shell.CaliberMm * 2f);
+                ApplyDestruction(damaged.Where(d => d.Item2).Select(d => d.Item1), from, dir * p.Shell.CaliberMm * 0.05f);
                 if (stop >= 0) return true;
             }
 
             if (terrainT < float.PositiveInfinity)
             {
-                Effects.Dust(this, terrainPos, terrainNormal, p.Shell.CaliberMm);
+                Effects.Dirt(this, terrainPos, terrainNormal, p.Shell.CaliberMm);
                 return true;
             }
 
@@ -190,6 +197,7 @@ public partial class Combat : Node3D
     {
         _hits.Clear();
         _hitPoints.Clear();
+        _hitNormals.Clear();
         foreach (IGridHost h in GridRegistry.Hosts.ToArray())
         {
             if (!IsInstanceValid(h.Body)) continue;
@@ -217,6 +225,7 @@ public partial class Combat : Node3D
                     };
                     _hits.Add(oh);
                     _hitPoints[oh] = from + dir * oh.DistanceM;
+                    _hitNormals[oh] = normal;
                 }
             }
         }
@@ -228,6 +237,7 @@ public partial class Combat : Node3D
     public void Explode(Vector3 center, float radius, float damage, bool byPlayer, string cause)
     {
         Effects.Explosion(this, center, radius);
+        Blast?.Invoke(center, radius, damage);
         var destroyedAll = new List<OrderedHit>();
         int hurtCount = 0;
         foreach (IGridHost h in GridRegistry.Hosts.ToArray())
@@ -258,14 +268,15 @@ public partial class Combat : Node3D
                 Report = new HitReport { Kind = HitKind.Explosion, BlockName = cause, Damage = damage, Destroyed = destroyedAll.Count > 0 },
                 Position = center, ByPlayer = byPlayer, BlocksHit = hurtCount, BlocksDestroyed = destroyedAll.Count,
             });
-        ApplyDestruction(destroyedAll, center, Vector3.Zero, byPlayer);
+        ApplyDestruction(destroyedAll, center, Vector3.Zero, byPlayer, damage);
     }
 
     /// <summary>
     /// Removes destroyed blocks, queues secondary explosions from ammo and fuel, and turns anything that's
     /// no longer attached into debris.
     /// </summary>
-    private void ApplyDestruction(IEnumerable<OrderedHit> destroyed, Vector3 source, Vector3 push, bool byPlayer = true)
+    private void ApplyDestruction(IEnumerable<OrderedHit> destroyed, Vector3 source, Vector3 push, bool byPlayer = true,
+        float blastDamage = 0f)
     {
         var byHost = new Dictionary<IGridHost, List<BlockInstance>>();
         foreach (OrderedHit d in destroyed)
@@ -292,12 +303,12 @@ public partial class Combat : Node3D
                         b.Def.Kind == BlockKind.FuelTank ? "Fuel tank" : "Propellant");
                 }
 
-                Effects.Shatter(this, at, b.Def);
+                Effects.Shatter(this, at, b.Def, host.VelocityAt(at), (at - source).Normalized());
                 host.Model.Remove(b);
                 host.View.RemoveBlock(b);
             }
 
-            SplitOff(host, source, push);
+            SplitOff(host, source, push, blastDamage);
             host.OnBlocksRemoved();
         }
     }
@@ -327,7 +338,7 @@ public partial class Combat : Node3D
     }
 
     /// <summary>Turns pieces that lost their connection into separate physics bodies.</summary>
-    private void SplitOff(IGridHost host, Vector3 source, Vector3 push)
+    private void SplitOff(IGridHost host, Vector3 source, Vector3 push, float blastDamage)
     {
         List<List<BlockInstance>> pieces = Connectivity.FindDetached(host.Model, host.Keep);
         Node parent = GetParent();
@@ -348,8 +359,13 @@ public partial class Combat : Node3D
                 Vector3 centerW = xf * model.CenterOfMass().G();
                 Vector3 vel = host.VelocityAt(centerW);
                 Vector3 away = (centerW - source).Normalized();
-                vel += away * _rng.RandfRange(1.5f, 4f) + push.LimitLength(6f) / Mathf.Max(model.TotalMassKg() / 200f, 1f);
-                var spin = new Vector3(_rng.RandfRange(-2, 2), _rng.RandfRange(-2, 2), _rng.RandfRange(-2, 2));
+                // Big blasts (ammo cooking off) throw pieces hard: this is what tosses turrets into the air.
+                float blast = Mathf.Clamp(blastDamage / 120f, 0f, 4.5f);
+                vel += away * _rng.RandfRange(1.5f, 4f) * (1f + blast) + Vector3.Up * blast * 2.2f +
+                       push.LimitLength(6f) / Mathf.Max(model.TotalMassKg() / 200f, 1f);
+                vel = vel.LimitLength(28f);
+                float spinAmount = 2f + blast * 1.5f;
+                var spin = new Vector3(_rng.RandfRange(-1, 1), _rng.RandfRange(-1, 1), _rng.RandfRange(-1, 1)) * spinAmount;
 
                 foreach (BlockInstance b in group)
                 {
@@ -365,8 +381,7 @@ public partial class Combat : Node3D
     /// <summary>Clears every shell and pending explosion (used when the range resets).</summary>
     public void Clear()
     {
-        foreach (Projectile p in _shells)
-            if (IsInstanceValid(p.Tracer)) p.Tracer.QueueFree();
+        foreach (Projectile p in _shells) Effects.EndTracer(p.Tracer);
         _shells.Clear();
         _blasts.Clear();
     }

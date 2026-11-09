@@ -10,6 +10,8 @@
   <ItemGroup>
     <!-- The core rules are plain C#, compiled straight from the game's source folder. -->
     <Compile Include="../../src/Core/**/*.cs" Link="Core/%(RecursiveDir)%(Filename)%(Extension)" />
+    <!-- The sound synthesizer is plain C# too, so it can be checked here. -->
+    <Compile Include="../../src/Game/Audio/Synth.cs" Link="Audio/Synth.cs" />
   </ItemGroup>
 
   <ItemGroup>

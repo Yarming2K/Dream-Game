@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using DreamGame.Core;
+using DreamGame.Game.Audio;
 using Godot;
 
 namespace DreamGame.Game;
@@ -89,6 +90,9 @@ public partial class VehicleBody : RigidBody3D, IGridHost
     /// <summary>Raised for big moments: "Driver knocked out!", "Engine destroyed", ...</summary>
     public event Action<string> Status;
 
+    /// <summary>Raised each time a gun fires (camera kick, HUD).</summary>
+    public event Action<GunRt> Fired;
+
     private float _crr;
     private float _governor;
     private float _k;
@@ -96,6 +100,7 @@ public partial class VehicleBody : RigidBody3D, IGridHost
     private float _yawInertia;
     private bool _hadEngine = true;
     private readonly RandomNumberGenerator _rng = new();
+    private AudioStreamPlayer3D _engineSound;
 
     public static VehicleBody Create(Blueprint bp, Transform3D where, bool player)
     {
@@ -144,6 +149,32 @@ public partial class VehicleBody : RigidBody3D, IGridHost
     }
 
     public override void _EnterTree() => GridRegistry.Add(this);
+
+    public override void _Ready()
+    {
+        if (!PlayerControlled) return;
+        _engineSound = Sfx.Loop(this, SoundId.Engine, -14f);
+        BlockInstance engine = Model.Blocks.Values.FirstOrDefault(b => b.Def.Kind == BlockKind.Engine);
+        if (engine != null) _engineSound.Position = Conv.CellPos(engine.Cell);
+    }
+
+    /// <summary>Engine note rises with speed and load, and cuts out when the engine can't run.</summary>
+    private void UpdateEngineSound()
+    {
+        if (_engineSound == null) return;
+        if (!CanDrive)
+        {
+            if (_engineSound.Playing) _engineSound.Stop();
+            return;
+        }
+
+        if (!_engineSound.Playing) _engineSound.Play();
+        float load = Mathf.Max(Mathf.Abs(Throttle), Mathf.Abs(Steer) * 0.6f);
+        float rev = Mathf.Clamp(Mathf.Abs(SpeedKmh / 3.6f) / Mathf.Max(_governor, 1f), 0, 1);
+        float pitch = 0.62f + 0.85f * rev + 0.28f * load;
+        _engineSound.PitchScale = Mathf.Lerp(_engineSound.PitchScale, pitch, 0.08f);
+        _engineSound.VolumeDb = Mathf.Lerp(_engineSound.VolumeDb, -15f + 9f * load + 3f * rev, 0.1f);
+    }
     public override void _ExitTree() => GridRegistry.Remove(this);
 
     private void SetupWheels()
@@ -281,7 +312,16 @@ public partial class VehicleBody : RigidBody3D, IGridHost
 
         Drive(dt);
         Aim(dt);
-        foreach (GunRt g in Guns) g.ReloadLeft = Mathf.Max(0, g.ReloadLeft - dt);
+        foreach (GunRt g in Guns)
+        {
+            if (g.ReloadLeft <= 0) continue;
+            g.ReloadLeft = Mathf.Max(0, g.ReloadLeft - dt);
+            if (g.ReloadLeft <= 0 && g.Alive && PlayerControlled && g.Info.GunSection >= 0)
+                Sfx.At(GetParent<Node3D>(), View.SectionGlobal(g.Info.Section) * Conv.CellPos(g.Info.Breech), SoundId.Reload,
+                    -3f, _rng.RandfRange(0.95f, 1.05f), 6f, delayByDistance: false);
+        }
+
+        UpdateEngineSound();
         View.SyncColliders();
     }
 
@@ -509,7 +549,8 @@ public partial class VehicleBody : RigidBody3D, IGridHost
             Vector3 breech = View.SectionGlobal(g.Info.GunSection) * Conv.CellPos(g.Info.Breech);
             ApplyImpulse(-dir * g.Stats.RecoilImpulse, breech - GlobalPosition);
             g.ReloadLeft = g.Stats.ReloadS;
-            Effects.MuzzleFlash(GetParent<Node3D>(), muzzle, dir, g.Stats.CaliberMm);
+            Effects.MuzzleFlash(GetParent<Node3D>(), muzzle, dir, g.Stats.CaliberMm, g.HasBrake);
+            Fired?.Invoke(g);
             fired++;
         }
 

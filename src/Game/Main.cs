@@ -1,4 +1,5 @@
 using DreamGame.Core;
+using DreamGame.Game.Audio;
 using Godot;
 
 namespace DreamGame.Game;
@@ -12,6 +13,7 @@ public partial class Main : Node
     public override void _Ready()
     {
         GameInput.Register();
+        Sfx.SetupBuses();
         _builder = new Builder();
         _builder.TestDriveRequested += bp => Callable.From(() => StartTestDrive(bp)).CallDeferred();
         AddChild(_builder);

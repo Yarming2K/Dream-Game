@@ -1,183 +1,584 @@
 using System;
+using System.Collections.Generic;
 using DreamGame.Core;
+using DreamGame.Game.Audio;
 using Godot;
 
 namespace DreamGame.Game;
 
-/// <summary>A short-lived effect that animates itself over its lifetime, then frees itself.</summary>
-public partial class FxNode : Node3D
-{
-    public float Life = 0.5f;
-    public Action<float> Animate;
-    private float _t;
-
-    public override void _Process(double delta)
-    {
-        _t += (float)delta;
-        float u = Mathf.Clamp(_t / Life, 0, 1);
-        Animate?.Invoke(u);
-        if (_t >= Life) QueueFree();
-    }
-}
-
-/// <summary>Muzzle flashes, tracers, impacts and explosions. Simple shapes and lights, cheap to draw.</summary>
+/// <summary>
+/// Muzzle blasts, tracers, impacts and explosions, built from layered soft particles, flashes of light,
+/// decals and sound. Everything is sized by caliber or blast radius.
+/// </summary>
 public static class Effects
 {
-    private static SphereMesh _sphere;
-    private static SphereMesh Sphere => _sphere ??= new SphereMesh { Radius = 0.5f, Height = 1f, RadialSegments = 16, Rings = 8 };
+    private static readonly RandomNumberGenerator Rng = new();
 
-    private static StandardMaterial3D FadeMat(Color c, bool additive = true) => new()
+    // ---------- Materials ----------
+
+    private static StandardMaterial3D _fire, _smoke, _spark;
+    private static SphereMesh _sphere;
+
+    private static StandardMaterial3D ParticleMat(Texture2D tex, bool additive, bool soft)
+    {
+        var m = new StandardMaterial3D
+        {
+            ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+            Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
+            BlendMode = additive ? BaseMaterial3D.BlendModeEnum.Add : BaseMaterial3D.BlendModeEnum.Mix,
+            AlbedoTexture = tex,
+            VertexColorUseAsAlbedo = true,
+            BillboardMode = BaseMaterial3D.BillboardModeEnum.Particles,
+            CullMode = BaseMaterial3D.CullModeEnum.Disabled,
+        };
+        if (soft)
+        {
+            m.ProximityFadeEnabled = true;
+            m.ProximityFadeDistance = 0.8f;
+        }
+
+        return m;
+    }
+
+    private static StandardMaterial3D Fire => _fire ??= ParticleMat(FxTextures.Puff, true, true);
+    private static StandardMaterial3D Smoke => _smoke ??= ParticleMat(FxTextures.Puff, false, true);
+    private static StandardMaterial3D Sparks => _spark ??= ParticleMat(FxTextures.Spark, true, false);
+    private static SphereMesh Sphere => _sphere ??= new SphereMesh { Radius = 0.5f, Height = 1f, RadialSegments = 20, Rings = 10 };
+
+    private static StandardMaterial3D SpriteMat(Texture2D tex, Color c, bool additive = true) => new()
     {
         ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
         Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
         BlendMode = additive ? BaseMaterial3D.BlendModeEnum.Add : BaseMaterial3D.BlendModeEnum.Mix,
+        AlbedoTexture = tex,
+        AlbedoColor = c,
+        BillboardMode = BaseMaterial3D.BillboardModeEnum.Enabled,
+        BillboardKeepScale = true,
+        CullMode = BaseMaterial3D.CullModeEnum.Disabled,
+        NoDepthTest = false,
+    };
+
+    private static StandardMaterial3D GlowLine(Color c) => new()
+    {
+        ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+        Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
+        BlendMode = BaseMaterial3D.BlendModeEnum.Add,
         AlbedoColor = c,
         CullMode = BaseMaterial3D.CullModeEnum.Disabled,
     };
 
-    private static FxNode Spawn(Node3D parent, Vector3 pos, float life)
+    // ---------- Building blocks ----------
+
+    private sealed class Burst
+    {
+        public Material Mat;
+        public float Size = 0.4f;
+        public int Amount = 10;
+        public float Life = 1f;
+        public float LifeRandom = 0.3f;
+        public Vector3 Dir = Vector3.Up;
+        public float Spread = 45f;
+        public float Flatness;
+        public float VelMin;
+        public float VelMax = 1f;
+        public float DampMin;
+        public float DampMax;
+        public Vector3 Gravity = new(0, -9.8f, 0);
+        public float ScaleFrom = 0.5f;
+        public float ScaleTo = 1f;
+        public Gradient Colors;
+        public float EmitRadius;
+    }
+
+    private static Gradient Ramp(params (float at, Color c)[] stops)
+    {
+        var g = new Gradient();
+        var offsets = new float[stops.Length];
+        var colors = new Color[stops.Length];
+        for (int i = 0; i < stops.Length; i++)
+        {
+            offsets[i] = stops[i].at;
+            colors[i] = stops[i].c;
+        }
+
+        g.Offsets = offsets;
+        g.Colors = colors;
+        return g;
+    }
+
+    private static readonly Gradient FireRamp = Ramp(
+        (0f, new Color(1f, 0.95f, 0.8f, 1f)), (0.3f, new Color(1f, 0.62f, 0.2f, 0.95f)),
+        (0.7f, new Color(0.55f, 0.18f, 0.05f, 0.55f)), (1f, new Color(0.1f, 0.06f, 0.04f, 0f)));
+
+    private static readonly Gradient SparkRamp = Ramp(
+        (0f, new Color(1f, 0.97f, 0.85f, 1f)), (0.4f, new Color(1f, 0.7f, 0.25f, 1f)), (1f, new Color(1f, 0.3f, 0.05f, 0f)));
+
+    private static readonly Gradient GunSmoke = Ramp(
+        (0f, new Color(0.8f, 0.78f, 0.75f, 0f)), (0.08f, new Color(0.75f, 0.73f, 0.7f, 0.55f)),
+        (0.6f, new Color(0.66f, 0.66f, 0.65f, 0.3f)), (1f, new Color(0.6f, 0.6f, 0.6f, 0f)));
+
+    private static readonly Gradient BlastSmoke = Ramp(
+        (0f, new Color(0.1f, 0.09f, 0.08f, 0f)), (0.1f, new Color(0.12f, 0.11f, 0.1f, 0.85f)),
+        (0.6f, new Color(0.3f, 0.29f, 0.28f, 0.5f)), (1f, new Color(0.42f, 0.42f, 0.42f, 0f)));
+
+    private static readonly Gradient DustRamp = Ramp(
+        (0f, new Color(0.62f, 0.55f, 0.44f, 0f)), (0.1f, new Color(0.6f, 0.53f, 0.42f, 0.6f)), (1f, new Color(0.6f, 0.55f, 0.46f, 0f)));
+
+    private static readonly Gradient ClodRamp = Ramp(
+        (0f, new Color(0.24f, 0.19f, 0.13f, 1f)), (0.8f, new Color(0.26f, 0.21f, 0.15f, 0.9f)), (1f, new Color(0.3f, 0.25f, 0.18f, 0f)));
+
+    private static void Emit(Node3D fx, Burst b)
+    {
+        var scale = new Curve();
+        scale.AddPoint(new Vector2(0, Mathf.Clamp(b.ScaleFrom, 0, 1)));
+        scale.AddPoint(new Vector2(1, Mathf.Clamp(b.ScaleTo, 0, 1)));
+        var p = new CpuParticles3D
+        {
+            Amount = Math.Max(1, b.Amount),
+            Lifetime = b.Life,
+            LifetimeRandomness = b.LifeRandom,
+            OneShot = true,
+            Explosiveness = 1f,
+            Direction = b.Dir.LengthSquared() > 0 ? b.Dir.Normalized() : Vector3.Up,
+            Spread = b.Spread,
+            Flatness = b.Flatness,
+            InitialVelocityMin = b.VelMin,
+            InitialVelocityMax = b.VelMax,
+            DampingMin = b.DampMin,
+            DampingMax = b.DampMax,
+            Gravity = b.Gravity,
+            AngleMin = 0f,
+            AngleMax = 360f,
+            ScaleAmountMin = b.Size * 0.7f,
+            ScaleAmountMax = b.Size,
+            ScaleAmountCurve = scale,
+            ColorRamp = b.Colors,
+            Mesh = new QuadMesh { Size = Vector2.One, Material = b.Mat },
+            Emitting = true,
+        };
+        if (b.EmitRadius > 0)
+        {
+            p.EmissionShape = CpuParticles3D.EmissionShapeEnum.Sphere;
+            p.EmissionSphereRadius = b.EmitRadius;
+        }
+
+        fx.AddChild(p);
+    }
+
+    private static FxNode Spawn(Node3D world, Vector3 pos, float life)
     {
         var fx = new FxNode { Life = life };
-        parent.AddChild(fx);
+        world.AddChild(fx);
         fx.GlobalPosition = pos;
         return fx;
     }
 
-    private static void Burst(FxNode fx, Color color, int amount, float speed, float size, float life, Vector3 dir,
-        float spread, float gravity = -9.8f)
+    private static void Chain(FxNode fx, Action<float> step)
     {
-        var mat = new StandardMaterial3D
-        {
-            ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
-            VertexColorUseAsAlbedo = true,
-            Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
-            BillboardMode = BaseMaterial3D.BillboardModeEnum.Particles,
-        };
-        var ramp = new Gradient();
-        ramp.SetColor(0, color);
-        ramp.SetColor(1, new Color(color.R, color.G, color.B, 0f));
-        var p = new CpuParticles3D
-        {
-            Amount = amount,
-            Lifetime = life,
-            OneShot = true,
-            Explosiveness = 0.95f,
-            Direction = dir,
-            Spread = spread,
-            InitialVelocityMin = speed * 0.4f,
-            InitialVelocityMax = speed,
-            Gravity = new Vector3(0, gravity, 0),
-            ScaleAmountMin = size * 0.5f,
-            ScaleAmountMax = size,
-            ColorRamp = ramp,
-            Mesh = new QuadMesh { Size = new Vector2(1, 1), Material = mat },
-            Emitting = true,
-        };
-        fx.AddChild(p);
-    }
-
-    private static void Flash(FxNode fx, Color color, float energy, float range)
-    {
-        var light = new OmniLight3D { LightColor = color, LightEnergy = energy, OmniRange = range, ShadowEnabled = false };
-        fx.AddChild(light);
         Action<float> prev = fx.Animate;
         fx.Animate = u =>
         {
             prev?.Invoke(u);
-            light.LightEnergy = energy * Mathf.Max(0, 1f - u * 3f);
+            step(u);
         };
     }
 
-    public static void MuzzleFlash(Node3D parent, Vector3 pos, Vector3 dir, float caliber)
+    /// <summary>A flash of light that dies away over <paramref name="seconds"/>.</summary>
+    private static void Light(FxNode fx, Color c, float energy, float range, float seconds, bool flicker = false)
     {
-        if (parent == null) return;
-        float s = caliber / 76f;
-        FxNode fx = Spawn(parent, pos, 1.2f);
-        var mat = FadeMat(new Color(1f, 0.75f, 0.35f, 1f));
-        var ball = new MeshInstance3D { Mesh = Sphere, MaterialOverride = mat, CastShadow = GeometryInstance3D.ShadowCastingSetting.Off };
-        fx.AddChild(ball);
-        ball.Scale = Vector3.One * 0.8f * s;
-        fx.Animate = u =>
+        var light = new OmniLight3D { LightColor = c, LightEnergy = energy, OmniRange = range, OmniAttenuation = 1.6f };
+        fx.AddChild(light);
+        Chain(fx, u =>
         {
-            float k = Mathf.Max(0, 1f - u * 10f);
-            ball.Scale = Vector3.One * (0.4f + 1.2f * (1 - k)) * s;
-            mat.AlbedoColor = new Color(1f, 0.75f, 0.35f, k);
-        };
-        Flash(fx, new Color(1f, 0.7f, 0.4f), 8f * s, 6f + 4f * s);
-        Burst(fx, new Color(0.55f, 0.53f, 0.5f, 0.55f), 14, 6f * s, 1.2f * s, 1.1f, dir, 25f, 0.4f);
+            float t = u * fx.Life / seconds;
+            float k = Mathf.Max(0, 1f - t);
+            if (flicker) k *= 0.8f + 0.2f * Rng.Randf();
+            light.LightEnergy = energy * k * k;
+            light.Visible = k > 0;
+        });
     }
 
-    public static MeshInstance3D Tracer(Node3D parent, float caliber, AmmoType type)
+    /// <summary>A camera-facing glow that pops and fades.</summary>
+    private static void Flash(FxNode fx, Color c, float size, float seconds, Vector3 offset = default)
     {
-        Color c = type == AmmoType.AP ? new Color(1f, 0.8f, 0.45f) : new Color(1f, 0.45f, 0.25f);
+        StandardMaterial3D mat = SpriteMat(FxTextures.Flare, c);
         var mi = new MeshInstance3D
         {
-            Mesh = new CylinderMesh { TopRadius = 1, BottomRadius = 1, Height = 1, RadialSegments = 6, Rings = 1 },
-            MaterialOverride = BlockVisuals.Emissive(c, 4f),
-            CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
-            Visible = false,
+            Mesh = new QuadMesh { Size = Vector2.One }, MaterialOverride = mat,
+            CastShadow = GeometryInstance3D.ShadowCastingSetting.Off, Position = offset,
+            Scale = Vector3.One * size * Rng.RandfRange(0.85f, 1.15f),
         };
-        mi.SetMeta("width", Mathf.Clamp(caliber / 1000f * 0.6f, 0.02f, 0.07f));
-        parent.AddChild(mi);
-        return mi;
+        fx.AddChild(mi);
+        Chain(fx, u =>
+        {
+            float t = u * fx.Life / seconds;
+            float k = Mathf.Max(0, 1f - t);
+            mat.AlbedoColor = new Color(c.R, c.G, c.B, k);
+            mi.Visible = k > 0;
+        });
     }
 
-    public static void UpdateTracer(MeshInstance3D t, Vector3 from, Vector3 to)
+    private static Vector3 Reflect(Vector3 dir, Vector3 normal) => (dir - 2f * dir.Dot(normal) * normal).Normalized();
+
+    private static bool GroundBelow(Node3D world, Vector3 from, float maxDist, out Vector3 point, out Vector3 normal)
+    {
+        point = default;
+        normal = Vector3.Up;
+        var q = PhysicsRayQueryParameters3D.Create(from + Vector3.Up * 0.2f, from + Vector3.Down * maxDist, GridRegistry.Layers.World);
+        Godot.Collections.Dictionary hit = world.GetWorld3D().DirectSpaceState.IntersectRay(q);
+        if (hit.Count == 0) return false;
+        point = hit["position"].AsVector3();
+        normal = hit["normal"].AsVector3();
+        return true;
+    }
+
+    // ---------- Gunfire ----------
+
+    public static void MuzzleFlash(Node3D world, Vector3 pos, Vector3 dir, float caliber, bool brake)
+    {
+        if (world == null) return;
+        float s = Mathf.Clamp(caliber / 76f, 0.5f, 1.8f);
+        FxNode fx = Spawn(world, pos, 4f);
+        Flash(fx, new Color(1f, 0.82f, 0.55f), 2.4f * s, 0.07f, dir * 0.5f * s);
+        Emit(fx, new Burst
+        {
+            Mat = Fire, Size = 1.0f * s, Amount = 12, Life = 0.15f, Dir = dir, Spread = 9, VelMin = 18 * s, VelMax = 42 * s,
+            DampMin = 140, DampMax = 180, Gravity = Vector3.Zero, ScaleFrom = 0.45f, ScaleTo = 1f, Colors = FireRamp,
+        });
+        if (brake)
+        {
+            Vector3 side = dir.Cross(Mathf.Abs(dir.Y) > 0.9f ? Vector3.Right : Vector3.Up).Normalized();
+            foreach (Vector3 d in new[] { side, -side })
+                Emit(fx, new Burst
+                {
+                    Mat = Fire, Size = 0.7f * s, Amount = 6, Life = 0.12f, Dir = d + dir * 0.3f, Spread = 14, VelMin = 10 * s,
+                    VelMax = 22 * s, DampMin = 120, DampMax = 150, Gravity = Vector3.Zero, Colors = FireRamp,
+                });
+        }
+
+        Emit(fx, new Burst
+        {
+            Mat = Smoke, Size = 1.8f * s, Amount = 16, Life = 3f, LifeRandom = 0.4f, Dir = dir, Spread = 28,
+            VelMin = 4 * s, VelMax = 15 * s, DampMin = 4, DampMax = 7, Gravity = new Vector3(0, 0.5f, 0),
+            ScaleFrom = 0.3f, ScaleTo = 1f, Colors = GunSmoke,
+        });
+        Light(fx, new Color(1f, 0.72f, 0.42f), 14f * s, 10f + 6f * s, 0.12f);
+
+        // The blast wave kicks up a ring of dust when the gun is close to the ground.
+        if (GroundBelow(world, pos, 4.5f, out Vector3 ground, out _))
+        {
+            FxNode dust = Spawn(world, ground + Vector3.Up * 0.2f, 3.5f);
+            Emit(dust, new Burst
+            {
+                Mat = Smoke, Size = 1.5f * s, Amount = 26, Life = 2.4f, Dir = Vector3.Right, Spread = 180, Flatness = 1f,
+                VelMin = 5 * s, VelMax = 14 * s, DampMin = 4, DampMax = 6, Gravity = new Vector3(0, 0.35f, 0),
+                ScaleFrom = 0.35f, ScaleTo = 1f, Colors = DustRamp, EmitRadius = 0.6f,
+            });
+        }
+
+        Sfx.At(world, pos, Sfx.CannonFor(caliber), 2f, Rng.RandfRange(0.94f, 1.06f), 26f, delayByDistance: false);
+    }
+
+    public static TracerFx Tracer(Node3D parent, float caliber, AmmoType type)
+    {
+        Color c = type == AmmoType.AP ? new Color(1f, 0.82f, 0.5f) : new Color(1f, 0.5f, 0.25f);
+        float w = Mathf.Clamp(caliber / 1000f * 0.5f, 0.02f, 0.06f);
+        var t = new TracerFx { Width = w, Tint = c };
+        parent.AddChild(t);
+        t.Head = new MeshInstance3D
+        {
+            Mesh = new QuadMesh { Size = Vector2.One }, MaterialOverride = SpriteMat(FxTextures.Flare, c),
+            CastShadow = GeometryInstance3D.ShadowCastingSetting.Off, Scale = Vector3.One * (0.5f + caliber / 160f), Visible = false,
+        };
+        t.Streak = new MeshInstance3D
+        {
+            Mesh = new CylinderMesh { TopRadius = 1, BottomRadius = 1, Height = 1, RadialSegments = 6, Rings = 1 },
+            MaterialOverride = BlockVisuals.Emissive(c, 6f), CastShadow = GeometryInstance3D.ShadowCastingSetting.Off, Visible = false,
+        };
+        parent.AddChild(t.Head);
+        parent.AddChild(t.Streak);
+        return t;
+    }
+
+    private static Transform3D Segment(Vector3 from, Vector3 to, float width)
+    {
+        Vector3 d = to - from;
+        float len = Mathf.Max(d.Length(), 0.01f);
+        Vector3 dir = d / len;
+        Vector3 up = Mathf.Abs(dir.Y) > 0.95f ? Vector3.Right : Vector3.Up;
+        // The cylinder's long axis is Y; turn it to lie along the segment, then stretch it.
+        Basis basis = Basis.LookingAt(dir, up) * new Basis(Vector3.Right, Mathf.Pi / 2) * Basis.FromScale(new Vector3(width, len, width));
+        return new Transform3D(basis, (from + to) * 0.5f);
+    }
+
+    public static void UpdateTracer(TracerFx t, Vector3 from, Vector3 to)
     {
         if (t == null || !GodotObject.IsInstanceValid(t)) return;
         Vector3 d = to - from;
-        float len = Mathf.Min(d.Length(), 12f);
+        float len = d.Length();
         if (len < 0.01f) return;
-        Vector3 dir = d.Normalized();
-        float w = t.GetMeta("width").AsSingle();
-        Vector3 up = Mathf.Abs(dir.Y) > 0.95f ? Vector3.Right : Vector3.Up;
-        // The cylinder's long axis is Y; turn it to lie along the flight path, then stretch it.
-        Basis basis = Basis.LookingAt(dir, up) * new Basis(Vector3.Right, Mathf.Pi / 2) * Basis.FromScale(new Vector3(w, len, w));
-        t.GlobalTransform = new Transform3D(basis, to - dir * len * 0.5f);
-        t.Visible = true;
-    }
+        Vector3 dir = d / len;
+        float streak = Mathf.Min(len, 28f);
+        t.Streak.GlobalTransform = Segment(to - dir * streak, to, t.Width);
+        t.Streak.Visible = true;
+        t.Head.GlobalPosition = to;
+        t.Head.Visible = true;
 
-    public static void Impact(Node3D parent, Vector3 pos, Vector3 normal, HitKind kind)
-    {
-        Color c = kind switch
+        // A thin glowing trail that hangs in the air for a moment.
+        Node parent = t.GetParent();
+        if (parent is not Node3D world) return;
+        StandardMaterial3D mat = GlowLine(new Color(t.Tint.R, t.Tint.G * 0.85f, t.Tint.B * 0.7f, 0.5f));
+        var seg = new MeshInstance3D
         {
-            HitKind.Penetration => new Color(1f, 0.65f, 0.3f),
-            HitKind.Ricochet => new Color(1f, 0.95f, 0.5f),
-            _ => new Color(1f, 0.85f, 0.6f),
+            Mesh = t.Streak.Mesh, MaterialOverride = mat, CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
         };
-        FxNode fx = Spawn(parent, pos, 0.8f);
-        Burst(fx, c, kind == HitKind.Penetration ? 26 : 16, 9f, 0.12f, 0.45f, normal, 55f);
-        Flash(fx, c, 4f, 4f);
+        var fx = new FxNode { Life = 0.18f };
+        world.AddChild(fx);
+        fx.AddChild(seg);
+        seg.GlobalTransform = Segment(from, to, t.Width * 0.55f);
+        fx.Animate = u => mat.AlbedoColor = new Color(mat.AlbedoColor.R, mat.AlbedoColor.G, mat.AlbedoColor.B, 0.5f * (1f - u));
     }
 
-    public static void Dust(Node3D parent, Vector3 pos, Vector3 normal, float caliber)
+    public static void EndTracer(TracerFx t)
     {
-        float s = caliber / 76f;
-        FxNode fx = Spawn(parent, pos, 2f);
-        Burst(fx, new Color(0.45f, 0.38f, 0.28f, 0.8f), 18, 5f * s, 1.2f * s, 1.6f, normal, 35f, -4f);
+        if (t == null || !GodotObject.IsInstanceValid(t)) return;
+        if (GodotObject.IsInstanceValid(t.Head)) t.Head.QueueFree();
+        if (GodotObject.IsInstanceValid(t.Streak)) t.Streak.QueueFree();
+        t.QueueFree();
     }
 
-    public static void Explosion(Node3D parent, Vector3 pos, float radius)
+    // ---------- Hits ----------
+
+    /// <summary>
+    /// A shell striking a block. <paramref name="surface"/> is the node the block hangs from, so the scorch
+    /// mark moves with a turret.
+    /// </summary>
+    public static void Impact(Node3D world, Vector3 pos, Vector3 normal, Vector3 dir, HitKind kind, float caliber, Node3D surface)
     {
-        FxNode fx = Spawn(parent, pos, 2.5f);
-        var mat = FadeMat(new Color(1f, 0.6f, 0.25f, 1f));
-        var ball = new MeshInstance3D { Mesh = Sphere, MaterialOverride = mat, CastShadow = GeometryInstance3D.ShadowCastingSetting.Off };
-        fx.AddChild(ball);
+        float s = Mathf.Clamp(caliber / 76f, 0.5f, 1.8f);
+        Vector3 bounce = Reflect(dir, normal);
+        FxNode fx = Spawn(world, pos, 3f);
+        Flash(fx, new Color(1f, 0.9f, 0.7f), 1.6f * s, 0.06f);
+        Light(fx, new Color(1f, 0.75f, 0.45f), 8f * s, 7f, 0.1f);
+        Node3D decalParent = surface != null && GodotObject.IsInstanceValid(surface) ? surface : world;
+
+        switch (kind)
+        {
+            case HitKind.Penetration:
+                Emit(fx, new Burst
+                {
+                    Mat = Sparks, Size = 0.1f, Amount = 44, Life = 0.6f, Dir = normal, Spread = 55, VelMin = 6, VelMax = 20,
+                    DampMin = 1, DampMax = 3, Colors = SparkRamp, ScaleFrom = 1f, ScaleTo = 0.4f,
+                });
+                Emit(fx, new Burst
+                {
+                    Mat = Fire, Size = 0.16f, Amount = 14, Life = 1.3f, Dir = normal, Spread = 70, VelMin = 2, VelMax = 8,
+                    Colors = FireRamp, ScaleFrom = 1f, ScaleTo = 0.5f,
+                });
+                Emit(fx, new Burst
+                {
+                    Mat = Smoke, Size = 1.0f * s, Amount = 7, Life = 2f, Dir = normal, Spread = 30, VelMin = 1, VelMax = 3,
+                    DampMin = 1, DampMax = 2, Gravity = new Vector3(0, 0.5f, 0), Colors = BlastSmoke, ScaleFrom = 0.3f,
+                });
+                Decals.Place(decalParent, pos, normal, FxTextures.Hole, 0.3f * s, 0.3f);
+                Sfx.At(world, pos, SoundId.Penetration, 0f, Rng.RandfRange(0.88f, 1.1f) / Mathf.Sqrt(s), 14f);
+                break;
+
+            case HitKind.Ricochet:
+                Emit(fx, new Burst
+                {
+                    Mat = Sparks, Size = 0.09f, Amount = 34, Life = 0.5f, Dir = bounce, Spread = 18, VelMin = 10, VelMax = 28,
+                    DampMin = 1, DampMax = 2, Colors = SparkRamp, ScaleFrom = 1f, ScaleTo = 0.4f,
+                });
+                Ricochet(world, pos, bounce, caliber);
+                Decals.Place(decalParent, pos, normal, FxTextures.Scuff, 0.35f * s, 0.25f);
+                Sfx.At(world, pos, SoundId.Ricochet, -1f, Rng.RandfRange(0.9f, 1.12f), 16f);
+                break;
+
+            default:
+                Emit(fx, new Burst
+                {
+                    Mat = Sparks, Size = 0.1f, Amount = 60, Life = 0.55f, Dir = bounce, Spread = 38, VelMin = 8, VelMax = 24,
+                    DampMin = 1, DampMax = 3, Colors = SparkRamp, ScaleFrom = 1f, ScaleTo = 0.4f,
+                });
+                Decals.Place(decalParent, pos, normal, FxTextures.Scuff, 0.42f * s, 0.25f);
+                Sfx.At(world, pos, SoundId.Clang, 0f, Rng.RandfRange(0.9f, 1.08f) / Mathf.Sqrt(s), 15f);
+                break;
+        }
+    }
+
+    /// <summary>A glowing shell skipping away after a ricochet.</summary>
+    private static void Ricochet(Node3D world, Vector3 pos, Vector3 dir, float caliber)
+    {
+        float w = Mathf.Clamp(caliber / 1000f * 0.45f, 0.02f, 0.05f);
+        StandardMaterial3D mat = GlowLine(new Color(1f, 0.85f, 0.5f, 1f));
+        var mesh = new CylinderMesh { TopRadius = 1, BottomRadius = 1, Height = 1, RadialSegments = 6, Rings = 1 };
+        var mi = new MeshInstance3D { Mesh = mesh, MaterialOverride = mat, CastShadow = GeometryInstance3D.ShadowCastingSetting.Off };
+        var fx = new FxNode { Life = 0.35f };
+        world.AddChild(fx);
+        fx.AddChild(mi);
+        Vector3 wobble = new Vector3(Rng.RandfRange(-1, 1), Rng.RandfRange(0, 1), Rng.RandfRange(-1, 1)) * 0.15f;
+        Vector3 d = (dir + wobble).Normalized();
         fx.Animate = u =>
         {
-            float grow = Mathf.Min(u * 8f, 1f);
-            ball.Scale = Vector3.One * Mathf.Max(radius * 2f * grow, 0.01f);
-            mat.AlbedoColor = new Color(1f, 0.55f + 0.3f * (1 - grow), 0.25f, Mathf.Max(0, 1f - u * 5f));
+            float dist = 160f * u * fx.Life;
+            Vector3 head = pos + d * dist + Vector3.Down * 4.9f * (u * fx.Life) * (u * fx.Life);
+            Vector3 tail = pos + d * Mathf.Max(0, dist - 14f);
+            mi.GlobalTransform = Segment(tail, head, w);
+            mat.AlbedoColor = new Color(1f, 0.85f, 0.5f, 1f - u);
         };
-        Flash(fx, new Color(1f, 0.6f, 0.3f), 14f, radius * 5f);
-        Burst(fx, new Color(1f, 0.6f, 0.25f), 30, radius * 7f, 0.25f, 0.6f, Vector3.Up, 180f);
-        Burst(fx, new Color(0.25f, 0.24f, 0.22f, 0.8f), 18, radius * 2f, radius * 1.5f, 2.4f, Vector3.Up, 70f, 0.6f);
     }
 
-    /// <summary>Little chunks flying off a destroyed block.</summary>
-    public static void Shatter(Node3D parent, Vector3 pos, BlockDef def)
+    /// <summary>A shell slamming into the ground.</summary>
+    public static void Dirt(Node3D world, Vector3 pos, Vector3 normal, float caliber)
     {
-        FxNode fx = Spawn(parent, pos, 1.4f);
-        Burst(fx, new Color(def.ColorR, def.ColorG, def.ColorB), 10, 6f, 0.1f, 1.2f, Vector3.Up, 120f);
+        float s = Mathf.Clamp(caliber / 76f, 0.5f, 1.8f);
+        FxNode fx = Spawn(world, pos, 4.5f);
+        Emit(fx, new Burst
+        {
+            Mat = Smoke, Size = 0.3f * s, Amount = 28, Life = 1.2f, Dir = normal, Spread = 26, VelMin = 7 * s, VelMax = 17 * s,
+            Gravity = new Vector3(0, -16f, 0), Colors = ClodRamp, ScaleFrom = 0.8f, ScaleTo = 0.6f,
+        });
+        Emit(fx, new Burst
+        {
+            Mat = Smoke, Size = 2.4f * s, Amount = 12, Life = 3.4f, LifeRandom = 0.4f, Dir = normal, Spread = 60,
+            VelMin = 1.5f, VelMax = 5f * s, DampMin = 2, DampMax = 3, Gravity = new Vector3(0, 0.25f, 0),
+            Colors = DustRamp, ScaleFrom = 0.3f, ScaleTo = 1f,
+        });
+        Flash(fx, new Color(1f, 0.85f, 0.6f), 0.9f * s, 0.05f);
+        Decals.Place(world, pos, normal, FxTextures.Scorch, 0.9f * s, 0.6f, new Color(1, 1, 1, 0.8f));
+        Sfx.At(world, pos, SoundId.Dirt, -1f, Rng.RandfRange(0.85f, 1.1f) / Mathf.Sqrt(s), 14f);
+    }
+
+    public static void Explosion(Node3D world, Vector3 pos, float radius)
+    {
+        float r = Mathf.Clamp(radius, 0.6f, 5f);
+        FxNode fx = Spawn(world, pos, 6f);
+        Flash(fx, new Color(1f, 0.85f, 0.6f), r * 5f, 0.13f);
+
+        StandardMaterial3D coreMat = SpriteMat(null, new Color(1f, 0.9f, 0.7f, 1f));
+        coreMat.BillboardMode = BaseMaterial3D.BillboardModeEnum.Disabled;
+        var core = new MeshInstance3D { Mesh = Sphere, MaterialOverride = coreMat, CastShadow = GeometryInstance3D.ShadowCastingSetting.Off };
+        fx.AddChild(core);
+        Chain(fx, u =>
+        {
+            float t = u * fx.Life;
+            float grow = Mathf.Min(t / 0.07f, 1f);
+            float fade = Mathf.Max(0, 1f - t / 0.28f);
+            core.Scale = Vector3.One * Mathf.Max(r * 1.4f * grow, 0.01f);
+            coreMat.AlbedoColor = new Color(1f, 0.75f + 0.2f * fade, 0.45f * fade + 0.2f, fade);
+            core.Visible = fade > 0;
+        });
+
+        Emit(fx, new Burst
+        {
+            Mat = Fire, Size = r * 1.3f, Amount = 14 + (int)(r * 4), Life = 0.8f, LifeRandom = 0.4f, EmitRadius = r * 0.25f,
+            Dir = Vector3.Up, Spread = 180, VelMin = r * 1.5f, VelMax = r * 5f, DampMin = r * 5f, DampMax = r * 8f,
+            Gravity = new Vector3(0, 1.5f, 0), ScaleFrom = 0.45f, ScaleTo = 1f, Colors = FireRamp,
+        });
+        Emit(fx, new Burst
+        {
+            Mat = Smoke, Size = r * 1.7f, Amount = 14 + (int)(r * 3), Life = 4.8f, LifeRandom = 0.35f, EmitRadius = r * 0.4f,
+            Dir = Vector3.Up, Spread = 70, VelMin = r * 0.5f, VelMax = r * 1.8f, DampMin = 0.6f, DampMax = 1.2f,
+            Gravity = new Vector3(0, 1.3f, 0), ScaleFrom = 0.35f, ScaleTo = 1f, Colors = BlastSmoke,
+        });
+        Emit(fx, new Burst
+        {
+            Mat = Sparks, Size = 0.13f, Amount = 45, Life = 1.6f, LifeRandom = 0.5f, Dir = Vector3.Up, Spread = 180,
+            VelMin = r * 4f, VelMax = r * 11f, DampMin = 0.3f, DampMax = 0.8f, Colors = SparkRamp, ScaleFrom = 1f, ScaleTo = 0.3f,
+        });
+        Light(fx, new Color(1f, 0.62f, 0.32f), 24f, r * 8f, 0.6f, flicker: true);
+
+        bool nearGround = GroundBelow(world, pos, r * 1.3f, out Vector3 ground, out Vector3 gn);
+        Shockwave(world, nearGround ? ground + gn * 0.15f : pos, nearGround ? gn : Vector3.Up, r);
+        if (nearGround)
+        {
+            Decals.Place(world, ground, gn, FxTextures.Scorch, r * 2.4f, 1.2f);
+            FxNode dirt = Spawn(world, ground + gn * 0.2f, 5f);
+            Emit(dirt, new Burst
+            {
+                Mat = Smoke, Size = 0.35f + r * 0.08f, Amount = 34, Life = 1.4f, Dir = gn, Spread = 38, VelMin = r * 3f,
+                VelMax = r * 7.5f, Gravity = new Vector3(0, -15f, 0), Colors = ClodRamp, ScaleFrom = 0.8f, ScaleTo = 0.6f,
+            });
+            Emit(dirt, new Burst
+            {
+                Mat = Smoke, Size = r * 1.6f, Amount = 22, Life = 3.2f, Dir = Vector3.Right, Spread = 180, Flatness = 1f,
+                VelMin = r * 2f, VelMax = r * 5.5f, DampMin = 2.5f, DampMax = 4f, Gravity = new Vector3(0, 0.3f, 0),
+                Colors = DustRamp, ScaleFrom = 0.35f, ScaleTo = 1f, EmitRadius = r * 0.3f,
+            });
+        }
+
+        Sfx.At(world, pos, Sfx.ExplosionFor(radius), 3f, Rng.RandfRange(0.9f, 1.08f), 40f);
+    }
+
+    private static void Shockwave(Node3D world, Vector3 pos, Vector3 normal, float r)
+    {
+        StandardMaterial3D mat = SpriteMat(FxTextures.Ring, new Color(1f, 0.95f, 0.85f, 0.5f), additive: false);
+        mat.BillboardMode = BaseMaterial3D.BillboardModeEnum.Disabled;
+        var quad = new MeshInstance3D
+        {
+            Mesh = new PlaneMesh { Size = Vector2.One }, MaterialOverride = mat, CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
+        };
+        var fx = new FxNode { Life = 0.45f };
+        world.AddChild(fx);
+        fx.AddChild(quad);
+        Vector3 t = Mathf.Abs(normal.Y) < 0.9f ? Vector3.Up.Cross(normal).Normalized() : Vector3.Right;
+        var basis = new Basis(t, normal, t.Cross(normal));
+        fx.Animate = u =>
+        {
+            float e = 1f - (1f - u) * (1f - u);
+            float size = r * (0.6f + 4.6f * e);
+            quad.GlobalTransform = new Transform3D(basis.Scaled(Vector3.One) * Basis.FromScale(new Vector3(size, 1, size)), pos);
+            mat.AlbedoColor = new Color(1f, 0.95f, 0.85f, 0.5f * (1f - u));
+        };
+    }
+
+    /// <summary>Chunks flying off a destroyed block.</summary>
+    public static void Shatter(Node3D world, Vector3 pos, BlockDef def, Vector3 velocity, Vector3 away)
+    {
+        Fragments.Spawn(world, pos, def, velocity, away, def.IsArmorLike ? 4 : 3);
+        FxNode fx = Spawn(world, pos, 2.5f);
+        Emit(fx, new Burst
+        {
+            Mat = Smoke, Size = 0.8f, Amount = 5, Life = 1.8f, Dir = Vector3.Up, Spread = 90, VelMin = 0.5f, VelMax = 2f,
+            DampMin = 1, DampMax = 2, Gravity = new Vector3(0, 0.4f, 0), Colors = BlastSmoke, ScaleFrom = 0.3f,
+        });
+    }
+}
+
+/// <summary>Scorch marks and holes. Capped in number; the oldest disappear first.</summary>
+public static class Decals
+{
+    private const int Max = 160;
+    private static readonly Queue<Decal> Live = new();
+    private static readonly RandomNumberGenerator Rng = new();
+
+    public static void Place(Node3D parent, Vector3 pos, Vector3 normal, Texture2D tex, float size, float depth, Color? tint = null,
+        float lifeSeconds = 60f)
+    {
+        if (parent == null || !GodotObject.IsInstanceValid(parent) || !parent.IsInsideTree()) return;
+        Vector3 n = normal.LengthSquared() > 0.001f ? normal.Normalized() : Vector3.Up;
+        var d = new Decal
+        {
+            TextureAlbedo = tex, Size = new Vector3(size, depth, size), Modulate = tint ?? Colors.White,
+            UpperFade = 0.3f, LowerFade = 0.3f, NormalFade = 0.4f,
+            DistanceFadeEnabled = true, DistanceFadeBegin = 180f, DistanceFadeLength = 40f,
+        };
+        parent.AddChild(d);
+        Vector3 t = Mathf.Abs(n.Y) < 0.9f ? Vector3.Up.Cross(n).Normalized() : Vector3.Right;
+        var basis = new Basis(n, Rng.RandfRange(0, Mathf.Tau)) * new Basis(t, n, t.Cross(n));
+        d.GlobalTransform = new Transform3D(basis, pos);
+
+        Live.Enqueue(d);
+        while (Live.Count > Max)
+        {
+            Decal old = Live.Dequeue();
+            if (GodotObject.IsInstanceValid(old)) old.QueueFree();
+        }
+
+        d.GetTree().CreateTimer(lifeSeconds).Timeout += () =>
+        {
+            if (GodotObject.IsInstanceValid(d)) d.QueueFree();
+        };
     }
 }

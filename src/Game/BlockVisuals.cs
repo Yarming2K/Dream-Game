@@ -12,13 +12,13 @@ public static class BlockVisuals
 
     private static readonly Dictionary<string, StandardMaterial3D> Materials = new();
     private static readonly Dictionary<string, Mesh> Meshes = new();
-    private static NoiseTexture2D _grit;
+    private static NoiseTexture2D _grit, _bumps;
     private static BoxShape3D _box;
     private static ConvexPolygonShape3D _wedge;
     private static ArrayMesh _wedgeMesh;
 
-    public static readonly StandardMaterial3D GhostOk = Overlay(new Color(0.35f, 1f, 0.45f, 0.38f));
-    public static readonly StandardMaterial3D GhostBad = Overlay(new Color(1f, 0.3f, 0.25f, 0.38f));
+    public static readonly Material GhostOk = Shaders.Hologram(new Color(0.35f, 1f, 0.5f));
+    public static readonly Material GhostBad = Shaders.Hologram(new Color(1f, 0.32f, 0.25f));
     public static readonly StandardMaterial3D LooseOverlay = Overlay(new Color(1f, 0.15f, 0.1f, 0.45f));
 
     private static StandardMaterial3D Overlay(Color c) => new()
@@ -47,17 +47,37 @@ public static class BlockVisuals
         return _grit;
     }
 
-    public static StandardMaterial3D Material(string key, Color color, float metallic, float roughness, bool twoSided = false)
+    /// <summary>Fine dents and hammer marks so plates catch the light unevenly.</summary>
+    private static NoiseTexture2D Bumps()
+    {
+        if (_bumps != null) return _bumps;
+        _bumps = new NoiseTexture2D
+        {
+            Width = 256,
+            Height = 256,
+            Seamless = true,
+            AsNormalMap = true,
+            BumpStrength = 3f,
+            Noise = new FastNoiseLite { NoiseType = FastNoiseLite.NoiseTypeEnum.SimplexSmooth, Frequency = 0.035f, FractalOctaves = 4 },
+        };
+        return _bumps;
+    }
+
+    public static StandardMaterial3D Material(string key, Color color, float metallic, float roughness, bool twoSided = true)
     {
         if (Materials.TryGetValue(key, out StandardMaterial3D m)) return m;
         m = new StandardMaterial3D
         {
             AlbedoColor = color,
             AlbedoTexture = Grit(),
+            NormalEnabled = true,
+            NormalTexture = Bumps(),
+            NormalScale = 0.35f,
             Uv1Triplanar = true,
             Uv1Scale = new Vector3(1.6f, 1.6f, 1.6f),
             Metallic = metallic,
             Roughness = roughness,
+            // Drawn from both sides so procedural meshes look right whichever way their triangles wind.
             CullMode = twoSided ? BaseMaterial3D.CullModeEnum.Disabled : BaseMaterial3D.CullModeEnum.Back,
         };
         Materials[key] = m;
@@ -142,6 +162,96 @@ public static class BlockVisuals
         return _wedgeMesh;
     }
 
+    /// <summary>
+    /// A box with chamfered edges. The thin bevels catch highlights, which is what makes plates read as
+    /// solid metal instead of flat colored cubes.
+    /// </summary>
+    private static Mesh Bevel(Vector3 size, float bevel = 0.022f)
+    {
+        string key = $"bevel:{size}:{bevel}";
+        if (Meshes.TryGetValue(key, out Mesh cached)) return cached;
+        Vector3 h = size * 0.5f;
+        float b = Mathf.Min(bevel, Mathf.Min(h.X, Mathf.Min(h.Y, h.Z)) * 0.5f);
+        Vector3 i = h - new Vector3(b, b, b);
+        var st = new SurfaceTool();
+        st.Begin(Mesh.PrimitiveType.Triangles);
+
+        void Tri(Vector3 n, Vector3 p0, Vector3 p1, Vector3 p2)
+        {
+            // Clockwise when seen from outside, which is what Godot treats as the front face.
+            if ((p1 - p0).Cross(p2 - p0).Dot(n) > 0) (p1, p2) = (p2, p1);
+            st.SetNormal(n);
+            st.AddVertex(p0);
+            st.SetNormal(n);
+            st.AddVertex(p1);
+            st.SetNormal(n);
+            st.AddVertex(p2);
+        }
+
+        void Quad(Vector3 n, Vector3 a, Vector3 c1, Vector3 c2, Vector3 d)
+        {
+            Tri(n, a, c1, c2);
+            Tri(n, a, c2, d);
+        }
+
+        // Six faces, inset by the bevel.
+        for (int axis = 0; axis < 3; axis++)
+        for (int sign = -1; sign <= 1; sign += 2)
+        {
+            Vector3 n = Vector3.Zero;
+            n[axis] = sign;
+            int u = (axis + 1) % 3, v = (axis + 2) % 3;
+            Vector3 Corner(float su, float sv)
+            {
+                Vector3 p = Vector3.Zero;
+                p[axis] = sign * h[axis];
+                p[u] = su * i[u];
+                p[v] = sv * i[v];
+                return p;
+            }
+
+            Quad(n, Corner(-1, -1), Corner(1, -1), Corner(1, 1), Corner(-1, 1));
+        }
+
+        // Twelve edge chamfers.
+        for (int k = 0; k < 3; k++)
+        {
+            int a = (k + 1) % 3, c = (k + 2) % 3;
+            for (int sa = -1; sa <= 1; sa += 2)
+            for (int sc = -1; sc <= 1; sc += 2)
+            {
+                Vector3 n = Vector3.Zero;
+                n[a] = sa;
+                n[c] = sc;
+                n = n.Normalized();
+                Vector3 P(float along, bool onA)
+                {
+                    Vector3 p = Vector3.Zero;
+                    p[k] = along * i[k];
+                    p[a] = sa * (onA ? h[a] : i[a]);
+                    p[c] = sc * (onA ? i[c] : h[c]);
+                    return p;
+                }
+
+                Quad(n, P(-1, true), P(1, true), P(1, false), P(-1, false));
+            }
+        }
+
+        // Eight corner triangles.
+        for (int sx = -1; sx <= 1; sx += 2)
+        for (int sy = -1; sy <= 1; sy += 2)
+        for (int sz = -1; sz <= 1; sz += 2)
+        {
+            var n = new Vector3(sx, sy, sz).Normalized();
+            Tri(n, new Vector3(sx * h.X, sy * i.Y, sz * i.Z), new Vector3(sx * i.X, sy * h.Y, sz * i.Z),
+                new Vector3(sx * i.X, sy * i.Y, sz * h.Z));
+        }
+
+        Mesh mesh = st.Commit();
+        Meshes[key] = mesh;
+        return mesh;
+    }
+
     private static Mesh Box(Vector3 size)
     {
         string key = $"box:{size}";
@@ -189,10 +299,10 @@ public static class BlockVisuals
                 break;
             case BlockKind.Armor:
             case BlockKind.Frame:
-                Add(root, Box(new Vector3(full, full, full)), mat, Vector3.Zero);
+                Add(root, Bevel(new Vector3(full, full, full)), mat, Vector3.Zero);
                 break;
             case BlockKind.Engine:
-                Add(root, Box(new Vector3(full, full, full)), mat, Vector3.Zero);
+                Add(root, Bevel(new Vector3(full, full, full)), mat, Vector3.Zero);
                 Add(root, Cylinder(0.045f, 0.16f), Dark, new Vector3(0.12f, 0.3f, 0.12f));
                 Add(root, Cylinder(0.045f, 0.16f), Dark, new Vector3(-0.12f, 0.3f, 0.12f));
                 Add(root, Box(new Vector3(0.36f, 0.04f, 0.2f)), Steel, new Vector3(0, 0.26f, -0.1f));
@@ -213,7 +323,7 @@ public static class BlockVisuals
                 Add(root, Box(new Vector3(0.42f, 0.07f, full)), mat, new Vector3(0, def.WheelRadiusM, 0));
                 break;
             case BlockKind.DriverSeat:
-                Add(root, Box(new Vector3(full, full, full)), mat, Vector3.Zero);
+                Add(root, Bevel(new Vector3(full, full, full)), mat, Vector3.Zero);
                 Add(root, Box(new Vector3(0.3f, 0.07f, 0.04f)), Glow(new Color(0.4f, 0.85f, 1f), 1.5f), new Vector3(0, 0.15f, -0.25f));
                 break;
             case BlockKind.TurretRing:
@@ -221,7 +331,7 @@ public static class BlockVisuals
                 Add(root, Cylinder(0.2f, 0.04f), Dark, new Vector3(0, 0.25f, 0));
                 break;
             case BlockKind.Breech:
-                Add(root, Box(new Vector3(full, full, full)), mat, Vector3.Zero);
+                Add(root, Bevel(new Vector3(full, full, full)), mat, Vector3.Zero);
                 Add(root, Cylinder(BarrelRadius(def.Breech.CaliberMm) * 1.4f, 0.12f), Steel,
                     new Transform3D(AlongZ, new Vector3(0, 0, -0.27f)));
                 break;
@@ -234,16 +344,16 @@ public static class BlockVisuals
                 Add(root, Cylinder(BarrelRadius(caliberMm), full), mat, new Transform3D(AlongZ, Vector3.Zero));
                 break;
             case BlockKind.Loader:
-                Add(root, Box(new Vector3(full, full, full)), mat, Vector3.Zero);
+                Add(root, Bevel(new Vector3(full, full, full)), mat, Vector3.Zero);
                 Add(root, Box(new Vector3(full * 1.01f, 0.06f, 0.3f)), Steel, Vector3.Zero);
                 break;
             case BlockKind.Propellant:
-                Add(root, Box(new Vector3(full, full * 0.6f, full)), Dark, new Vector3(0, -0.1f, 0));
+                Add(root, Bevel(new Vector3(full, full * 0.6f, full)), Dark, new Vector3(0, -0.1f, 0));
                 for (int i = 0; i < 4; i++)
                     Add(root, Cylinder(0.08f, 0.36f), mat, new Vector3(i % 2 == 0 ? -0.11f : 0.11f, 0.05f, i < 2 ? -0.11f : 0.11f));
                 break;
             case BlockKind.AmmoRack:
-                Add(root, Box(new Vector3(full, full * 0.7f, full)), mat, new Vector3(0, -0.075f, 0));
+                Add(root, Bevel(new Vector3(full, full * 0.7f, full)), mat, new Vector3(0, -0.075f, 0));
                 for (int i = 0; i < 4; i++)
                 {
                     var p = new Vector3(i % 2 == 0 ? -0.11f : 0.11f, 0.2f, i < 2 ? -0.11f : 0.11f);
@@ -252,13 +362,13 @@ public static class BlockVisuals
 
                 break;
             case BlockKind.AmmoFeed:
-                Add(root, Box(new Vector3(0.3f, 0.3f, 0.3f)), mat, Vector3.Zero);
+                Add(root, Bevel(new Vector3(0.3f, 0.3f, 0.3f), 0.03f), mat, Vector3.Zero);
                 Add(root, Box(new Vector3(full, 0.12f, 0.12f)), Dark, Vector3.Zero);
                 Add(root, Box(new Vector3(0.12f, full, 0.12f)), Dark, Vector3.Zero);
                 Add(root, Box(new Vector3(0.12f, 0.12f, full)), Dark, Vector3.Zero);
                 break;
             default:
-                Add(root, Box(new Vector3(full, full, full)), mat, Vector3.Zero);
+                Add(root, Bevel(new Vector3(full, full, full)), mat, Vector3.Zero);
                 break;
         }
 
