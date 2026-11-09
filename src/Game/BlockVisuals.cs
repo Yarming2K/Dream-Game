@@ -336,6 +336,39 @@ public static class BlockVisuals
                 Add(root, Cylinder(0.07f, 0.16f), Dark, new Vector3(0, 0.32f, 0));
                 Add(root, Box(new Vector3(0.12f, 0.04f, 0.03f)), Glow(new Color(0.4f, 0.85f, 1f), 1.5f), new Vector3(0, 0.36f, -0.07f));
                 break;
+            case BlockKind.ShipPropeller:
+                Add(root, Cylinder(0.07f, 0.3f), Steel, new Transform3D(AlongZ, Vector3.Zero));
+                Add(root, Cylinder(0.09f, 0.12f, 0.02f), mat, new Transform3D(new Basis(Vector3.Right, -Mathf.Pi / 2), new Vector3(0, 0, -0.18f)));
+                for (int i = 0; i < 3; i++)
+                {
+                    var blade = new Basis(Vector3.Back, i * Mathf.Tau / 3f) * new Basis(Vector3.Up, 0.5f);
+                    Add(root, Box(new Vector3(0.09f, 0.42f, 0.03f)), mat, new Transform3D(blade, blade * new Vector3(0, 0.2f, 0)));
+                }
+
+                break;
+            case BlockKind.Rudder:
+                Add(root, Box(new Vector3(0.06f, full * 0.95f, full * 0.85f)), mat, Vector3.Zero);
+                Add(root, Cylinder(0.035f, full), Steel, new Vector3(0, 0, -0.2f));
+                break;
+            case BlockKind.BallastValve:
+                Add(root, Bevel(new Vector3(full, full, full)), mat, Vector3.Zero);
+                Add(root, Cylinder(0.14f, 0.04f), RedTip, new Vector3(0, 0.27f, 0));
+                Add(root, Cylinder(0.03f, 0.08f), Steel, new Vector3(0, 0.24f, 0));
+                break;
+            case BlockKind.BilgePump:
+                Add(root, Bevel(new Vector3(full, full * 0.7f, full)), mat, new Vector3(0, -0.075f, 0));
+                Add(root, Cylinder(0.06f, full), Steel, new Vector3(0.14f, 0.1f, 0));
+                Add(root, Cylinder(0.11f, 0.12f), Dark, new Vector3(-0.08f, 0.2f, 0));
+                break;
+            case BlockKind.LeadBallast:
+                Add(root, Bevel(new Vector3(full, full * 0.5f, full)), mat, new Vector3(0, -0.125f, 0));
+                Add(root, Bevel(new Vector3(full * 0.8f, full * 0.42f, full * 0.8f)), mat, new Vector3(0, 0.12f, 0));
+                break;
+            case BlockKind.TorpedoTube:
+                Add(root, Bevel(new Vector3(full, full * 0.4f, full)), Dark, new Vector3(0, -0.15f, 0));
+                Add(root, Cylinder(0.19f, full * 1.02f), mat, new Transform3D(AlongZ, new Vector3(0, 0.05f, 0)));
+                Add(root, Cylinder(0.12f, 0.05f), Dark, new Transform3D(AlongZ, new Vector3(0, 0.05f, -0.26f)));
+                break;
             case BlockKind.TurretRing:
                 Add(root, Cylinder(0.25f, full), mat, Vector3.Zero);
                 Add(root, Cylinder(0.2f, 0.04f), Dark, new Vector3(0, 0.25f, 0));
@@ -362,6 +395,11 @@ public static class BlockVisuals
                 for (int i = 0; i < 4; i++)
                     Add(root, Cylinder(0.08f, 0.36f), mat, new Vector3(i % 2 == 0 ? -0.11f : 0.11f, 0.05f, i < 2 ? -0.11f : 0.11f));
                 break;
+            case BlockKind.AmmoRack when def.Ammo == AmmoType.Torpedo:
+                Add(root, Bevel(new Vector3(full, full * 0.45f, full)), mat, new Vector3(0, -0.14f, 0));
+                Add(root, Cylinder(0.11f, full * 0.95f), Steel, new Transform3D(AlongZ, new Vector3(0, 0.15f, 0)));
+                Add(root, Cylinder(0.11f, 0.1f, 0.02f), RedTip, new Transform3D(new Basis(Vector3.Right, -Mathf.Pi / 2), new Vector3(0, 0.15f, -0.28f)));
+                break;
             case BlockKind.AmmoRack:
                 Add(root, Bevel(new Vector3(full, full * 0.7f, full)), mat, new Vector3(0, -0.075f, 0));
                 for (int i = 0; i < 4; i++)
@@ -382,7 +420,7 @@ public static class BlockVisuals
                 break;
         }
 
-        if (hints && def.Kind == BlockKind.Breech)
+        if (hints && (def.Kind == BlockKind.Breech || def.Kind == BlockKind.TorpedoTube || def.Kind == BlockKind.ShipPropeller))
         {
             // Arrow showing which way the gun fires (where the barrels go).
             Add(root, Cylinder(0.09f, 0.2f, 0f), Glow(new Color(1f, 0.85f, 0.2f), 2f),

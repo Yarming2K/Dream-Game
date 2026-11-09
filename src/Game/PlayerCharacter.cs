@@ -29,6 +29,13 @@ public partial class PlayerCharacter : CharacterBody3D, ICharacter
     public const float EyeHeight = 1.62f;
     private const float WalkSpeed = 4.6f, SprintSpeed = 7.4f, JumpSpeed = 5.4f, Gravity = 16f;
     private const float WeldRange = 3.4f;
+    private const float SwimSpeed = 2.8f;
+
+    /// <summary>In water deeper than about chest height: the player swims instead of walking.</summary>
+    public bool Swimming { get; private set; }
+
+    /// <summary>The camera is below the surface.</summary>
+    public bool EyesUnderwater => Active && Camera.GlobalPosition.Y < Ocean.Level;
 
     public Camera3D Camera { get; private set; }
     public float Health { get; private set; } = InfantryDamage.MaxHealth;
@@ -197,8 +204,21 @@ public partial class PlayerCharacter : CharacterBody3D, ICharacter
 
         // Movement
         Vector3 v = Velocity;
-        if (!IsOnFloor()) v.Y -= Gravity * dt;
+        bool wasSwimming = Swimming;
+        Swimming = GlobalPosition.Y < Ocean.Level - 1.15f;
+        if (Swimming && !wasSwimming && v.Y < -3f) Effects.Splash(GetParent<Node3D>(), GlobalPosition, 0.7f);
         Vector2 input = control ? Input.GetVector("steer_left", "steer_right", "move_forward", "move_back") : Vector2.Zero;
+        if (Swimming)
+        {
+            Swim(dt, ref v, input, control);
+            Velocity = v;
+            _fallSpeed = 0;
+            MoveAndSlide();
+            WeaponsTick(dt, control);
+            return;
+        }
+
+        if (!IsOnFloor()) v.Y -= Gravity * dt;
         bool sprint = control && Input.IsPhysicalKeyPressed(Key.Shift) && input.Y < 0 && !_aiming;
         float speed = sprint ? SprintSpeed : _aiming ? WalkSpeed * 0.55f : WalkSpeed;
         Vector3 wish = (Transform.Basis * new Vector3(input.X, 0, input.Y)).Normalized() * speed;
@@ -211,8 +231,28 @@ public partial class PlayerCharacter : CharacterBody3D, ICharacter
         MoveAndSlide();
 
         Footsteps(dt, new Vector2(Velocity.X, Velocity.Z).Length());
+        WeaponsTick(dt, control);
+    }
 
-        // Weapons
+    /// <summary>
+    /// Swimming: you float with your head just out of the water. Space swims up and out (climb onto a beach
+    /// or a low deck), C dives. Slow, and no sprinting.
+    /// </summary>
+    private void Swim(float dt, ref Vector3 v, Vector2 input, bool control)
+    {
+        Vector3 wish = (Transform.Basis * new Vector3(input.X, 0, input.Y)).Normalized() * SwimSpeed;
+        v.X = Mathf.MoveToward(v.X, wish.X, 6f * dt);
+        v.Z = Mathf.MoveToward(v.Z, wish.Z, 6f * dt);
+        float floatY = Ocean.Level - 1.35f;
+        float wantUp = Mathf.Clamp((floatY - GlobalPosition.Y) * 2f, -1.5f, 1.5f);
+        if (control && Input.IsActionPressed("brake")) wantUp = 3.2f;
+        else if (control && Input.IsActionPressed("dive")) wantUp = -2f;
+        v.Y = Mathf.MoveToward(v.Y, wantUp, 9f * dt);
+        _bob += new Vector2(v.X, v.Z).Length() * dt * 1.2f;
+    }
+
+    private void WeaponsTick(float dt, bool control)
+    {
         foreach (CarriedWeapon w in Weapons)
         {
             w.Cooldown = Mathf.Max(0, w.Cooldown - dt);

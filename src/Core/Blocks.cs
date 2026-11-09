@@ -23,6 +23,12 @@ public enum BlockKind
     AmmoRack,
     AmmoFeed,
     TurretRing,
+    ShipPropeller,
+    Rudder,
+    BallastValve,
+    BilgePump,
+    LeadBallast,
+    TorpedoTube,
 }
 
 public enum BlockShape
@@ -40,6 +46,7 @@ public enum AmmoType
 {
     AP,
     HE,
+    Torpedo,
 }
 
 /// <summary>Fixed properties of a breech, which sets a gun's caliber.</summary>
@@ -92,6 +99,24 @@ public sealed class BlockDef
     /// <summary>Whether the block has a physics collider. Wheels, barrels and feeds don't.</summary>
     public bool HasCollider = true;
 
+    /// <summary>Whether water can get past this block. Hulls are made of watertight blocks; frames and feeds let water through.</summary>
+    public bool Watertight = true;
+
+    /// <summary>
+    /// How much of its cell this block fills with something that pushes water aside (0 to 1). Unless a block
+    /// says otherwise (sealed tanks, tyres) that's just its own steel, so armor sinks on its own: ships float
+    /// on the sealed air inside their hulls.
+    /// </summary>
+    public float Displacement
+    {
+        get => _displacement >= 0 ? _displacement : Math.Clamp(MassKg / (SteelDensity * CellVolume), 0f, 1f);
+        set => _displacement = value;
+    }
+
+    private float _displacement = -1f;
+    public const float SteelDensity = 7850f;
+    private const float CellVolume = Blueprint.CellSize * Blueprint.CellSize * Blueprint.CellSize;
+
     /// <summary>Damage and radius of the explosion when this block is destroyed (fuel). Ammo racks scale with what's inside.</summary>
     public float DeathExplosionDamage;
     public float DeathExplosionRadiusM;
@@ -108,7 +133,7 @@ public sealed class BlockDef
 
 public static class BlockCatalog
 {
-    public static readonly string[] Categories = { "Structure", "Mobility", "Control", "Weapons", "Ammo" };
+    public static readonly string[] Categories = { "Structure", "Mobility", "Sea", "Control", "Weapons", "Ammo" };
 
     public static readonly BreechSpec Light37 = new()
     {
@@ -172,6 +197,7 @@ public static class BlockCatalog
             Description = "Light internal structure for filling space and holding parts together. Offers almost no protection.",
             MassKg = 20, Hp = 60, ArmorMm = 5, ColorR = 0.25f, ColorG = 0.25f, ColorB = 0.27f,
             Metallic = 0.8f, Roughness = 0.45f,
+            Watertight = false,
         },
 
         // Mobility
@@ -181,6 +207,7 @@ public static class BlockCatalog
             Description = "150 kW diesel. Needs a fuel tank somewhere in the vehicle.",
             MassKg = 250, Hp = 100, ArmorMm = 10, PowerKw = 150,
             ColorR = 0.5f, ColorG = 0.3f, ColorB = 0.18f, Metallic = 0.7f, Roughness = 0.5f,
+            Watertight = false,
         },
         new BlockDef
         {
@@ -188,6 +215,7 @@ public static class BlockCatalog
             Description = "450 kW diesel. The heart of a heavy vehicle.",
             MassKg = 700, Hp = 200, ArmorMm = 15, PowerKw = 450,
             ColorR = 0.55f, ColorG = 0.28f, ColorB = 0.12f, Metallic = 0.7f, Roughness = 0.5f,
+            Watertight = false,
         },
         new BlockDef
         {
@@ -196,6 +224,7 @@ public static class BlockCatalog
             MassKg = 120, Hp = 60, ArmorMm = 5, FuelL = 100,
             DeathExplosionDamage = 160, DeathExplosionRadiusM = 1.6f,
             ColorR = 0.6f, ColorG = 0.12f, ColorB = 0.1f, Metallic = 0.5f, Roughness = 0.55f,
+            Watertight = false, Displacement = 1f, // a sealed tank of fuel, lighter than water
         },
         new BlockDef
         {
@@ -203,6 +232,7 @@ public static class BlockCatalog
             Description = "Driven wheel with suspension. Fast on flat ground. Put wheels on the bottom row with nothing underneath.",
             MassKg = 80, Hp = 90, ArmorMm = 10, WheelRadiusM = 0.42f, HasCollider = false,
             ColorR = 0.1f, ColorG = 0.1f, ColorB = 0.1f, Metallic = 0.1f, Roughness = 0.9f,
+            Watertight = false, Displacement = 0.5f,
         },
         new BlockDef
         {
@@ -210,6 +240,7 @@ public static class BlockCatalog
             Description = "A wheel that turns for steering. Put these at the front.",
             MassKg = 90, Hp = 90, ArmorMm = 10, WheelRadiusM = 0.42f, HasCollider = false,
             ColorR = 0.12f, ColorG = 0.12f, ColorB = 0.14f, Metallic = 0.1f, Roughness = 0.9f,
+            Watertight = false, Displacement = 0.5f,
         },
         new BlockDef
         {
@@ -217,6 +248,7 @@ public static class BlockCatalog
             Description = "Tank track with a road wheel. Strong grip and skid steering; slower than wheels. Run them along both sides.",
             MassKg = 120, Hp = 140, ArmorMm = 20, WheelRadiusM = 0.3f, HasCollider = false,
             ColorR = 0.16f, ColorG = 0.15f, ColorB = 0.13f, Metallic = 0.6f, Roughness = 0.8f,
+            Watertight = false, Displacement = 0.5f,
         },
 
         // Control
@@ -226,6 +258,7 @@ public static class BlockCatalog
             Description = "Where you drive from. Every vehicle needs one. If it's destroyed, the vehicle is knocked out.",
             MassKg = 90, Hp = 80, ArmorMm = 5, ColorR = 0.2f, ColorG = 0.32f, ColorB = 0.5f,
             Metallic = 0.3f, Roughness = 0.6f,
+            Watertight = false,
         },
         new BlockDef
         {
@@ -233,6 +266,7 @@ public static class BlockCatalog
             Description = "Whoever sits here aims and fires the guns in the same turret (or the hull guns, if it's in the hull). Empty seats get an AI crew member, so you can drive while your gunner shoots.",
             MassKg = 90, Hp = 80, ArmorMm = 5, ColorR = 0.42f, ColorG = 0.26f, ColorB = 0.2f,
             Metallic = 0.3f, Roughness = 0.6f,
+            Watertight = false,
         },
         new BlockDef
         {
@@ -240,6 +274,7 @@ public static class BlockCatalog
             Description = "A periscope with strong zoom. A commander spots targets, so AI gunners find and track them much faster.",
             MassKg = 90, Hp = 80, ArmorMm = 5, ColorR = 0.24f, ColorG = 0.38f, ColorB = 0.3f,
             Metallic = 0.3f, Roughness = 0.6f,
+            Watertight = false,
         },
         new BlockDef
         {
@@ -256,6 +291,7 @@ public static class BlockCatalog
             Description = "Light gun. Fast reload, low damage. Barrels go in front of it (the arrow side).",
             MassKg = 150, Hp = 120, ArmorMm = 30, ColorR = 0.22f, ColorG = 0.22f, ColorB = 0.2f,
             Metallic = 0.85f, Roughness = 0.35f,
+            Watertight = false,
         },
         new BlockDef
         {
@@ -263,6 +299,7 @@ public static class BlockCatalog
             Description = "Medium gun. A good all-rounder. Barrels go in front of it (the arrow side).",
             MassKg = 500, Hp = 200, ArmorMm = 40, ColorR = 0.22f, ColorG = 0.22f, ColorB = 0.2f,
             Metallic = 0.85f, Roughness = 0.35f,
+            Watertight = false,
         },
         new BlockDef
         {
@@ -270,6 +307,7 @@ public static class BlockCatalog
             Description = "Heavy gun. Huge damage and recoil, slow reload. Barrels go in front of it (the arrow side).",
             MassKg = 1200, Hp = 320, ArmorMm = 50, ColorR = 0.22f, ColorG = 0.22f, ColorB = 0.2f,
             Metallic = 0.85f, Roughness = 0.35f,
+            Watertight = false,
         },
         new BlockDef
         {
@@ -277,6 +315,7 @@ public static class BlockCatalog
             Description = "Each segment in a straight line in front of a breech adds velocity and penetration (with diminishing returns), but adds weight and slows the turret.",
             MassKg = 90, Hp = 90, ArmorMm = 20, HasCollider = false, ColorR = 0.2f, ColorG = 0.21f, ColorB = 0.19f,
             Metallic = 0.85f, Roughness = 0.35f,
+            Watertight = false,
         },
         new BlockDef
         {
@@ -284,6 +323,7 @@ public static class BlockCatalog
             Description = "Goes on the end of the barrel. Cuts recoil by 40%.",
             MassKg = 70, Hp = 80, ArmorMm = 20, HasCollider = false, ColorR = 0.18f, ColorG = 0.18f, ColorB = 0.17f,
             Metallic = 0.85f, Roughness = 0.35f,
+            Watertight = false,
         },
         new BlockDef
         {
@@ -291,6 +331,7 @@ public static class BlockCatalog
             Description = "Touching a breech: about 22% faster reload each, up to 3.",
             MassKg = 150, Hp = 90, ArmorMm = 10, ColorR = 0.3f, ColorG = 0.4f, ColorB = 0.3f,
             Metallic = 0.6f, Roughness = 0.5f,
+            Watertight = false,
         },
         new BlockDef
         {
@@ -298,6 +339,7 @@ public static class BlockCatalog
             Description = "Touching a breech: +10% muzzle velocity and more recoil each, up to 2.",
             MassKg = 80, Hp = 60, ArmorMm = 5, DeathExplosionDamage = 120, DeathExplosionRadiusM = 1.2f,
             ColorR = 0.72f, ColorG = 0.55f, ColorB = 0.22f, Metallic = 0.8f, Roughness = 0.35f,
+            Watertight = false,
         },
 
         // Ammo
@@ -308,6 +350,7 @@ public static class BlockCatalog
             Description = "Armor-piercing shells: punch through armor and wreck what's behind it. Must touch the breech or connect through feeds or other racks. Explodes if destroyed while loaded.",
             MassKg = 120, Hp = 70, ArmorMm = 5, ColorR = 0.7f, ColorG = 0.62f, ColorB = 0.3f,
             Metallic = 0.5f, Roughness = 0.5f,
+            Watertight = false,
         },
         new BlockDef
         {
@@ -316,6 +359,15 @@ public static class BlockCatalog
             Description = "High-explosive shells: blast damage around the impact. Great against light armor and composite. Explodes if destroyed while loaded.",
             MassKg = 120, Hp = 70, ArmorMm = 5, ColorR = 0.65f, ColorG = 0.25f, ColorB = 0.18f,
             Metallic = 0.5f, Roughness = 0.5f,
+            Watertight = false,
+        },
+        new BlockDef
+        {
+            Id = "ammo_torpedo", Name = "Torpedo Rack", Category = "Ammo", Kind = BlockKind.AmmoRack, Ammo = AmmoType.Torpedo,
+            AmmoUnits = 16,
+            Description = "Holds two torpedoes. Must touch a Torpedo Tube or connect to it through ammo feeds or other racks. Explodes if destroyed while loaded.",
+            MassKg = 400, Hp = 90, ArmorMm = 5, ColorR = 0.32f, ColorG = 0.4f, ColorB = 0.46f, Metallic = 0.6f, Roughness = 0.45f,
+            Watertight = false,
         },
         new BlockDef
         {
@@ -323,6 +375,48 @@ public static class BlockCatalog
             Description = "Carries shells between racks and breeches. Use it to keep ammo deep inside the hull.",
             MassKg = 30, Hp = 50, ArmorMm = 5, HasCollider = false, ColorR = 0.45f, ColorG = 0.42f, ColorB = 0.3f,
             Metallic = 0.6f, Roughness = 0.5f,
+            Watertight = false,
+        },
+
+        // Sea
+        new BlockDef
+        {
+            Id = "ship_propeller", Name = "Ship Propeller", Category = "Sea", Kind = BlockKind.ShipPropeller,
+            Description = "Pushes the ship the way its arrow points, using engine power. It only works under water, so put it below the waterline, usually at the stern.",
+            MassKg = 200, Hp = 120, ArmorMm = 15, HasCollider = false, Watertight = false,
+            ColorR = 0.72f, ColorG = 0.55f, ColorB = 0.25f, Metallic = 0.9f, Roughness = 0.3f,
+        },
+        new BlockDef
+        {
+            Id = "rudder", Name = "Rudder", Category = "Sea", Kind = BlockKind.Rudder,
+            Description = "Steers the ship. Put it behind a propeller, below the waterline. Turned on its side (G) it becomes a dive plane, which helps a moving submarine change depth.",
+            MassKg = 120, Hp = 120, ArmorMm = 15, HasCollider = false, Watertight = false,
+            ColorR = 0.3f, ColorG = 0.32f, ColorB = 0.3f, Metallic = 0.7f, Roughness = 0.45f,
+        },
+        new BlockDef
+        {
+            Id = "ballast_valve", Name = "Ballast Valve", Category = "Sea", Kind = BlockKind.BallastValve,
+            Description = "Makes the sealed space it touches a ballast tank: flood it to dive, blow it out to surface. Wall off empty compartments low in the hull and give each one a valve.",
+            MassKg = 80, Hp = 80, ArmorMm = 20, ColorR = 0.25f, ColorG = 0.45f, ColorB = 0.55f, Metallic = 0.7f, Roughness = 0.4f,
+        },
+        new BlockDef
+        {
+            Id = "bilge_pump", Name = "Bilge Pump", Category = "Sea", Kind = BlockKind.BilgePump,
+            Description = "Pumps flood water out of the hull. Pumps can't beat a big hole: weld the hole shut first, then they clear the water.",
+            MassKg = 90, Hp = 60, ArmorMm = 5, ColorR = 0.2f, ColorG = 0.36f, ColorB = 0.6f, Metallic = 0.6f, Roughness = 0.45f,
+            Watertight = false,
+        },
+        new BlockDef
+        {
+            Id = "lead_ballast", Name = "Lead Ballast", Category = "Sea", Kind = BlockKind.LeadBallast,
+            Description = "Very heavy and compact. Low in the hull it keeps ships from rolling over, and it lets submarines sit at the right weight to dive.",
+            MassKg = 1400, Hp = 400, ArmorMm = 30, ColorR = 0.36f, ColorG = 0.37f, ColorB = 0.4f, Metallic = 0.5f, Roughness = 0.7f,
+        },
+        new BlockDef
+        {
+            Id = "torpedo_tube", Name = "Torpedo Tube", Category = "Sea", Kind = BlockKind.TorpedoTube,
+            Description = "Launches a torpedo the way its arrow points. Torpedoes run just under the surface and blow holes below the waterline. Feed it from Torpedo Racks.",
+            MassKg = 600, Hp = 200, ArmorMm = 30, ColorR = 0.3f, ColorG = 0.33f, ColorB = 0.36f, Metallic = 0.8f, Roughness = 0.35f,
         },
     };
 

@@ -651,6 +651,69 @@ public static class Effects
         Light(fx, new Color(0.7f, 0.85f, 1f), 3f + Rng.Randf() * 2f, 4f, 0.08f, flicker: true);
     }
 
+    // ---------- Water ----------
+
+    private static readonly Gradient SprayRamp = Ramp(
+        (0f, new Color(0.92f, 0.95f, 0.96f, 0.9f)), (0.6f, new Color(0.85f, 0.9f, 0.92f, 0.5f)), (1f, new Color(0.8f, 0.86f, 0.9f, 0f)));
+
+    /// <summary>A column of spray where something hits the water. <paramref name="size"/> about 0.3 (bullet) to 3 (torpedo).</summary>
+    public static void Splash(Node3D world, Vector3 pos, float size)
+    {
+        var at = new Vector3(pos.X, Ocean.Level + 0.05f, pos.Z);
+        FxNode fx = Spawn(world, at, 4f);
+        Emit(fx, new Burst
+        {
+            Mat = Smoke, Size = 0.8f * size, Amount = 14 + (int)(size * 8), Life = 1.6f, LifeRandom = 0.3f, Dir = Vector3.Up,
+            Spread = 12 + 6 * size, VelMin = 4 * size + 2, VelMax = 9 * size + 4, Gravity = new Vector3(0, -9.8f, 0),
+            Colors = SprayRamp, ScaleFrom = 0.4f, ScaleTo = 1f,
+        });
+        Emit(fx, new Burst
+        {
+            Mat = Smoke, Size = 1.2f * size, Amount = 18, Life = 1.8f, Dir = Vector3.Right, Spread = 180, Flatness = 1f,
+            VelMin = 1.5f * size + 1, VelMax = 4 * size + 2, DampMin = 2, DampMax = 3, Gravity = new Vector3(0, 0.2f, 0),
+            Colors = SprayRamp, ScaleFrom = 0.3f, ScaleTo = 1f, EmitRadius = 0.3f * size,
+        });
+        if (size >= 0.6f) Sfx.At(world, at, SoundId.Splash, -6f + size * 2f, Rng.RandfRange(0.85f, 1.1f) / Mathf.Sqrt(size), 14f + size * 6f);
+        else Sfx.At(world, at, SoundId.BulletDirt, -12f, Rng.RandfRange(1.3f, 1.6f), 6f);
+    }
+
+    /// <summary>
+    /// An explosion under water: a dull boom and a tall column of white water thrown up at the surface
+    /// (smaller the deeper it was), with a ring of foam spreading out.
+    /// </summary>
+    public static void UnderwaterBlast(Node3D world, Vector3 pos, float radius)
+    {
+        float depth = Mathf.Max(Ocean.Level - pos.Y, 0f);
+        float size = Mathf.Clamp(radius * 0.8f, 0.8f, 3.5f) * Mathf.Clamp(1.4f - depth / 12f, 0.35f, 1.2f);
+        var at = new Vector3(pos.X, Ocean.Level + 0.05f, pos.Z);
+        FxNode fx = Spawn(world, at, 6f);
+        Emit(fx, new Burst
+        {
+            Mat = Smoke, Size = 1.4f * size, Amount = 40, Life = 2.6f, LifeRandom = 0.3f, Dir = Vector3.Up, Spread = 9,
+            VelMin = 9 * size, VelMax = 16 * size, Gravity = new Vector3(0, -9.8f, 0), Colors = SprayRamp, ScaleFrom = 0.5f,
+            ScaleTo = 1.4f, EmitRadius = 0.6f * size,
+        });
+        Emit(fx, new Burst
+        {
+            Mat = Smoke, Size = 2.2f * size, Amount = 26, Life = 3.4f, Dir = Vector3.Right, Spread = 180, Flatness = 1f,
+            VelMin = 3 * size, VelMax = 7 * size, DampMin = 1.5f, DampMax = 2.5f, Gravity = new Vector3(0, 0.1f, 0),
+            Colors = SprayRamp, ScaleFrom = 0.4f, ScaleTo = 1.3f, EmitRadius = 0.8f * size,
+        });
+        Sfx.At(world, at, Sfx.ExplosionFor(radius), 1f, Rng.RandfRange(0.55f, 0.65f), 40f);
+        Sfx.At(world, at, SoundId.Splash, 2f, Rng.RandfRange(0.6f, 0.7f), 30f);
+    }
+
+    /// <summary>A puff of foam at the surface above a running torpedo.</summary>
+    public static void Wake(Node3D world, Vector3 pos)
+    {
+        FxNode fx = Spawn(world, new Vector3(pos.X, Ocean.Level + 0.1f, pos.Z), 3f);
+        Emit(fx, new Burst
+        {
+            Mat = Smoke, Size = 1.1f, Amount = 3, Life = 2.6f, Dir = Vector3.Up, Spread = 60, VelMin = 0.2f, VelMax = 0.6f,
+            DampMin = 1, DampMax = 2, Gravity = Vector3.Zero, Colors = SprayRamp, ScaleFrom = 0.4f, ScaleTo = 1f,
+        });
+    }
+
     /// <summary>Chunks flying off a destroyed block.</summary>
     public static void Shatter(Node3D world, Vector3 pos, BlockDef def, Vector3 velocity, Vector3 away)
     {

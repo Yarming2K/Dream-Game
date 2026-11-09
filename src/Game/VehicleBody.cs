@@ -85,7 +85,7 @@ public partial class VehicleBody : RigidBody3D, IGridHost
     public bool DriverAlive { get; private set; } = true;
     public float SpeedKmh { get; private set; }
     public AmmoType SelectedAmmo { get; private set; } = AmmoType.AP;
-    public bool CanDrive => DriverAlive && PowerKw > 0 && FuelL > 0 && Wheels.Count > 0;
+    public bool CanDrive => DriverAlive && UsablePowerKw > 0 && FuelL > 0 && (Wheels.Count > 0 || PropsAlive > 0);
     public bool HasLiveEngine => PowerKw > 0;
 
     public readonly List<WheelRt> Wheels = new();
@@ -140,6 +140,7 @@ public partial class VehicleBody : RigidBody3D, IGridHost
         v.SetupWheels();
         v.SetupGuns();
         v.SetupSeats();
+        v.SetupNaval();
         v.RefreshStats();
         v.FuelL = v.FuelCapacityL;
         return v;
@@ -283,6 +284,8 @@ public partial class VehicleBody : RigidBody3D, IGridHost
                 .Sum(b => b.Def.MassKg);
             t.SpeedRad = Mathf.DegToRad(Mobility.TraverseDegPerSec(turretMass));
         }
+
+        RefreshNaval();
     }
 
     public int Rounds(GunRt g, AmmoType type)
@@ -325,8 +328,14 @@ public partial class VehicleBody : RigidBody3D, IGridHost
             Braking = true;
         }
 
+        // Ships hold the telegraph's speed whoever is at the wheel, as long as someone is.
+        if (IsNaval) Throttle = driver != null && driver.Occupant != Occupant.Empty ? TelegraphThrottle[Telegraph] : 0f;
+
         Drive(dt);
+        if (IsNaval || PropsAlive > 0) NavalDrive(dt);
+        WaterTick(dt);
         CrewTick(dt);
+        TorpedoTick(dt);
         Aim(dt);
         if (PlayerInput.Fire) FirePlayerGuns();
         foreach (GunRt g in Guns)
@@ -364,7 +373,7 @@ public partial class VehicleBody : RigidBody3D, IGridHost
         float force = 0;
         if (canDrive && (Mathf.Abs(throttle) > 0.01f || Mathf.Abs(steer) > 0.01f))
         {
-            float p = PowerKw * 1000f * Mobility.DrivetrainEfficiency;
+            float p = UsablePowerKw * 1000f * Mobility.DrivetrainEfficiency;
             force = Mathf.Min(p / Mathf.Max(Mathf.Abs(speed), 2.5f), mass * GunMath.Gravity * 0.5f);
             float limit = throttle >= 0 ? _governor : _governor * 0.4f;
             if (Mathf.Abs(throttle) > 0.01f && speed * Mathf.Sign(throttle) > limit) force = 0;
@@ -584,6 +593,12 @@ public partial class VehicleBody : RigidBody3D, IGridHost
     /// <summary>Puts the vehicle back on its wheels where it is ("forgiving" recovery).</summary>
     public void Recover()
     {
+        if (IsNaval && Submerged > 0.05f)
+        {
+            RecoverAfloat();
+            return;
+        }
+
         Vector3 f = -GlobalTransform.Basis.Z;
         f.Y = 0;
         float yaw = f.LengthSquared() > 0.001f ? Mathf.Atan2(-f.X, -f.Z) : 0;

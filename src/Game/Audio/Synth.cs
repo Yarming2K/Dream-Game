@@ -418,6 +418,18 @@ public static class Synth
         return b;
     }
 
+    /// <summary>Something heavy hitting water: a slap, a gush and falling spray.</summary>
+    public static float[] Splash(uint seed = 18)
+    {
+        var r = new Rng(seed);
+        float[] b = Buffer(1.6f);
+        Noise(b, r, 0, 0.001f, 0.02f, 300, 6000, 0.9f);
+        Sweep(b, 0, 140, 55, 0.15f, 0.002f, 0.12f, 0.6f);
+        Noise(b, r, 0.02f, 0.05f, 0.35f, 150, 2500, 0.6f);
+        for (int i = 0; i < 40; i++) Noise(b, r, 0.15f + r.Unit() * 0.9f, 0.001f, 0.012f, 1500, 9000, 0.05f + 0.06f * r.Unit());
+        return Finish(b, 1.4f);
+    }
+
     /// <summary>Converts to 16-bit little-endian PCM.</summary>
     public static byte[] ToPcm16(float[] samples)
     {

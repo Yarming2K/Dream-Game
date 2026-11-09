@@ -5,7 +5,7 @@ namespace DreamGame.Game;
 /// <summary>Sky, sun and post-processing shared by the builder and the test range.</summary>
 public static class Scenery
 {
-    public static void AddSkyAndSun(Node3D parent, bool outdoors)
+    public static Godot.Environment AddSkyAndSun(Node3D parent, bool outdoors)
     {
         // Outdoors: a hazy daytime sky. In the builder: a dark workshop backdrop so the design stands out.
         var sky = outdoors
@@ -68,5 +68,7 @@ public static class Scenery
                 RotationDegrees = new Vector3(-20f, 150f, 0f),
             });
         }
+
+        return env;
     }
 }

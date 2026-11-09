@@ -69,6 +69,23 @@ public sealed class GunInfo
     public float MuzzleDistanceCells => Barrels.Count + (Brake.HasValue ? 1 : 0) + 0.5f;
 }
 
+/// <summary>How a design gets around, worked out from its parts.</summary>
+public enum MobilityMode
+{
+    Ground,
+    Ship,
+    Submarine,
+}
+
+public sealed class LauncherInfo
+{
+    public Int3 Cell;
+    public Int3 Forward;
+    public int Section;
+    public readonly List<Int3> Racks = new();
+    public int Rounds;
+}
+
 public sealed class TurretInfo
 {
     public int Section;
@@ -130,7 +147,21 @@ public sealed class VehicleAnalysis
     public ArmorProfile Front, Rear, LeftSide, RightSide, Top;
     public bool HasDriver;
 
-    public bool CanDrive => HasDriver && PowerKw > 0 && FuelL > 0 && Wheels.Count > 0;
+    public MobilityMode Mode;
+    public List<Compartment> Compartments = new();
+    public HydroStats Water;
+    public List<Int3> ShipPropellers = new();
+    public List<Int3> Rudders = new();
+    public List<LauncherInfo> TorpedoTubes = new();
+    public int Pumps;
+
+    public bool IsNaval => Mode is MobilityMode.Ship or MobilityMode.Submarine;
+
+    public bool CanDrive => HasDriver && FuelL > 0 && Mode switch
+    {
+        MobilityMode.Ground => PowerKw > 0 && Wheels.Count > 0,
+        _ => PowerKw > 0 && ShipPropellers.Count > 0 && Water.Floats,
+    };
     public int ErrorCount => Warnings.Count(w => w.Severity == Severity.Error);
 
     public static VehicleAnalysis Analyze(Blueprint bp) => Analyze(bp.ToCellMap());
@@ -160,6 +191,7 @@ public sealed class VehicleAnalysis
         a.FindDisconnected();
         a.ComputeMass();
         a.ComputeMobility();
+        a.ComputeNaval();
         a.ComputeTurrets();
         a.ComputeArmor();
         a.AssignCrew();
@@ -328,7 +360,10 @@ public sealed class VehicleAnalysis
                 Int3 n = stack.Pop();
                 BlockDef nd = Defs[n];
                 if (nd.Kind == BlockKind.AmmoRack)
-                    (nd.Ammo == AmmoType.AP ? gun.ApRacks : gun.HeRacks).Add(n);
+                {
+                    if (nd.Ammo == AmmoType.AP) gun.ApRacks.Add(n);
+                    else if (nd.Ammo == AmmoType.HE) gun.HeRacks.Add(n);
+                }
                 foreach (Int3 d in Int3.Directions)
                 {
                     Int3 m = n + d;
@@ -574,6 +609,74 @@ public sealed class VehicleAnalysis
         }
     }
 
+    /// <summary>Ships and submarines: how the hull floats, and its propellers, rudders, pumps and torpedo tubes.</summary>
+    private void ComputeNaval()
+    {
+        foreach (Int3 c in Sorted(Defs.Keys))
+        {
+            switch (Defs[c].Kind)
+            {
+                case BlockKind.ShipPropeller: ShipPropellers.Add(c); break;
+                case BlockKind.Rudder: Rudders.Add(c); break;
+                case BlockKind.BilgePump: Pumps++; break;
+                case BlockKind.TorpedoTube: TorpedoTubes.Add(FindLauncher(c, AmmoType.Torpedo, Torpedoes.Units)); break;
+            }
+        }
+
+        bool anyBallast = Defs.Values.Any(d => d.Kind == BlockKind.BallastValve);
+        bool shipParts = ShipPropellers.Count > 0 || anyBallast;
+        if (Wheels.Count > 0 && !shipParts)
+        {
+            Mode = MobilityMode.Ground;
+            return;
+        }
+
+        var connected = Defs.Where(kv => !Disconnected.Contains(kv.Key)).ToDictionary(kv => kv.Key, kv => kv.Value);
+        Compartments = Hydro.FindCompartments(connected);
+        Water = Hydro.Analyze(connected, Compartments, MassKg);
+        if (!shipParts && !Water.Floats)
+        {
+            Mode = MobilityMode.Ground;
+            return;
+        }
+
+        Mode = Compartments.Any(c => c.IsBallast) ? MobilityMode.Submarine : MobilityMode.Ship;
+        float cs = Blueprint.CellSize;
+        float beam = (Max.X - Min.X + 1) * cs, length = (Max.Z - Min.Z + 1) * cs;
+        TopSpeedKmh = FuelL > 0 && ShipPropellers.Count > 0 ? Hydro.TopSpeed(PowerKw, beam, Math.Max(Water.DraftM, 0.3f), length) * 3.6f : 0;
+    }
+
+    /// <summary>A launcher and the racks of its ammo that can reach it.</summary>
+    private LauncherInfo FindLauncher(Int3 cell, AmmoType ammo, int unitsPerRound)
+    {
+        var info = new LauncherInfo { Cell = cell, Forward = Orientations.Forward(Cells[cell].O), Section = SectionOf[cell] };
+        var seen = new HashSet<Int3>();
+        var stack = new Stack<Int3>();
+        foreach (Int3 d in Int3.Directions)
+        {
+            Int3 n = cell + d;
+            if (d != info.Forward && Defs.TryGetValue(n, out BlockDef nd) && nd.ConductsAmmo && seen.Add(n)) stack.Push(n);
+        }
+
+        while (stack.Count > 0)
+        {
+            Int3 n = stack.Pop();
+            if (Defs[n].Kind == BlockKind.AmmoRack && Defs[n].Ammo == ammo) info.Racks.Add(n);
+            foreach (Int3 d in Int3.Directions)
+            {
+                Int3 m = n + d;
+                if (!seen.Contains(m) && Defs.TryGetValue(m, out BlockDef md) && md.ConductsAmmo)
+                {
+                    seen.Add(m);
+                    stack.Push(m);
+                }
+            }
+        }
+
+        info.Rounds = info.Racks.Sum(r => Defs[r].AmmoUnits) / unitsPerRound;
+        return info;
+    }
+
     private void CollectWarnings()
     {
         if (!HasDriver)
@@ -582,9 +685,10 @@ public sealed class VehicleAnalysis
             Warnings.Add(new DesignWarning(Severity.Error, "No engine. Add a Small or Large Engine (Mobility)."));
         else if (FuelL <= 0)
             Warnings.Add(new DesignWarning(Severity.Error, "No fuel tank. The engines can't run without one."));
-        if (Wheels.Count == 0)
+        if (Mode == MobilityMode.Ground && Wheels.Count == 0)
             Warnings.Add(new DesignWarning(Severity.Error,
-                "No wheels or tracks. Put them on the bottom row with nothing underneath."));
+                "No wheels or tracks. Put them on the bottom row with nothing underneath (or Ship Propellers, to make it a boat)."));
+        if (IsNaval) NavalWarnings();
 
         int blocked = Wheels.Count(w => w.Blocked);
         if (blocked > 0)
@@ -615,12 +719,52 @@ public sealed class VehicleAnalysis
             Warnings.Add(new DesignWarning(Severity.Warning,
                 $"{Disconnected.Count} block(s) aren't attached to the vehicle (shown in red) and will fall off."));
 
-        if (Wheels.Count > 0 && TipAngleDeg < 30f)
+        if (Mode == MobilityMode.Ground && Wheels.Count > 0 && TipAngleDeg < 30f)
             Warnings.Add(new DesignWarning(Severity.Warning,
                 $"Top-heavy: it may tip over on slopes steeper than about {TipAngleDeg:0}°. Move heavy parts lower or make it wider."));
 
-        if (PowerKw > 0 && MassKg > 0 && PowerToWeight < 8f)
+        if (Mode == MobilityMode.Ground && PowerKw > 0 && MassKg > 0 && PowerToWeight < 8f)
             Warnings.Add(new DesignWarning(Severity.Warning,
                 $"Underpowered: {PowerToWeight:0.0} kW per tonne. It will crawl; aim for 10 or more."));
+    }
+
+    private void NavalWarnings()
+    {
+        float cs = Blueprint.CellSize;
+        if (!Water.Floats)
+            Warnings.Add(new DesignWarning(Severity.Error,
+                $"It sinks: it weighs {MassKg / 1000f:0.0} t but can only keep {Water.DisplacementT:0.0} t afloat. " +
+                "Seal more empty space inside the hull (closed compartments are what float), or use lighter armor."));
+        else if (Water.FreeboardM < 0.5f)
+            Warnings.Add(new DesignWarning(Severity.Warning,
+                $"Only {Water.FreeboardM:0.0} m of hull above the waterline. Waves of damage will swamp it; make the hull taller or lighter."));
+
+        if (ShipPropellers.Count == 0)
+            Warnings.Add(new DesignWarning(Severity.Error,
+                "No ship propeller. Add Ship Propellers below the waterline (Sea); they push the way their arrow points."));
+        int dry = ShipPropellers.Count(c => c.Y * cs > Water.WaterlineY);
+        if (dry > 0 && Mode == MobilityMode.Ship)
+            Warnings.Add(new DesignWarning(Severity.Warning,
+                $"{dry} propeller(s) sit above the waterline and won't push. Move them lower."));
+        if (Rudders.Count == 0 && ShipPropellers.Count > 0)
+            Warnings.Add(new DesignWarning(Severity.Info, "No rudder: it will turn slowly. Put Rudders behind the propellers."));
+        if (Compartments.Count == 0)
+            Warnings.Add(new DesignWarning(Severity.Warning,
+                "No sealed compartments: one hole anywhere and it floods. Close the hull and add a few inner walls."));
+        else if (Pumps == 0)
+            Warnings.Add(new DesignWarning(Severity.Info, "No bilge pumps: once water gets in, it stays in."));
+
+        if (Mode == MobilityMode.Submarine)
+        {
+            if (!Water.CanDive)
+                Warnings.Add(new DesignWarning(Severity.Warning,
+                    $"Even with the ballast flooded it stays afloat. Add {Math.Max(0.1f, Water.DisplacementT - Water.BallastT - MassKg / 1000f):0.0} t of Lead Ballast or make the ballast tanks bigger."));
+            if (!Water.CanSurface)
+                Warnings.Add(new DesignWarning(Severity.Error, "It can't surface even with the ballast blown out. Make it lighter."));
+        }
+
+        foreach (LauncherInfo t in TorpedoTubes.Where(t => t.Rounds == 0))
+            Warnings.Add(new DesignWarning(Severity.Warning,
+                $"The torpedo tube at {t.Cell} has no torpedoes. Put a Torpedo Rack touching it, or connect one with Ammo Feeds."));
     }
 }

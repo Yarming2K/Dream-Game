@@ -17,9 +17,21 @@ public partial class TestRange : Node3D
 {
     public event Action ExitRequested;
 
-    private static readonly Vector3 SpawnPoint = new(0, 0, 120);
-    private static readonly Vector3 DepotCenter = new(16, 0, 124);
+    private const float Ground = Terrain.LandHeight;
+    private static readonly Vector3 SpawnPoint = new(0, Ground, 120);
+    private static readonly Vector3 DepotCenter = new(16, Ground, 124);
     private const float DepotRadius = 9f;
+
+    // The sea off the east coast: ships start here, and a supply ring floats behind them.
+    private static readonly Vector3 SeaSpawn = new(240, Ocean.Level, 60);
+    private static readonly Vector3 SeaDepotCenter = new(240, Ocean.Level, 100);
+    private const float SeaDepotRadius = 18f;
+
+    private Godot.Environment _env;
+    private float _airFogDensity;
+    private Color _airFogColor;
+    private ColorRect _underwaterTint;
+    private bool _torpedoQueued;
 
     private Blueprint _bp;
     private VehicleBody _vehicle;
@@ -81,11 +93,15 @@ public partial class TestRange : Node3D
     public override void _Ready()
     {
         Sfx.Prewarm();
-        Scenery.AddSkyAndSun(this, true);
+        _env = Scenery.AddSkyAndSun(this, true);
+        _airFogDensity = _env.FogDensity;
+        _airFogColor = _env.FogLightColor;
         AddChild(Terrain.Build());
+        AddChild(Ocean.Build());
         AddRamps();
         AddMarkers();
         AddDepot();
+        AddSeaDepot();
         AddPopupTargets();
         _combat = new Combat { Name = "Combat" };
         AddChild(_combat);
@@ -134,20 +150,20 @@ public partial class TestRange : Node3D
             var body = new StaticBody3D { CollisionLayer = GridRegistry.Layers.World, CollisionMask = 0 };
             body.AddChild(new CollisionShape3D { Shape = new BoxShape3D { Size = size } });
             body.AddChild(new MeshInstance3D { Mesh = new BoxMesh { Size = size }, MaterialOverride = concrete });
-            var basePos = new Vector3(x, 0, 104f);
+            var basePos = new Vector3(x, Ground, 104f);
             var center = basePos + new Vector3(0, Mathf.Sin(a) * length / 2f - thick * 0.5f * Mathf.Cos(a), -Mathf.Cos(a) * length / 2f);
             body.Transform = new Transform3D(new Basis(Vector3.Right, a), center);
             AddChild(body);
-            AddChild(Sign($"{deg:0}° slope", new Vector3(x, 1.5f, 106f), 64));
+            AddChild(Sign($"{deg:0}° slope", new Vector3(x, Ground + 1.5f, 106f), 64));
         }
     }
 
     private void AddMarkers()
     {
-        for (int d = 50; d <= 400; d += 50)
+        for (int d = 50; d <= 300; d += 50)
         {
-            AddChild(Sign($"{d} m", new Vector3(-50f, 1.2f, SpawnPoint.Z - d), 96));
-            AddChild(Sign($"{d} m", new Vector3(50f, 1.2f, SpawnPoint.Z - d), 96));
+            AddChild(Sign($"{d} m", new Vector3(-50f, Ground + 1.2f, SpawnPoint.Z - d), 96));
+            AddChild(Sign($"{d} m", new Vector3(50f, Ground + 1.2f, SpawnPoint.Z - d), 96));
         }
     }
 
@@ -187,6 +203,42 @@ public partial class TestRange : Node3D
         root.AddChild(Sign("SUPPLY\npark or stand here", new Vector3(0, 3.2f, 0), 64));
     }
 
+    /// <summary>A ring of buoys at sea: stop a ship inside it to rearm and refuel.</summary>
+    private void AddSeaDepot()
+    {
+        var root = new Node3D { Name = "SeaDepot", Position = SeaDepotCenter };
+        AddChild(root);
+        root.AddChild(new MeshInstance3D
+        {
+            Mesh = new TorusMesh { InnerRadius = SeaDepotRadius - 0.35f, OuterRadius = SeaDepotRadius, Rings = 72, RingSegments = 6 },
+            Position = new Vector3(0, 0.12f, 0), Scale = new Vector3(1, 0.3f, 1),
+            MaterialOverride = BlockVisuals.Emissive(new Color(1f, 0.72f, 0.27f), 1.2f),
+        });
+        var red = new StandardMaterial3D { AlbedoColor = new Color(0.75f, 0.16f, 0.12f), Roughness = 0.6f };
+        var white = new StandardMaterial3D { AlbedoColor = new Color(0.9f, 0.9f, 0.86f), Roughness = 0.6f };
+        for (int i = 0; i < 8; i++)
+        {
+            float a = i * Mathf.Tau / 8f;
+            var at = new Vector3(Mathf.Cos(a) * SeaDepotRadius, 0, Mathf.Sin(a) * SeaDepotRadius);
+            root.AddChild(new MeshInstance3D { Mesh = new CylinderMesh { TopRadius = 0.45f, BottomRadius = 0.6f, Height = 1.2f }, MaterialOverride = red, Position = at + Vector3.Up * 0.2f });
+            root.AddChild(new MeshInstance3D { Mesh = new CylinderMesh { TopRadius = 0.12f, BottomRadius = 0.3f, Height = 1.1f }, MaterialOverride = white, Position = at + Vector3.Up * 1.3f });
+            root.AddChild(new MeshInstance3D
+            {
+                Mesh = new SphereMesh { Radius = 0.14f, Height = 0.28f }, Position = at + Vector3.Up * 1.95f,
+                MaterialOverride = BlockVisuals.Emissive(new Color(1f, 0.72f, 0.27f), 3f),
+            });
+        }
+
+        root.AddChild(Sign("NAVAL SUPPLY\nstop inside the ring", new Vector3(0, 7f, 0), 72));
+    }
+
+    private static bool AtDepot(Vector3 p)
+    {
+        float land = new Vector2(p.X - DepotCenter.X, p.Z - DepotCenter.Z).Length();
+        float sea = new Vector2(p.X - SeaDepotCenter.X, p.Z - SeaDepotCenter.Z).Length();
+        return (land <= DepotRadius && p.Y > DepotCenter.Y - 3f) || sea <= SeaDepotRadius;
+    }
+
     private void AddPopupTargets()
     {
         (float x, float d)[] spots = { (30f, 15f), (36f, 30f), (31f, 50f), (38f, 75f), (33f, 110f) };
@@ -194,12 +246,12 @@ public partial class TestRange : Node3D
         {
             var t = new PopupTarget { DistanceM = d };
             AddChild(t);
-            t.GlobalPosition = new Vector3(x, 0, SpawnPoint.Z - d);
+            t.GlobalPosition = new Vector3(x, Ground, SpawnPoint.Z - d);
             t.Rotation = new Vector3(0, Mathf.Atan2(SpawnPoint.X - x, d) * 0.5f, 0);
             t.KnockedDown += target => AddFeed($"[color={Ui.Hex(Ui.Good)}]TARGET DOWN  {target.DistanceM:0} m[/color]", true);
         }
 
-        AddChild(Sign("Pop-up targets", new Vector3(34f, 3f, SpawnPoint.Z - 8f), 64));
+        AddChild(Sign("Pop-up targets", new Vector3(34f, Ground + 3f, SpawnPoint.Z - 8f), 64));
     }
 
     private void SpawnTargets()
@@ -215,15 +267,19 @@ public partial class TestRange : Node3D
         _combat?.Clear();
 
         float wallZ = SpawnPoint.Z - 60f;
-        AddStructure(ExampleDesigns.Wall("armor_light", 7, 5), new Vector3(-24, 0, wallZ), 0, "Light armor\n25 mm");
-        AddStructure(ExampleDesigns.Wall("armor_heavy", 7, 5), new Vector3(-8, 0, wallZ), 0, "Heavy armor\n80 mm");
-        AddStructure(ExampleDesigns.Wall("armor_composite", 7, 5), new Vector3(8, 0, wallZ), 0, "Composite\n110 mm, weak to HE");
-        AddStructure(ExampleDesigns.Wall("armor_heavy", 7, 5), new Vector3(24, 0, wallZ), 45, "Heavy armor\nangled 45°");
-        AddStructure(ExampleDesigns.Bunker(), new Vector3(0, 0, SpawnPoint.Z - 160f), 180, "Bunker\n(ammo inside)");
-        AddStructure(ExampleDesigns.Wall("armor_heavy", 9, 6), new Vector3(0, 0, SpawnPoint.Z - 400f), 0, "400 m");
+        AddStructure(ExampleDesigns.Wall("armor_light", 7, 5), new Vector3(-24, Ground, wallZ), 0, "Light armor\n25 mm");
+        AddStructure(ExampleDesigns.Wall("armor_heavy", 7, 5), new Vector3(-8, Ground, wallZ), 0, "Heavy armor\n80 mm");
+        AddStructure(ExampleDesigns.Wall("armor_composite", 7, 5), new Vector3(8, Ground, wallZ), 0, "Composite\n110 mm, weak to HE");
+        AddStructure(ExampleDesigns.Wall("armor_heavy", 7, 5), new Vector3(24, Ground, wallZ), 45, "Heavy armor\nangled 45°");
+        AddStructure(ExampleDesigns.Bunker(), new Vector3(0, Ground, SpawnPoint.Z - 160f), 180, "Bunker\n(ammo inside)");
+        AddStructure(ExampleDesigns.Wall("armor_heavy", 9, 6), new Vector3(0, Ground, SpawnPoint.Z - 300f), 0, "300 m");
 
-        AddDummy(ExampleDesigns.Warden(), new Vector3(-26, 0, SpawnPoint.Z - 120f), 35f);
-        AddDummy(ExampleDesigns.Jackal(), new Vector3(26, 0, SpawnPoint.Z - 110f), -60f);
+        AddDummy(ExampleDesigns.Warden(), new Vector3(-26, Ground, SpawnPoint.Z - 120f), 35f);
+        AddDummy(ExampleDesigns.Jackal(), new Vector3(26, Ground, SpawnPoint.Z - 110f), -60f);
+
+        // At sea: an enemy patrol boat lying broadside on, and a submarine on the surface further out.
+        AddDummy(ExampleDesigns.Corsair(), new Vector3(SeaSpawn.X + 70f, 0, SeaSpawn.Z - 260f), 90f);
+        AddDummy(ExampleDesigns.Barracuda(), new Vector3(SeaSpawn.X + 160f, 0, SeaSpawn.Z - 420f), 30f);
     }
 
     private void AddStructure(Blueprint bp, Vector3 pos, float yawDeg, string label)
@@ -238,7 +294,8 @@ public partial class TestRange : Node3D
     private void AddDummy(Blueprint bp, Vector3 pos, float yawDeg)
     {
         VehicleAnalysis a = VehicleAnalysis.Analyze(bp);
-        var where = new Transform3D(new Basis(Vector3.Up, Mathf.DegToRad(yawDeg)), pos + Vector3.Up * VehicleBody.SpawnHeight(a));
+        Vector3 at = a.IsNaval ? new Vector3(pos.X, VehicleBody.FloatHeight(a), pos.Z) : pos + Vector3.Up * VehicleBody.SpawnHeight(a);
+        var where = new Transform3D(new Basis(Vector3.Up, Mathf.DegToRad(yawDeg)), at);
         VehicleBody v = VehicleBody.Create(bp, where, false);
         v.AiCrewActive = _liveFire;
         AddChild(v);
@@ -250,7 +307,9 @@ public partial class TestRange : Node3D
         if (_mount != null && _mount == _vehicle) ExitVehicle(silent: true);
         if (_vehicle != null && IsInstanceValid(_vehicle)) _vehicle.Vanish();
         VehicleAnalysis a = VehicleAnalysis.Analyze(_bp);
-        var where = new Transform3D(Basis.Identity, SpawnPoint + Vector3.Up * VehicleBody.SpawnHeight(a));
+        // Ships and submarines start at sea; everything else on the firing line.
+        Vector3 at = a.IsNaval ? new Vector3(SeaSpawn.X, VehicleBody.FloatHeight(a), SeaSpawn.Z) : SpawnPoint + Vector3.Up * VehicleBody.SpawnHeight(a);
+        var where = new Transform3D(Basis.Identity, at);
         _vehicle = VehicleBody.Create(_bp, where, true);
         _vehicle.AiCrewActive = _liveFire;
         VehicleBody v = _vehicle;
@@ -332,6 +391,27 @@ public partial class TestRange : Node3D
         };
         PhysicsDirectSpaceState3D space = GetWorld3D().DirectSpaceState;
         var shape = new CapsuleShape3D { Radius = 0.35f, Height = 1.8f };
+
+        // Boats: step out onto the deck rather than into the sea.
+        if (v.IsNaval)
+        {
+            float cs = Conv.CS;
+            foreach (float along in new[] { 0f, -0.22f, 0.22f, -0.35f, 0.35f, -0.1f, 0.1f })
+            {
+                float z = Mathf.Lerp(a.Min.Z, a.Max.Z, 0.5f + along) * cs;
+                Vector3 from = xf * new Vector3((a.Min.X + a.Max.X) * 0.5f * cs, (a.Max.Y + 4) * cs, z);
+                Godot.Collections.Dictionary deck = space.IntersectRay(
+                    PhysicsRayQueryParameters3D.Create(from, from + Vector3.Down * (a.Max.Y - a.Min.Y + 8) * cs, GridRegistry.Layers.Vehicles));
+                if (deck.Count == 0 || deck["collider"].AsGodotObject() != v || deck["normal"].AsVector3().Y < 0.7f) continue;
+                Vector3 spot = deck["position"].AsVector3();
+                var q = new PhysicsShapeQueryParameters3D
+                {
+                    Shape = shape, Transform = new Transform3D(Basis.Identity, spot + Vector3.Up * 1.0f), CollisionMask = GridRegistry.Layers.All,
+                };
+                if (space.IntersectShape(q, 1).Count == 0) return spot + Vector3.Up * 0.05f;
+            }
+        }
+
         foreach (Vector3 c in candidates)
         {
             Godot.Collections.Dictionary down = space.IntersectRay(
@@ -398,21 +478,36 @@ public partial class TestRange : Node3D
             Vector3 d = -_cam.GlobalTransform.Basis.Z;
             Godot.Collections.Dictionary hit = space.IntersectRay(PhysicsRayQueryParameters3D.Create(
                 o, o + d * 2500f, GridRegistry.Layers.All | GridRegistry.Layers.Characters | GridRegistry.Layers.Targets, exclude));
+            bool naval = _mount.IsNaval;
             _mount.PlayerInput = new VehicleControls
             {
-                Throttle = captured && driving ? Input.GetAxis("move_back", "move_forward") : 0f,
+                // Ships take their speed from the telegraph (W / S taps, in _UnhandledInput).
+                Throttle = captured && driving && !naval ? Input.GetAxis("move_back", "move_forward") : 0f,
                 Steer = captured && driving ? Input.GetAxis("steer_left", "steer_right") : 0f,
-                Brake = captured && driving && Input.IsActionPressed("brake"),
+                Brake = captured && driving && !naval && Input.IsActionPressed("brake"),
                 HasAim = true,
                 Aim = hit.Count > 0 ? hit["position"].AsVector3() : o + d * 1500f,
                 Fire = captured && !_holdFire && Input.IsActionPressed("fire"),
             };
+            if (captured && driving && _mount.IsSubmarine)
+            {
+                if (Input.IsActionPressed("dive")) _mount.ChangeDepth(3f, dt);
+                if (Input.IsActionPressed("brake")) _mount.ChangeDepth(-5f, dt);
+            }
+
+            if (_torpedoQueued)
+            {
+                _torpedoQueued = false;
+                LaunchTorpedo();
+            }
+
             _me.GlobalPosition = _mount.PlayerSeat != null ? _mount.SeatWorldPos(_mount.PlayerSeat) : _me.GlobalPosition;
             PredictImpacts(space, exclude);
         }
         else
         {
             _impacts.Clear();
+            _torpedoQueued = false;
         }
 
         _lookedAt = !Mounted && _me.Active && _me.Alive ? _me.LookedAtVehicle(5f) : null;
@@ -427,13 +522,12 @@ public partial class TestRange : Node3D
         foreach (IGridHost h in GridRegistry.Hosts)
         {
             if (h is not VehicleBody v || v.Faction != 0 || !IsInstanceValid(v)) continue;
-            Vector3 p = v.GlobalPosition;
-            if (new Vector2(p.X - DepotCenter.X, p.Z - DepotCenter.Z).Length() > DepotRadius) continue;
+            if (!AtDepot(v.GlobalPosition)) continue;
             bool changed = v.Resupply(dt);
             if (v == _mount && changed) _resupplying = true;
         }
 
-        if (_me.Active && _me.Alive && _me.GlobalPosition.DistanceTo(DepotCenter) < DepotRadius)
+        if (_me.Active && _me.Alive && AtDepot(_me.GlobalPosition))
         {
             bool healed = _me.Health < InfantryDamage.MaxHealth;
             _me.Heal(25f * dt);
@@ -472,6 +566,12 @@ public partial class TestRange : Node3D
                     break;
                 }
 
+                if (p.Y > Ocean.Level && next.Y <= Ocean.Level)
+                {
+                    p = p.Lerp(next, (p.Y - Ocean.Level) / (p.Y - next.Y));
+                    break;
+                }
+
                 p = next;
             }
 
@@ -499,6 +599,7 @@ public partial class TestRange : Node3D
         float n1 = _shakeNoise.GetNoise2D(_shakeTime * 60f, 0), n2 = _shakeNoise.GetNoise2D(0, _shakeTime * 60f);
         float n3 = _shakeNoise.GetNoise2D(_shakeTime * 60f, 100f);
         Camera3D active = Mounted ? _cam : _me.Camera;
+        UpdateUnderwater(active);
         active.HOffset = n1 * 0.35f * shake;
         active.VOffset = n2 * 0.35f * shake;
         _cam.Rotation = new Vector3(n2 * 0.03f * shake, n1 * 0.03f * shake, n3 * 0.05f * shake);
@@ -511,6 +612,16 @@ public partial class TestRange : Node3D
 
         _hurtFlash = Mathf.Max(0, _hurtFlash - dt * 1.2f);
         UpdateHud(dt);
+    }
+
+    /// <summary>Below the surface the world turns murky green-blue and close.</summary>
+    private void UpdateUnderwater(Camera3D cam)
+    {
+        bool under = cam.GlobalPosition.Y < Ocean.Level - 0.05f;
+        _underwaterTint.Visible = under;
+        _env.FogDensity = under ? 0.075f : _airFogDensity;
+        _env.FogLightColor = under ? new Color(0.05f, 0.22f, 0.26f) : _airFogColor;
+        _env.FogSkyAffect = under ? 1f : 0.3f;
     }
 
     public override void _UnhandledInput(InputEvent e)
@@ -548,6 +659,25 @@ public partial class TestRange : Node3D
             return;
         }
 
+        // Ships: W / S move the engine telegraph a notch, Space orders all stop.
+        if (captured && Mounted && _mount.IsNaval && _mount.PlayerSeat?.Role == SeatRole.Driver)
+        {
+            int notch = e.IsActionPressed("move_forward") ? 1 : e.IsActionPressed("move_back") ? -1 : 0;
+            if (notch != 0)
+            {
+                _mount.StepTelegraph(notch);
+                Big(_mount.TelegraphName);
+                return;
+            }
+
+            if (!_mount.IsSubmarine && e.IsActionPressed("brake"))
+            {
+                _mount.AllStop();
+                Big(_mount.TelegraphName);
+                return;
+            }
+        }
+
         if (Mounted && e is InputEventKey { Pressed: true, Echo: false } k)
         {
             if (k.PhysicalKeycode == Key.Key1) TrySwitchSeat(SeatRole.Driver);
@@ -559,6 +689,7 @@ public partial class TestRange : Node3D
         else if (e.IsActionPressed("toggle_ammo") && Mounted) _mount.ToggleAmmo();
         else if (e.IsActionPressed("recover") && Mounted) _mount.Recover();
         else if (e.IsActionPressed("gunner_mode") && Mounted) ToggleGunnerMode();
+        else if (e.IsActionPressed("torpedo") && Mounted) _torpedoQueued = true;
         else if (e.IsActionPressed("respawn")) RespawnAll();
         else if (e.IsActionPressed("reset_targets"))
         {
@@ -568,6 +699,21 @@ public partial class TestRange : Node3D
         else if (e.IsActionPressed("live_fire")) ToggleLiveFire();
         else if (e.IsActionPressed("to_builder")) ExitRequested?.Invoke();
         else if (e.IsActionPressed("help")) _help.Visible = !_help.Visible;
+    }
+
+    private void LaunchTorpedo()
+    {
+        VehicleBody v = _mount;
+        if (v.FireTorpedo(true, v.PlayerInput.Aim))
+        {
+            AddFeed($"[color={Ui.Hex(Ui.Info)}]TORPEDO AWAY  ·  {v.TorpedoesLeft} left[/color]", true);
+            _trauma = Mathf.Min(1f, _trauma + 0.15f);
+            return;
+        }
+
+        Big(v.Tubes.Count == 0 ? "No torpedo tubes" : v.Tubes.All(t => !t.Alive) ? "Torpedo tubes destroyed"
+            : v.TorpedoesLeft == 0 ? "Out of torpedoes" : "Tubes reloading");
+        Sfx.Play2D(this, SoundId.Error, -10f);
     }
 
     private void Interact()
@@ -619,6 +765,9 @@ public partial class TestRange : Node3D
     private void BuildHud()
     {
         Control root = Ui.Root(this);
+        _underwaterTint = new ColorRect { Color = new Color(0.03f, 0.2f, 0.24f, 0.32f), MouseFilter = Control.MouseFilterEnum.Ignore, Visible = false };
+        root.AddChild(_underwaterTint);
+        _underwaterTint.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
         _vignette = new ColorRect { Color = new Color(0.6f, 0f, 0f, 0f), MouseFilter = Control.MouseFilterEnum.Ignore };
         root.AddChild(_vignette);
         _vignette.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
@@ -739,7 +888,7 @@ public partial class TestRange : Node3D
         _liveChip.OffsetTop = 14;
         _liveChip.AddThemeConstantOverride("outline_size", 6);
 
-        Label hint = Ui.Small("F1 help   ·   E get in / out   ·   L live fire   ·   Tab builder");
+        Label hint = Ui.Small("F1 help   ·   E get in / out   ·   F torpedo   ·   L live fire   ·   Tab builder");
         root.AddChild(hint);
         hint.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.BottomLeft);
         hint.GrowVertical = Control.GrowDirection.Begin;
@@ -780,6 +929,12 @@ public partial class TestRange : Node3D
             "Left click fire · Right click zoom (the commander seat zooms much further) · Q switch AP / HE\n" +
             "1 / 2 / 3 switch to the driver, gunner or commander seat · G gunner follows your aim / picks its own targets\n" +
             "E get out\n\n" +
+            "[b][color=#ffb845]At sea[/color][/b]\n" +
+            "Ships and submarines start off the east coast. W / S move the engine telegraph a notch (it holds the speed, so you can leave the wheel for a gun) · A / D rudder · Space all stop\n" +
+            "Submarines: hold C to order the boat deeper, hold Space to come up. The crew floods and blows the ballast tanks to hold the depth you order.\n" +
+            "F fires a torpedo from any seat. It turns onto the bearing you're aiming at, then runs straight just under the surface. Torpedoes sink ships by flooding them.\n" +
+            "Holes below the waterline flood compartments: get out, weld them shut (3), and the bilge pumps clear the water. Stop inside the buoy ring to rearm and refuel.\n" +
+            "In the water you swim: Space up, C down, E to climb into a boat you're looking at.\n\n" +
             "[b][color=#ffb845]On foot[/color][/b]\n" +
             "W A S D move · Shift sprint · Space jump · Mouse look · Right click aim\n" +
             "1 rifle · 2 AT rocket · 3 welding torch · Left click fire · R reload\n" +
@@ -882,12 +1037,16 @@ public partial class TestRange : Node3D
         VehicleBody v = _mount;
         var sb = new StringBuilder();
         sb.Append($"[b]{v.DisplayName}[/b]\n");
-        sb.Append($"[font_size=22][b]{Mathf.Abs(v.SpeedKmh):0}[/b][/font_size] km/h   ");
-        sb.Append($"Fuel {v.FuelL:0}/{v.FuelCapacityL:0} L   Engines {v.PowerKw:0} kW\n");
+        if (v.IsNaval) NavalStatus(v, sb);
+        else sb.Append($"[font_size=22][b]{Mathf.Abs(v.SpeedKmh):0}[/b][/font_size] km/h   ");
+        sb.Append($"Fuel {v.FuelL:0}/{v.FuelCapacityL:0} L   Engines {v.UsablePowerKw:0} kW\n");
         if (!v.DriverAlive) sb.Append($"[color={Ui.Hex(Ui.Bad)}]Driver knocked out. Get out (E) and weld the seat back, or Backspace.[/color]\n");
         else if (v.PowerKw <= 0) sb.Append($"[color={Ui.Hex(Ui.Bad)}]Engines destroyed.[/color]\n");
-        else if (v.FuelL <= 0) sb.Append($"[color={Ui.Hex(Ui.Bad)}]Out of fuel: drive onto the supply pad.[/color]\n");
-        else if (v.Wheels.Count == 0) sb.Append($"[color={Ui.Hex(Ui.Bad)}]No wheels left.[/color]\n");
+        else if (v.EngineDrowned) sb.Append($"[color={Ui.Hex(Ui.Bad)}]{(v.IsNaval ? "Engine room flooded: pump it out or weld the holes." : "Engine flooded: it won't run under water. Backspace to respawn.")}[/color]\n");
+        else if (v.FuelL <= 0) sb.Append($"[color={Ui.Hex(Ui.Bad)}]Out of fuel: {(v.IsNaval ? "stop inside the buoy ring." : "drive onto the supply pad.")}[/color]\n");
+        else if (!v.IsNaval && v.Wheels.Count == 0) sb.Append($"[color={Ui.Hex(Ui.Bad)}]No wheels left.[/color]\n");
+        else if (v.IsNaval && v.PropsAlive == 0) sb.Append($"[color={Ui.Hex(Ui.Bad)}]Propellers destroyed.[/color]\n");
+        if (!v.IsNaval && v.Submerged > 0.25f) sb.Append($"[color={Ui.Hex(Ui.Warn)}]Deep water: land vehicles sink. Back out while the engine still runs.[/color]\n");
         if (v.IsUpsideDownOrStuck) sb.Append($"[color={Ui.Hex(Ui.Warn)}]Tipped over: press R to get back up.[/color]\n");
         if (_resupplying) sb.Append($"[color={Ui.Hex(Ui.Good)}]Resupplying...[/color]\n");
         int missing = v.MissingCount;
@@ -930,6 +1089,55 @@ public partial class TestRange : Node3D
             float progress = g.Alive ? 1f - g.ReloadLeft / Mathf.Max(g.Stats.ReloadS, 0.01f) : 0f;
             row.Reload.Set(progress, 1f, g.ReloadLeft > 0 ? Ui.Warn : Ui.Good);
             row.Ammo.Text = $"AP {apRounds}   HE {heRounds}   ·   {g.Stats.ApPenMm:0} mm pen";
+        }
+    }
+
+    /// <summary>Speed in knots, the telegraph, rudder, depth and ballast, flooding, and torpedoes.</summary>
+    private static void NavalStatus(VehicleBody v, StringBuilder sb)
+    {
+        string dim = Ui.Hex(Ui.Dim);
+        float kn = Mathf.Abs(v.SpeedKmh) / 1.852f;
+        sb.Append($"[font_size=22][b]{kn:0}[/b][/font_size] kn [color={dim}]({Mathf.Abs(v.SpeedKmh):0} km/h)[/color]   ");
+        sb.Append($"[b][color=#ffb845]{v.TelegraphName}[/color][/b]\n");
+        float deg = v.RudderAngle * 35f;
+        string rudder = Mathf.Abs(deg) < 2f ? "amidships" : $"{Mathf.Abs(deg):0}° {(deg < 0 ? "port" : "starboard")}";
+        sb.Append($"Rudder {rudder}   ");
+        if (v.IsSubmarine)
+        {
+            string depth = v.DepthM <= 0.2f ? "surfaced" : $"{v.DepthM:0.0} m";
+            string order = v.TargetDepth < 0.1f ? "surface" : $"{v.TargetDepth:0} m";
+            string tanks = v.BallastCommand > 0 ? "flooding" : v.BallastCommand < 0 ? "blowing" : "holding";
+            sb.Append($"\nDepth [b]{depth}[/b]  [color={dim}]ordered {order}[/color]   Ballast {v.BallastFill * 100f:0}% [color={dim}]{tanks}[/color]");
+            if (v.ValvesAlive == 0) sb.Append($"  [color={Ui.Hex(Ui.Bad)}]valves destroyed[/color]");
+        }
+
+        sb.Append('\n');
+        float cap = v.FloodCapacity;
+        if (cap > 0)
+        {
+            var parts = v.Analysis.Compartments.Where(c => !c.IsBallast && c.Cells.Count > 8).ToList();
+            float flood = v.FloodWater / cap;
+            if (flood > 0.005f || v.TakingWater)
+            {
+                string word = v.TakingWater ? "TAKING WATER" : "Flooded";
+                sb.Append($"[color={Ui.Hex(v.TakingWater ? Ui.Bad : Ui.Warn)}]{word} {flood * 100f:0}%[/color]  ");
+                foreach (Compartment c in parts)
+                {
+                    Color col = c.FillFraction > 0.6f ? Ui.Bad : c.FillFraction > 0.05f ? Ui.Warn : Ui.Good;
+                    sb.Append($"[color={Ui.Hex(col)}]■[/color]");
+                }
+
+                sb.Append($"  [color={dim}]{v.PumpsAlive} pump(s)[/color]\n");
+            }
+        }
+
+        if (v.Tubes.Count > 0)
+        {
+            int ready = v.Tubes.Count(t => t.Alive && t.ReloadLeft <= 0);
+            float next = v.Tubes.Where(t => t.Alive && t.ReloadLeft > 0).Select(t => t.ReloadLeft).DefaultIfEmpty(0).Min();
+            sb.Append($"Torpedoes [b]{v.TorpedoesLeft}[/b]   tubes ready {ready}/{v.Tubes.Count(t => t.Alive)}");
+            if (ready == 0 && next > 0) sb.Append($" [color={dim}](next in {next:0}s)[/color]");
+            sb.Append($"   [color={dim}]F fires[/color]\n");
         }
     }
 
@@ -976,6 +1184,7 @@ public partial class TestRange : Node3D
         VehicleBody looked = _lookedAt != null && IsInstanceValid(_lookedAt) ? _lookedAt : null;
         _prompt.Text = looked == null ? "" : looked.Faction != 0 ? "Enemy vehicle"
             : looked.HasFreeSeat ? $"E  get into {looked.DisplayName}" : "No free seats";
+        if (_me.Swimming && _prompt.Text.Length == 0) _prompt.Text = "Swimming  ·  Space up  ·  C down";
         if (_resupplying) _prompt.Text = (_prompt.Text.Length > 0 ? _prompt.Text + "\n" : "") + "Resupplying...";
     }
 

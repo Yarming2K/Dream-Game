@@ -30,6 +30,8 @@ These three have to feel great, or the game fails:
 |---|---|
 | Platform | Downloadable PC game in Godot 4 (C#). Target hardware: a gaming PC |
 | World | A newly generated star system each campaign. Ground and space are separate battlefields, joined by a system map |
+| Fronts | On a planet you fight on land, at sea (ships and submarines) and in the air (planes, helicopters, VTOL and drones, airships). All of them are built in the same builder from the same blocks |
+| Machine size | From scout cars up to colossal machines 300 m and longer: land battleships, carriers, mobile fortresses |
 | Player | A soldier-engineer on foot with full shooter combat. No hunger, thirst or oxygen meters; only health |
 | Building | Block by block, plus reusable parts you've designed (like a turret you drop onto any hull). Everything is custom: guns are built from components, and factory machines are built from blocks |
 | Damage | Every block has health and armor. Pieces that lose their connection break off as physics debris |
@@ -98,6 +100,16 @@ Guns inside a turret group traverse (turn left and right); every gun elevates.
 - Wheels and track segments both use raycast suspension. Wheels steer; tracks skid-steer.
 - Engine power and vehicle mass set acceleration and top speed.
 - Fuel tanks feed the engines. An engine with no fuel connected gets a warning.
+- The builder works out what a design is from its parts: wheels or tracks make it a **land vehicle**, ship propellers make it a **ship**, and ballast valves make it a **submarine**.
+
+### Sea
+- **Ships float on sealed air.** Armor and machinery only float by their own steel, so what keeps a ship up is the empty space its watertight hull encloses. The builder finds every sealed space (a **compartment**) by flooding the grid from outside. Frames, feeds, propellers and all the machinery inside let water past; armor, the turret ring, ballast valves and torpedo tubes don't.
+- The builder shows the **waterline**, draft and freeboard, how many compartments the hull has, and whether it stays up with any one of them flooded.
+- **Flooding:** a destroyed hull block below the waterline is a hole. Water comes in faster through more and deeper holes, and never rises higher than the sea outside. The ship settles, trims and lists as compartments fill. If enough of them flood, it sinks. **Bilge pumps** clear water, but can't beat an open hole: weld it shut first. Engines stop when the water inside reaches them.
+- **Ship propellers** push along their arrow, but only under water. **Rudders** steer, and work better with speed and propeller wash; turned on their side they're **dive planes**. Ships keep the speed set on an **engine telegraph** (full astern to full ahead), so the player can leave the wheel and man a gun.
+- **Submarines:** a compartment touching a **ballast valve** is a ballast tank. The player orders a depth and the boat floods and blows its own tanks and works the planes to hold it. A design that can't dive with its tanks full, or can't surface with them blown, gets a warning.
+- **Torpedoes** (fired from tubes and fed from torpedo racks, from any seat) drop in, settle just under the surface, turn onto the bearing the player aimed at, and run straight. They go off against a hull or passing just under the keel, and blow holes below the waterline. Shells that hit the sea splash; HE goes off on the surface; AP shells dive a few dozen meters, slowing fast.
+- Land vehicles that drive into deep water mostly sink (their blocks hold up about a third of their weight) and stall once the engine is under. People swim.
 
 ## Technical approach
 
@@ -105,6 +117,7 @@ Guns inside a turret group traverse (turn left and right); every gun elevates.
 - **The core rules don't depend on Godot.** Block definitions, blueprints, vehicle stats, gun stats, penetration, explosions and connectivity live in `src/Core` as plain C#. They're unit tested with xUnit, and they're what will make multiplayer and simplified far-off battles possible.
 - **Multiplayer-ready from day one.** Game logic runs as if a server is in charge, even in solo play, so co-op can arrive early instead of being bolted on.
 - **Scale:** a block is 0.5 m. Vehicles stay one physics body until pieces break off.
+- **Water** is a flat surface for physics (the waves are only drawn). Every block and every compartment cell under it pushes up on the hull where it is, so trim, list and capsizing come out of the shape. Water drag on each piece gives a ship its keel and its roll damping. Submarine depth keeping and rudder steering have gentle assists, and a standalone simulation checks the example ships float level, right themselves, turn and dive before each change ships.
 - **Level of detail:** full block simulation near players. Far-off battles use the core stat math with no physics.
 
 ## Roadmap
@@ -123,14 +136,19 @@ Each milestone is playable on its own.
    - Gunner and commander seats; get in and out and switch seats; AI crew that follows your aim or fights on its own.
    - Field repair and rebuild by hand; supply pad; pop-up targets; live fire (the range's parked vehicles shoot back).
    - Not yet: the first co-op test. Controls already go through plain data (`VehicleControls`), so remote players can plug into the same path. That's next, along with enemy soldiers on foot.
-3. **Terrain + industry:** deformable terrain, mining, machines you design, conveyors, power, assembly bays that print blueprints.
-4. **Planet war:** a generated planet, a rival faction that designs its own vehicles, territory, the supply network, research, salvage, captured sites, simplified far-off battles.
-5. **Space:** the system map, capital ships, orbital strikes, landings, scouting, supply between planets.
-6. **Co-op campaign, PvP, configurable factions, Steam (GodotSteam, Workshop).**
+3. **Sea, air and machines of scale** *(sea built; air and scale next)*
+   - **Sea** *(built)*: ships and submarines, buoyancy from sealed compartments, flooding and bilge pumps, propellers, rudders, dive planes, ballast and depth keeping, torpedoes, the engine telegraph, swimming. The test range is now an island with open sea off the east coast, an enemy patrol boat and a surfaced submarine.
+   - **Air** *(next)*: wings and control surfaces, air propellers, jets, rotors, thrusters and gas cells; planes (mouse aim), helicopters, VTOL and drones, airships; bombs with a bombsight, guided missiles built from parts (seeker, motor, warhead, fins), autocannons with air-burst flak; an airstrip and helipad.
+   - **Scale** *(after that)*: colossal machines, 300 m and up. Large multi-cell blocks, merged rendering, chunked buoyancy and damage, a much bigger build area, and box fill and delete tools.
+4. **Terrain + industry:** deformable terrain, mining, machines you design, conveyors, power, assembly bays that print blueprints.
+5. **Planet war:** a generated planet, a rival faction that designs its own vehicles, territory, the supply network, research, salvage, captured sites, simplified far-off battles.
+6. **Space:** the system map, capital ships, orbital strikes, landings, scouting, supply between planets.
+7. **Co-op campaign, PvP, configurable factions, Steam (GodotSteam, Workshop).**
 
 ## Risks
 
 - **Scope.** This is a multi-year vision. We protect the pillars and cut everything else first.
 - **Art.** Blocks, terrain and lighting can look good. Characters and animation start from free art packs and get replaced later.
 - **Networking.** Keeping block damage in sync between players is the hardest technical problem. Game logic runs as if a server is in charge, and the rules are deterministic.
+- **Colossal machines.** A 300 m machine is 600 cells long and could hold hundreds of thousands of blocks. That needs multi-cell blocks, merged meshes, and physics and damage that work on chunks rather than every block every frame.
 - **Testing.** Claude builds in a cloud container with no screen. Automated tests cover the core rules, and in-game feel needs playtesting on a real PC.

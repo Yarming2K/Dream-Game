@@ -4,22 +4,36 @@ using Godot;
 namespace DreamGame.Game;
 
 /// <summary>
-/// The test range ground: a flat firing lane down the middle with rolling hills on both sides for testing
-/// climbing and tipping. Collision is a heightmap with 1 m spacing, sized 2^n + 1 so the physics engine
-/// can use it directly.
+/// The test range: an island. A flat firing lane runs down the middle with rolling hills on both sides,
+/// a beach on the east coast slopes into the sea, and the sea surrounds everything (water level is y = 0).
+/// Collision is a heightmap with 1 m spacing, sized 2^n + 1 so the physics engine can use it directly.
 /// </summary>
 public static class Terrain
 {
     public const int Samples = 513;
     public const float LaneHalfWidth = 55f;
 
+    /// <summary>Height of the flat land above the sea.</summary>
+    public const float LandHeight = 3f;
+
+    public const float SeabedDepth = -26f;
+
+    /// <summary>Where the east coast's beach starts sloping into the sea.</summary>
+    public const float CoastX = 135f;
+
     public static float HeightAt(FastNoiseLite noise, float x, float z)
     {
         float half = (Samples - 1) * 0.5f;
         float lane = Smooth(LaneHalfWidth, LaneHalfWidth + 45f, MathF.Abs(x));
-        float edge = 1f - Smooth(half - 60f, half - 8f, MathF.Max(MathF.Abs(x), MathF.Abs(z)));
         float hills = (noise.GetNoise2D(x, z) * 0.5f + 0.5f) * 16f + noise.GetNoise2D(x * 3.1f, z * 3.1f) * 1.5f;
-        return MathF.Max(0f, hills * lane * edge);
+        float land = LandHeight + MathF.Max(0f, hills * lane);
+        // How much of this spot is island rather than sea: the east coast, and a ring of sea round the edge.
+        float east = 1f - Smooth(CoastX, CoastX + 60f, x + noise.GetNoise2D(z * 0.4f, 7f) * 12f);
+        float rim = 1f - Smooth(half - 45f, half - 5f, MathF.Max(MathF.Abs(x), MathF.Abs(z)));
+        float island = MathF.Min(east, rim);
+        // Hills flatten out towards the beach.
+        land = LandHeight + (land - LandHeight) * Smooth(0.6f, 1f, island);
+        return SeabedDepth + (land - SeabedDepth) * island;
     }
 
     private static float Smooth(float a, float b, float x)
@@ -44,15 +58,15 @@ public static class Terrain
             Shape = new HeightMapShape3D { MapWidth = n, MapDepth = n, MapData = heights },
         });
 
-        // An endless flat floor beyond the heightmap.
-        body.AddChild(new CollisionShape3D { Shape = new WorldBoundaryShape3D() });
+        // An endless flat seabed beyond the heightmap.
+        body.AddChild(new CollisionShape3D { Shape = new WorldBoundaryShape3D(), Position = new Vector3(0, SeabedDepth, 0) });
 
         body.AddChild(new MeshInstance3D { Mesh = BuildMesh(heights, n), MaterialOverride = GroundMaterial() });
         body.AddChild(new MeshInstance3D
         {
             Mesh = new PlaneMesh { Size = new Vector2(6000, 6000) },
-            Position = new Vector3(0, -0.03f, 0),
-            MaterialOverride = new StandardMaterial3D { AlbedoColor = new Color(0.36f, 0.38f, 0.27f), Roughness = 1f },
+            Position = new Vector3(0, SeabedDepth - 0.03f, 0),
+            MaterialOverride = new StandardMaterial3D { AlbedoColor = new Color(0.33f, 0.31f, 0.24f), Roughness = 1f },
         });
         return body;
     }
@@ -98,8 +112,14 @@ public static class Terrain
             normals[i] = nrm;
             float slope = 1f - nrm.Y;
             bool lane = MathF.Abs(x - half) < LaneHalfWidth;
-            Color c = lane ? dirt.Lerp(grass, 0.35f) : grass.Lerp(dirt, Math.Clamp(y / 20f, 0, 0.4f));
-            colors[i] = c.Lerp(rock, Math.Clamp(slope * 6f, 0, 1));
+            Color c = lane ? dirt.Lerp(grass, 0.35f) : grass.Lerp(dirt, Math.Clamp((y - LandHeight) / 20f, 0, 0.4f));
+            c = c.Lerp(rock, Math.Clamp(slope * 6f, 0, 1));
+            // Beach sand at the waterline, darker seabed below.
+            var sand = new Color(0.64f, 0.58f, 0.43f);
+            var seabed = new Color(0.32f, 0.33f, 0.28f);
+            if (y < LandHeight + 0.8f) c = c.Lerp(sand, Math.Clamp((LandHeight + 0.8f - y) / 1.5f, 0, 1));
+            if (y < -1.5f) c = sand.Lerp(seabed, Math.Clamp((-1.5f - y) / 6f, 0, 1));
+            colors[i] = c;
         }
 
         var idx = new int[(n - 1) * (n - 1) * 6];

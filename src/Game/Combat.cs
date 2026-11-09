@@ -43,6 +43,12 @@ public partial class Combat : Node3D
         public float InfantryDamage;
         public Rid Ignore;
         public bool Small;
+
+        /// <summary>A shell that went into the sea: it slows fast and soon stops.</summary>
+        public bool Underwater;
+
+        /// <summary>Where the shell really is after this step, when it isn't the end of the segment (it hit the water).</summary>
+        public Vector3? Moved;
     }
 
     private struct PendingBlast
@@ -110,16 +116,18 @@ public partial class Combat : Node3D
             p.Age += dt;
             Vector3 from = p.Pos;
             float speed = p.Vel.Length();
-            p.Vel += Vector3.Down * GunMath.Gravity * dt;
-            p.Vel *= Mathf.Max(0f, 1f - p.DragK * speed * dt);
+            p.Vel += Vector3.Down * GunMath.Gravity * (p.Underwater ? 0.2f : 1f) * dt;
+            p.Vel *= Mathf.Max(0f, 1f - (p.Underwater ? UnderwaterDrag : p.DragK) * speed * dt);
+            if (p.Underwater) p.Shell.PenMm *= p.Vel.Length() / Mathf.Max(speed, 1f);
             Vector3 to = from + p.Vel * dt;
             bool done = Step(p, from, to);
             if (!done)
             {
-                p.Pos = to;
-                if (p.Tracer != null) Effects.UpdateTracer(p.Tracer, from, to);
-                Effects.Follow(p.Trail, to);
-                if (p.Age > 8f || to.Y < -100f) done = true;
+                p.Pos = p.Moved ?? to;
+                p.Moved = null;
+                if (p.Tracer != null) Effects.UpdateTracer(p.Tracer, from, p.Pos);
+                Effects.Follow(p.Trail, p.Pos);
+                if (p.Age > 8f || p.Pos.Y < -100f || (p.Underwater && p.Vel.Length() < 60f)) done = true;
             }
 
             if (done)
@@ -130,8 +138,12 @@ public partial class Combat : Node3D
             }
         }
 
+        TorpedoTick(dt);
         RunBlasts(dt);
     }
+
+    /// <summary>Drag on a shell in water, per meter per (m/s): a few dozen meters and it's spent.</summary>
+    private const float UnderwaterDrag = 0.03f;
 
     /// <summary>Moves a shell along one segment. Returns true when it's used up.</summary>
     private bool Step(Projectile p, Vector3 from, Vector3 to)
@@ -150,6 +162,21 @@ public partial class Combat : Node3D
             terrainPos = hit["position"].AsVector3();
             terrainNormal = hit["normal"].AsVector3();
             terrainT = from.DistanceTo(terrainPos);
+        }
+
+        // The sea surface: shells splash, HE goes off on it, small arms stop.
+        float waterT = float.PositiveInfinity;
+        if (!p.Underwater && from.Y > Ocean.Level && to.Y <= Ocean.Level)
+            waterT = len * (from.Y - Ocean.Level) / (from.Y - to.Y);
+        if (waterT < terrainT)
+        {
+            terrainT = waterT;
+            terrainPos = from + dir * waterT;
+            terrainNormal = Vector3.Up;
+        }
+        else
+        {
+            waterT = float.PositiveInfinity;
         }
 
         // People and practice targets.
@@ -205,8 +232,20 @@ public partial class Combat : Node3D
                 if (stop >= 0) return true;
             }
 
+            if (waterT < float.PositiveInfinity)
+            {
+                Effects.Splash(this, terrainPos, p.Small ? 0.2f : Mathf.Clamp(p.Shell.CaliberMm / 70f, 0.4f, 2.2f));
+                if (p.Small) return true;
+                p.Underwater = true;
+                p.Vel *= 0.45f;
+                p.Shell.PenMm *= 0.6f;
+                p.Moved = terrainPos + dir * 0.05f;
+                return false;
+            }
+
             if (terrainT < float.PositiveInfinity)
             {
+                if (p.Underwater) return true;
                 if (p.Small) Effects.BulletImpact(this, terrainPos, terrainNormal, dir, false, null);
                 else Effects.Dirt(this, terrainPos, terrainNormal, p.Shell.CaliberMm);
                 return true;
@@ -226,6 +265,7 @@ public partial class Combat : Node3D
             return true;
         }
 
+        if (waterT < float.PositiveInfinity) Effects.Splash(this, terrainPos, Mathf.Clamp(p.Shell.HeRadiusM * 0.6f, 0.4f, 2.5f));
         if (terrainT < float.PositiveInfinity)
         {
             Explode(terrainPos + terrainNormal * 0.1f, p.Shell.HeRadiusM, p.Shell.HeDamage, p.ByPlayer, "HE shell");
@@ -279,7 +319,9 @@ public partial class Combat : Node3D
     /// <summary>An explosion: damages blocks in range on every grid and shoves bodies away.</summary>
     public void Explode(Vector3 center, float radius, float damage, bool byPlayer, string cause)
     {
-        Effects.Explosion(this, center, radius);
+        // Under water there's no fireball, just a column of spray thrown up at the surface.
+        if (center.Y < Ocean.Level - 0.4f) Effects.UnderwaterBlast(this, center, radius);
+        else Effects.Explosion(this, center, radius);
         Blast?.Invoke(center, radius, damage);
         var destroyedAll = new List<OrderedHit>();
         int hurtCount = 0;
@@ -434,5 +476,6 @@ public partial class Combat : Node3D
         foreach (Projectile p in _shells) Effects.EndTracer(p.Tracer);
         _shells.Clear();
         _blasts.Clear();
+        ClearTorpedoes();
     }
 }

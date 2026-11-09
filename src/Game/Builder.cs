@@ -42,6 +42,8 @@ public partial class Builder : Node3D
     private bool _mirror = true;
     private int _category;
     private Node3D _ghost, _ghostMirror, _comMarker, _outline;
+    private MeshInstance3D _waterline;
+    private Label3D _waterlineLabel;
     private StandardMaterial3D _outlineMat;
     private string _ghostKey = "";
 
@@ -94,6 +96,25 @@ public partial class Builder : Node3D
             CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
         };
         AddChild(_comMarker);
+
+        // Ships: where the sea will come up to, so you can see what's under water.
+        _waterline = new MeshInstance3D
+        {
+            Mesh = new PlaneMesh { Size = Vector2.One },
+            MaterialOverride = new StandardMaterial3D
+            {
+                AlbedoColor = new Color(0.18f, 0.55f, 0.78f, 0.3f), ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+                Transparency = BaseMaterial3D.TransparencyEnum.Alpha, CullMode = BaseMaterial3D.CullModeEnum.Disabled,
+            },
+            CastShadow = GeometryInstance3D.ShadowCastingSetting.Off, Visible = false,
+        };
+        AddChild(_waterline);
+        _waterlineLabel = new Label3D
+        {
+            Text = "waterline", FontSize = 40, PixelSize = 0.006f, Font = Ui.BodyBoldFont, OutlineSize = 8,
+            Modulate = new Color(0.55f, 0.85f, 1f), Billboard = BaseMaterial3D.BillboardModeEnum.Enabled, Visible = false,
+        };
+        AddChild(_waterlineLabel);
         _outline = BuildOutline();
         AddChild(_outline);
 
@@ -697,7 +718,22 @@ public partial class Builder : Node3D
 
         _comMarker.Visible = _cells.Count > 0;
         _comMarker.Position = _analysis.CenterOfMass.G();
+        UpdateWaterline(_analysis);
         RebuildDashboard(_analysis);
+    }
+
+    private void UpdateWaterline(VehicleAnalysis a)
+    {
+        bool show = a.IsNaval && a.Cells.Count > 0;
+        _waterline.Visible = _waterlineLabel.Visible = show;
+        if (!show) return;
+        float cs = Conv.CS;
+        float w = (a.Max.X - a.Min.X + 5) * cs, l = (a.Max.Z - a.Min.Z + 5) * cs;
+        var center = new Vector3((a.Min.X + a.Max.X) * 0.5f * cs, a.Water.WaterlineY, (a.Min.Z + a.Max.Z) * 0.5f * cs);
+        _waterline.Position = center;
+        _waterline.Scale = new Vector3(w, 1, l);
+        _waterlineLabel.Position = center + new Vector3(w * 0.5f + 0.4f, 0.15f, 0);
+        _waterlineLabel.Text = a.Water.Floats ? $"waterline · {a.Water.DraftM:0.0} m draft" : "sinks";
     }
 
     // ---------- UI: layout ----------
@@ -1020,6 +1056,46 @@ public partial class Builder : Node3D
         return f;
     }
 
+    /// <summary>How the hull floats, how much flooding it can take, and (submarines) whether it can dive and come back up.</summary>
+    private void HullSection(VehicleAnalysis a)
+    {
+        HydroStats w = a.Water;
+        _dash.AddChild(Ui.Section(a.Mode == MobilityMode.Submarine ? "Hull and ballast" : "Hull"));
+        _dash.AddChild(Ui.Small("Ships float on the sealed air inside their hulls. The blue plane is the waterline."));
+        HFlowContainer chips = ChipFlow();
+        chips.AddChild(Ui.Chip("Keeps afloat", $"{w.DisplacementT:0} t", w.Floats ? Ui.Text : Ui.Bad));
+        chips.AddChild(Ui.Chip("Draft", w.Floats ? $"{w.DraftM:0.0} m" : "-"));
+        var real = a.Compartments.Where(c => !c.IsBallast && c.Cells.Count > 8).ToList();
+        chips.AddChild(Ui.Chip("Compartments", $"{real.Count}", real.Count > 1 ? Ui.Text : Ui.Warn));
+        chips.AddChild(Ui.Chip("Pumps", $"{a.Pumps}", a.Pumps > 0 ? Ui.Text : Ui.Dim));
+        if (a.Mode == MobilityMode.Submarine)
+        {
+            chips.AddChild(Ui.Chip("Ballast", $"{w.BallastT:0.0} t", Ui.Info));
+            chips.AddChild(Ui.Chip("Dives", w.CanDive ? "yes" : "no", w.CanDive ? Ui.Good : Ui.Bad));
+            chips.AddChild(Ui.Chip("Surfaces", w.CanSurface ? "yes" : "no", w.CanSurface ? Ui.Good : Ui.Bad));
+        }
+
+        if (a.TorpedoTubes.Count > 0)
+            chips.AddChild(Ui.Chip("Torpedoes", $"{a.TorpedoTubes.Sum(t => t.Rounds)} in {a.TorpedoTubes.Count} tube{(a.TorpedoTubes.Count == 1 ? "" : "s")}", Ui.Accent));
+        _dash.AddChild(chips);
+
+        // Damage control: does she stay up with any one compartment flooded?
+        if (!w.Floats || real.Count == 0) return;
+        var cells = a.Defs.Where(kv => !a.Disconnected.Contains(kv.Key)).ToDictionary(kv => kv.Key, kv => kv.Value);
+        int survives = 0;
+        foreach (Compartment c in real)
+        {
+            c.Water = c.CapacityM3;
+            if (Hydro.Analyze(cells, a.Compartments, a.MassKg).Floats) survives++;
+            c.Water = 0;
+        }
+
+        string text = survives == real.Count
+            ? "Stays afloat with any one compartment flooded."
+            : $"Sinks if {real.Count - survives} of its {real.Count} compartments floods. Add bulkheads (inner walls) or more sealed space.";
+        _dash.AddChild(Ui.Wrapped(text, 14, survives == real.Count ? Ui.Good : Ui.Warn));
+    }
+
     private void RebuildDashboard(VehicleAnalysis a)
     {
         foreach (Node n in _dash.GetChildren()) n.QueueFree();
@@ -1042,12 +1118,19 @@ public partial class Builder : Node3D
         grid.AddChild(StatTile("Mass", $"{a.MassKg / 1000f:0.0}", "t", Ui.Text));
         grid.AddChild(StatTile("Top speed", $"{a.TopSpeedKmh:0}", "km/h", Ui.Grade(a.TopSpeedKmh, 20, 35)));
         grid.AddChild(StatTile("Power", $"{a.PowerToWeight:0.0}", "kW/t", Ui.Grade(a.PowerToWeight, 8, 12)));
-        grid.AddChild(a.Wheels.Count > 0
-            ? StatTile("Tips over at", $"{a.TipAngleDeg:0}", "°", Ui.Grade(a.TipAngleDeg, 30, 40))
-            : StatTile("Tips over at", "-", "", Ui.Dim));
+        if (a.IsNaval)
+            grid.AddChild(a.Water.Floats
+                ? StatTile("Freeboard", $"{a.Water.FreeboardM:0.0}", "m", Ui.Grade(a.Water.FreeboardM, 0.5f, 1.2f))
+                : StatTile("Freeboard", "sinks", "", Ui.Bad));
+        else
+            grid.AddChild(a.Wheels.Count > 0
+                ? StatTile("Tips over at", $"{a.TipAngleDeg:0}", "°", Ui.Grade(a.TipAngleDeg, 30, 40))
+                : StatTile("Tips over at", "-", "", Ui.Dim));
         grid.AddChild(StatTile("Fuel", $"{a.FuelL:0}", "L", a.FuelL > 0 ? Ui.Text : Ui.Bad));
         grid.AddChild(StatTile("Blocks", $"{a.Cells.Count}", "", Ui.Text));
         _dash.AddChild(grid);
+
+        if (a.IsNaval) HullSection(a);
 
         _dash.AddChild(Ui.Section("Armor"));
         _dash.AddChild(Ui.Small("How much armor a shell must get through to reach the insides. The tick is the weakest spot."));

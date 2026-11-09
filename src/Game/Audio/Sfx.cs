@@ -31,6 +31,7 @@ public enum SoundId
     Step3,
     Hurt,
     Weld,
+    Splash,
 }
 
 /// <summary>Generates, caches and plays sound effects, and sets up the audio buses (outdoor reverb, limiter).</summary>
@@ -94,6 +95,7 @@ public static class Sfx
             SoundId.Step3 => Synth.Footstep(43),
             SoundId.Hurt => Synth.Hurt(),
             SoundId.Weld => Synth.WeldLoop(),
+            SoundId.Splash => Synth.Splash(),
             _ => Synth.Tick(),
         };
 

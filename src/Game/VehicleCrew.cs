@@ -450,6 +450,7 @@ public partial class VehicleBody
         }
 
         foreach (GunRt g in Guns.Where(g => g.Info.Breech == cell)) g.Breech = b;
+        foreach (TubeRt t in Tubes.Where(t => t.Info.Cell == cell)) t.Block = b;
         if (_repairGhosts.Remove(cell, out Node3D ghost)) ghost.QueueFree();
         Radius = Mathf.Max(Radius, View.BoundingRadius());
         RefreshStats();

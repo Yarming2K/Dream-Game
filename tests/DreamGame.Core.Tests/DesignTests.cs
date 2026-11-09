@@ -30,7 +30,7 @@ public class DesignTests
         Assert.True(a.CanDrive);
         Assert.Empty(a.Disconnected);
         Assert.All(a.Guns, g => Assert.True(g.Valid && g.ApRounds > 0 && g.HeRounds > 0));
-        Assert.InRange(a.TopSpeedKmh, 25, 110);
+        Assert.InRange(a.TopSpeedKmh, a.IsNaval ? 15 : 25, 110);
         Assert.True(a.Front.Samples > 0);
     }
 

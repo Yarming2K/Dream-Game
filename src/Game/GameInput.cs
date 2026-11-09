@@ -23,6 +23,8 @@ public static class GameInput
         AddKeys("interact", Key.E);
         AddKeys("live_fire", Key.L);
         AddKeys("gunner_mode", Key.G);
+        AddKeys("torpedo", Key.F);
+        AddKeys("dive", Key.C);
     }
 
     private static void AddKeys(string action, params Key[] keys)
