@@ -98,7 +98,7 @@ Guns inside a turret group traverse (turn left and right); every gun elevates.
 
 Each milestone is playable on its own.
 
-1. **Builder + test range** *(current)*
+1. **Builder + test range** *(built; being playtested)*
    - Block-by-block builder: about 25 blocks, mirror mode, live stats and warnings, save and load.
    - Guns built from components; turrets.
    - Drive with real mass and recoil.

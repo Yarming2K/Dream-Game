@@ -1,0 +1,44 @@
+using DreamGame.Core;
+using Godot;
+
+namespace DreamGame.Game;
+
+/// <summary>A static block structure standing on the ground: target walls and bunkers. Pieces that lose
+/// their footing fall off as debris.</summary>
+public partial class StructureBody : StaticBody3D, IGridHost
+{
+    public GridModel Model { get; private set; }
+    public GridView View { get; private set; }
+    public PhysicsBody3D Body => this;
+    public KeepRule Keep => KeepRule.Anchored;
+    public float Radius { get; private set; }
+    public string Label = "";
+
+    public static StructureBody Create(Blueprint bp, Transform3D where, string label)
+    {
+        var s = new StructureBody { Name = "Structure", Label = label };
+        s.CollisionLayer = GridRegistry.Layers.Structures;
+        s.CollisionMask = 0;
+        s.Model = GridModel.FromBlueprint(bp);
+        s.View = new GridView(s, s.Model);
+        s.Radius = s.View.BoundingRadius();
+        s.Transform = where;
+        return s;
+    }
+
+    public override void _EnterTree() => GridRegistry.Add(this);
+    public override void _ExitTree() => GridRegistry.Remove(this);
+
+    public Vector3 VelocityAt(Vector3 worldPoint) => Vector3.Zero;
+
+    public void OnBlocksRemoved()
+    {
+        if (Model.Blocks.Count == 0) Vanish();
+    }
+
+    public void Vanish()
+    {
+        GridRegistry.Remove(this);
+        QueueFree();
+    }
+}

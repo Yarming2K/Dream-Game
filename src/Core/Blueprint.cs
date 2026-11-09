@@ -1,0 +1,115 @@
+using System;
+using System.Collections.Generic;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+
+namespace DreamGame.Core;
+
+public sealed class BlueprintBlock
+{
+    [JsonPropertyName("id")] public string Id { get; set; }
+    [JsonPropertyName("x")] public int X { get; set; }
+    [JsonPropertyName("y")] public int Y { get; set; }
+    [JsonPropertyName("z")] public int Z { get; set; }
+
+    /// <summary>Orientation index, 0-23. See <see cref="Orientations"/>.</summary>
+    [JsonPropertyName("o")] public int O { get; set; }
+
+    [JsonIgnore] public Int3 Cell => new(X, Y, Z);
+
+    public BlueprintBlock() { }
+
+    public BlueprintBlock(string id, Int3 cell, int orientation = 0)
+    {
+        Id = id;
+        X = cell.X;
+        Y = cell.Y;
+        Z = cell.Z;
+        O = orientation;
+    }
+}
+
+/// <summary>A saved design. Stored as JSON so it can be shared as a file.</summary>
+public sealed class Blueprint
+{
+    public const int CurrentFormat = 1;
+
+    /// <summary>Size of one grid cell in meters.</summary>
+    public const float CellSize = 0.5f;
+
+    [JsonPropertyName("format")] public int Format { get; set; } = CurrentFormat;
+    [JsonPropertyName("name")] public string Name { get; set; } = "Untitled";
+    [JsonPropertyName("blocks")] public List<BlueprintBlock> Blocks { get; set; } = new();
+
+    private static readonly JsonSerializerOptions Options = new() { WriteIndented = false };
+
+    public string ToJson() => JsonSerializer.Serialize(this, Options);
+
+    /// <summary>
+    /// Reads a blueprint. Unknown block types and out-of-range orientations are dropped and listed in
+    /// <paramref name="problems"/>, so files from newer versions still load.
+    /// </summary>
+    public static Blueprint FromJson(string json, List<string> problems = null)
+    {
+        Blueprint bp;
+        try
+        {
+            bp = JsonSerializer.Deserialize<Blueprint>(json, Options);
+        }
+        catch (JsonException e)
+        {
+            throw new FormatException("That file isn't a valid blueprint: " + e.Message, e);
+        }
+
+        if (bp == null) throw new FormatException("That file is empty.");
+        bp.Blocks ??= new List<BlueprintBlock>();
+        if (bp.Format > CurrentFormat)
+            problems?.Add($"Made with a newer version (format {bp.Format}); some parts may be missing.");
+
+        var seen = new HashSet<Int3>();
+        var kept = new List<BlueprintBlock>(bp.Blocks.Count);
+        var unknown = new HashSet<string>();
+        foreach (BlueprintBlock b in bp.Blocks)
+        {
+            if (b == null) continue;
+            if (!BlockCatalog.TryGet(b.Id, out _))
+            {
+                unknown.Add(b.Id ?? "(none)");
+                continue;
+            }
+
+            if (!Orientations.IsValid(b.O)) b.O = 0;
+            if (!seen.Add(b.Cell)) continue;
+            kept.Add(b);
+        }
+
+        foreach (string id in unknown) problems?.Add($"Unknown block type '{id}' was skipped.");
+        bp.Blocks = kept;
+        bp.Format = CurrentFormat;
+        return bp;
+    }
+
+    public Dictionary<Int3, BlueprintBlock> ToCellMap()
+    {
+        var map = new Dictionary<Int3, BlueprintBlock>();
+        foreach (BlueprintBlock b in Blocks) map.TryAdd(b.Cell, b);
+        return map;
+    }
+
+    public static Blueprint FromCellMap(string name, IEnumerable<BlueprintBlock> blocks)
+    {
+        var bp = new Blueprint { Name = name };
+        foreach (BlueprintBlock b in blocks) bp.Blocks.Add(new BlueprintBlock(b.Id, b.Cell, b.O));
+        // Stable order keeps saved files tidy and diffs small.
+        bp.Blocks.Sort((a, c) =>
+        {
+            int r = a.Y.CompareTo(c.Y);
+            if (r != 0) return r;
+            r = a.Z.CompareTo(c.Z);
+            return r != 0 ? r : a.X.CompareTo(c.X);
+        });
+        return bp;
+    }
+
+    public Blueprint Clone() => FromCellMap(Name, Blocks);
+}

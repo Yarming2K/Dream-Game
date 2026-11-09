@@ -2,6 +2,79 @@
 
 A military-industrial sandbox: design everything, then fight a war for a star system. Working title.
 
-The scope we agreed on is in [docs/DESIGN.md](docs/DESIGN.md).
+The scope we agreed on is in [docs/DESIGN.md](docs/DESIGN.md). This is **milestone 1: the builder and test range**.
 
-Status: milestone 1 (builder + test range) is in progress.
+## Play it
+
+1. Install **Godot 4.7.2, .NET edition** from [godotengine.org/download](https://godotengine.org/download). Get the one labeled ".NET"; the standard one can't run C#.
+2. Install the **.NET 8 SDK** from [dotnet.microsoft.com/download](https://dotnet.microsoft.com/download/dotnet/8.0).
+3. Get this repo (Code → Download ZIP, or clone it). Make sure you're on the branch you want to test.
+4. Open Godot, click **Import**, and pick the `project.godot` file in this folder.
+5. Press **F5** (or the ▶ button, top right). The first run takes a moment to build.
+
+The game opens in the builder with an example tank loaded. Press **Tab** to drive it.
+
+## Builder
+
+| Do this | To |
+|---|---|
+| Left click (hold and drag to paint) | Place a block |
+| Right click | Remove a block |
+| Middle click | Copy the block under the cursor |
+| R / T / G (Shift reverses) | Rotate the block |
+| M | Mirror mode (on at start) |
+| 1-9, [ and ] | Pick a block, switch category |
+| Ctrl+Z / Ctrl+Y | Undo / redo |
+| Right drag, middle drag, wheel | Orbit, pan, zoom |
+| F | Focus the camera |
+| Ctrl+S | Save |
+| Tab | Test drive |
+| F1 | Help |
+
+The panel on the right updates as you build: mass, speed, armor, gun stats and a list of problems in plain English. The pink dot is the center of mass. Blocks tinted red aren't attached and would fall off.
+
+### How designs work
+- The front of a vehicle faces the **FRONT** marker.
+- Every vehicle needs a **driver seat**, an **engine**, a **fuel tank**, and **wheels or tracks** on the bottom row.
+- **A gun is a breech with barrel segments in a straight line in front of it**, on the side its yellow arrow points to.
+  - **Loaders** (faster reload) and **propellant** (more velocity) only count if they touch the breech.
+  - **Ammo racks** must touch the breech, or connect to it through ammo feeds, other racks or a turret ring.
+- Everything you build on top of a **turret ring** (connected to the block directly above it) turns as a turret.
+
+Saved designs are `.json` files in your blueprints folder. The **Folder** button opens it, so you can send files to friends.
+
+## Test range
+
+| Do this | To |
+|---|---|
+| W / S, A / D, Space | Drive, steer, brake (tanks turn on the spot) |
+| Mouse | Aim: turrets turn and guns elevate on their own |
+| Left click / right click | Fire / zoom |
+| Q | Switch between AP and HE |
+| R | Flip back upright |
+| Backspace | Respawn |
+| T | Reset the targets |
+| Tab | Back to the builder |
+| Esc / F1 | Free the mouse / help |
+
+The circles on screen show where each gun will actually land: green when it's loaded. Every hit is listed in the top right:
+- **PEN**: the shell got through. It shows the shell's penetration vs. the armor.
+- **NO PEN**: the armor stopped it. Angled armor counts as thicker.
+- **RICOCHET**: the shell hit at a steep angle and bounced off.
+
+The range has walls of each armor type (one angled), a bunker with ammo inside, two parked vehicles, slopes at 12°, 22° and 32°, and a wall at 400 m.
+
+## What to test (and tell Claude about)
+- **Building:** Is placing, rotating and removing blocks smooth? Is anything confusing?
+- **Driving:** Do tanks and the wheeled scout feel heavy and controllable? Does anything bounce, sink or slide?
+- **Turrets:** Do they turn toward the crosshair, and do the circles match where shells land?
+- **Destruction:** Shoot the parked tank's turret ring, its ammo, its barrel. Do pieces break off the way you'd expect?
+- **Speed:** Is anything slow (frame rate drops during big explosions, or when lots of debris is around)?
+
+Screenshots, or the text from Godot's **Output** panel at the bottom when something goes wrong, help a lot.
+
+## For developers
+- `src/Core/`: the game's rules in plain C#, with no Godot dependency (blocks, blueprints, gun math, penetration, connectivity, design analysis).
+- `src/Game/`: the Godot side (rendering, physics bodies, input, UI).
+- Tests: `dotnet test tests/DreamGame.Core.Tests`.
+- Build check without the editor: `dotnet build DreamGame.csproj`.

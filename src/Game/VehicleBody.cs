@@ -1,0 +1,551 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using DreamGame.Core;
+using Godot;
+
+namespace DreamGame.Game;
+
+/// <summary>
+/// A drivable vehicle built from a blueprint. Suspension, grip and steering are simulated per wheel with
+/// raycasts (so wheels and tracks behave the same whatever the design); turrets traverse toward the aim
+/// point and guns elevate with automatic drop compensation.
+/// </summary>
+public partial class VehicleBody : RigidBody3D, IGridHost
+{
+    public sealed class WheelRt
+    {
+        public BlockInstance Block;
+        public Node3D Visual;
+        public Vector3 Mount;
+        public float Radius;
+        public float Rest;
+        public BlockKind Kind;
+        public bool LeftSide;
+        public float Offset;
+        public float Compression;
+        public float Spin;
+        public float SteerAngle;
+        public bool Contact;
+        public Vector3 HitPos;
+        public Vector3 HitNormal;
+    }
+
+    public sealed class GunRt
+    {
+        public GunInfo Info;
+        public BlockInstance Breech;
+        public GunStats Stats;
+        public int Barrels;
+        public bool HasBrake;
+        public bool Alive = true;
+        public float ReloadLeft;
+        public float Pitch;
+        public float ElevSpeedRad;
+        public float AimError;
+        public string Label => Info.Label;
+        public float MuzzleDistanceCells => Barrels + (HasBrake ? 1 : 0) + 0.5f;
+    }
+
+    public sealed class TurretRt
+    {
+        public int Section;
+        public Vector3 PivotLocal;
+        public float Angle;
+        public float SpeedRad;
+        public GunRt Lead;
+    }
+
+    public GridModel Model { get; private set; }
+    public GridView View { get; private set; }
+    public PhysicsBody3D Body => this;
+    public KeepRule Keep => KeepRule.DriverSeat;
+    public float Radius { get; private set; }
+
+    public Blueprint Blueprint { get; private set; }
+    public VehicleAnalysis Analysis { get; private set; }
+    public string DisplayName => Blueprint.Name;
+    public bool PlayerControlled;
+
+    // Controls, set by whoever drives this (the player or, later, AI).
+    public float Throttle;
+    public float Steer;
+    public bool Braking = true;
+    public bool HasAim;
+    public Vector3 AimPoint;
+
+    public float PowerKw { get; private set; }
+    public float FuelL { get; private set; }
+    public float FuelCapacityL { get; private set; }
+    public bool DriverAlive { get; private set; } = true;
+    public float SpeedKmh { get; private set; }
+    public AmmoType SelectedAmmo { get; private set; } = AmmoType.AP;
+    public bool CanDrive => DriverAlive && PowerKw > 0 && FuelL > 0 && Wheels.Count > 0;
+
+    public readonly List<WheelRt> Wheels = new();
+    public readonly List<GunRt> Guns = new();
+    public readonly List<TurretRt> Turrets = new();
+
+    /// <summary>Raised for big moments: "Driver knocked out!", "Engine destroyed", ...</summary>
+    public event Action<string> Status;
+
+    private float _crr;
+    private float _governor;
+    private float _k;
+    private float _c;
+    private float _yawInertia;
+    private bool _hadEngine = true;
+    private readonly RandomNumberGenerator _rng = new();
+
+    public static VehicleBody Create(Blueprint bp, Transform3D where, bool player)
+    {
+        VehicleAnalysis a = VehicleAnalysis.Analyze(bp);
+        var v = new VehicleBody { Name = player ? "PlayerVehicle" : "Vehicle", Blueprint = bp, Analysis = a, PlayerControlled = player };
+        v.Model = GridModel.FromAnalysis(a);
+        foreach (Int3 c in a.Disconnected)
+            if (v.Model.Blocks.TryGetValue(c, out BlockInstance b)) v.Model.Remove(b);
+        v.Model.RecomputeBounds();
+
+        var calibers = new Dictionary<Int3, float>();
+        foreach (GunInfo g in a.Guns)
+        {
+            foreach (Int3 c in g.Barrels) calibers[c] = g.Stats.CaliberMm;
+            if (g.Brake.HasValue) calibers[g.Brake.Value] = g.Stats.CaliberMm;
+        }
+
+        v.View = new GridView(v, v.Model, c => calibers.TryGetValue(c, out float cal) ? cal : 76f);
+        v.Radius = v.View.BoundingRadius();
+        v.CollisionLayer = GridRegistry.Layers.Vehicles;
+        v.CollisionMask = GridRegistry.Layers.All;
+        v.Transform = where;
+        v.CanSleep = false;
+        v.LinearDamp = 0.02f;
+        v.AngularDamp = 0.8f;
+        v.CenterOfMassMode = CenterOfMassModeEnum.Custom;
+
+        float cs = Conv.CS;
+        float len = (a.Max.Z - a.Min.Z + 1) * cs, wid = (a.Max.X - a.Min.X + 1) * cs;
+        v._yawInertia = Mathf.Max(a.MassKg, 100f) * (len * len + wid * wid) / 12f;
+
+        v.SetupWheels();
+        v.SetupGuns();
+        v.RefreshStats();
+        v.FuelL = v.FuelCapacityL;
+        return v;
+    }
+
+    /// <summary>How high above the ground the body origin should spawn so the wheels just touch down.</summary>
+    public static float SpawnHeight(VehicleAnalysis a)
+    {
+        float lowest = (a.Min.Y - 0.5f) * Conv.CS;
+        foreach (WheelInfo w in a.Wheels)
+            lowest = Mathf.Min(lowest, w.Cell.Y * Conv.CS - w.RadiusM - Mobility.RestLength(w.Kind));
+        return -lowest + 0.15f;
+    }
+
+    public override void _EnterTree() => GridRegistry.Add(this);
+    public override void _ExitTree() => GridRegistry.Remove(this);
+
+    private void SetupWheels()
+    {
+        float comX = Analysis.CenterOfMass.X;
+        foreach (WheelInfo w in Analysis.Wheels)
+        {
+            if (w.Blocked || !Model.Blocks.TryGetValue(w.Cell, out BlockInstance b)) continue;
+            Wheels.Add(new WheelRt
+            {
+                Block = b, Visual = View.VisualOf(b), Mount = Conv.CellPos(w.Cell), Radius = w.RadiusM,
+                Rest = Mobility.RestLength(w.Kind), Kind = w.Kind, LeftSide = w.Cell.X * Conv.CS < comX,
+                Offset = Mobility.RestLength(w.Kind),
+            });
+        }
+    }
+
+    private void SetupGuns()
+    {
+        foreach (GunInfo g in Analysis.Guns)
+        {
+            if (!g.Valid || !Model.Blocks.TryGetValue(g.Breech, out BlockInstance breech)) continue;
+            Guns.Add(new GunRt { Info = g, Breech = breech });
+        }
+
+        foreach (TurretInfo t in Analysis.Turrets)
+        {
+            Turrets.Add(new TurretRt
+            {
+                Section = t.Section, PivotLocal = Conv.CellPos(t.Ring), SpeedRad = Mathf.DegToRad(t.TraverseDegPerSec),
+            });
+        }
+    }
+
+    private bool Has(Int3 cell, BlockKind kind) =>
+        Model.Blocks.TryGetValue(cell, out BlockInstance b) && b.Alive && b.Def.Kind == kind;
+
+    /// <summary>Recomputes everything that depends on which blocks are left.</summary>
+    public void RefreshStats()
+    {
+        float mass = Mathf.Max(Model.TotalMassKg(), 50f);
+        Mass = mass;
+        CenterOfMass = Model.CenterOfMass().G();
+
+        PowerKw = Model.Blocks.Values.Where(b => b.Alive).Sum(b => b.Def.PowerKw);
+        FuelCapacityL = Model.Blocks.Values.Where(b => b.Alive).Sum(b => b.Def.FuelL);
+        FuelL = Mathf.Min(FuelL, FuelCapacityL);
+        bool driverWas = DriverAlive;
+        DriverAlive = Model.Blocks.Values.Any(b => b.Alive && b.Def.Kind == BlockKind.DriverSeat);
+        if (driverWas && !DriverAlive) Status?.Invoke("Driver knocked out!");
+        if (_hadEngine && PowerKw <= 0) Status?.Invoke("Engine destroyed");
+        _hadEngine = PowerKw > 0;
+
+        Wheels.RemoveAll(w => !w.Block.Alive || !Model.Blocks.ContainsKey(w.Block.Cell));
+        int tracks = Wheels.Count(w => w.Kind == BlockKind.Track);
+        float trackFraction = Wheels.Count > 0 ? tracks / (float)Wheels.Count : 0;
+        _crr = Mobility.RollingResistance(trackFraction);
+        _governor = Mobility.GovernorKmh(trackFraction) / 3.6f;
+        if (Wheels.Count > 0)
+        {
+            float share = mass / Wheels.Count;
+            float rest = Wheels.Average(w => w.Rest);
+            _k = share * GunMath.Gravity / (0.35f * rest);
+            _c = 2f * 0.6f * Mathf.Sqrt(_k * share);
+        }
+
+        foreach (GunRt g in Guns)
+        {
+            g.Alive = Model.Blocks.TryGetValue(g.Info.Breech, out BlockInstance b) && b == g.Breech && b.Alive;
+            g.Barrels = 0;
+            foreach (Int3 c in g.Info.Barrels)
+            {
+                if (!Has(c, BlockKind.Barrel)) break;
+                g.Barrels++;
+            }
+
+            g.HasBrake = g.Barrels == g.Info.Barrels.Count && g.Info.Brake.HasValue && Has(g.Info.Brake.Value, BlockKind.MuzzleBrake);
+            int loaders = 0, props = 0;
+            foreach (Int3 d in Int3.Directions)
+            {
+                if (d == g.Info.Forward || !Model.Blocks.TryGetValue(g.Info.Breech + d, out BlockInstance n) || !n.Alive ||
+                    n.Section != g.Info.Section) continue;
+                if (n.Def.Kind == BlockKind.Loader) loaders++;
+                else if (n.Def.Kind == BlockKind.Propellant) props++;
+            }
+
+            g.Stats = GunMath.Compute(g.Info.BreechDef.Breech, g.Barrels, g.HasBrake, loaders, props);
+            float barrelMass = g.Barrels * 90f + (g.HasBrake ? 70f : 0f);
+            g.ElevSpeedRad = Mathf.DegToRad(Mobility.ElevationDegPerSec(barrelMass));
+            if (g.Barrels == 0) g.Alive = false;
+        }
+
+        foreach (TurretRt t in Turrets)
+        {
+            t.Lead = Guns.FirstOrDefault(g => g.Alive && g.Info.Section == t.Section);
+            float turretMass = Model.Blocks.Values
+                .Where(b => b.Section == t.Section || Model.Sections[b.Section].Parent == t.Section)
+                .Sum(b => b.Def.MassKg);
+            t.SpeedRad = Mathf.DegToRad(Mobility.TraverseDegPerSec(turretMass));
+        }
+    }
+
+    public int Rounds(GunRt g, AmmoType type)
+    {
+        float units = 0;
+        foreach (Int3 c in type == AmmoType.AP ? g.Info.ApRacks : g.Info.HeRacks)
+            if (Model.Blocks.TryGetValue(c, out BlockInstance b) && b.Alive) units += b.AmmoUnits;
+        return (int)(units / g.Stats.ShellUnits);
+    }
+
+    private bool TakeRound(GunRt g, AmmoType type)
+    {
+        int units = g.Stats.ShellUnits;
+        foreach (Int3 c in type == AmmoType.AP ? g.Info.ApRacks : g.Info.HeRacks)
+        {
+            if (!Model.Blocks.TryGetValue(c, out BlockInstance b) || !b.Alive || b.AmmoUnits < units) continue;
+            b.AmmoUnits -= units;
+            return true;
+        }
+
+        return false;
+    }
+
+    public void ToggleAmmo() => SelectedAmmo = SelectedAmmo == AmmoType.AP ? AmmoType.HE : AmmoType.AP;
+
+    public override void _PhysicsProcess(double delta)
+    {
+        float dt = (float)delta;
+        if (!PlayerControlled)
+        {
+            Throttle = 0;
+            Steer = 0;
+            Braking = true;
+        }
+
+        Drive(dt);
+        Aim(dt);
+        foreach (GunRt g in Guns) g.ReloadLeft = Mathf.Max(0, g.ReloadLeft - dt);
+        View.SyncColliders();
+    }
+
+    private void Drive(float dt)
+    {
+        Transform3D xf = GlobalTransform;
+        Vector3 up = xf.Basis.Y.Normalized();
+        Vector3 fwd = -xf.Basis.Z.Normalized();
+        Vector3 comW = xf * CenterOfMass;
+        Vector3 vel = LinearVelocity;
+        Vector3 ang = AngularVelocity;
+        float speed = vel.Dot(fwd);
+        SpeedKmh = speed * 3.6f;
+        if (Wheels.Count == 0) return;
+
+        float mass = Mass;
+        float share = mass / Wheels.Count;
+        bool canDrive = CanDrive;
+        float throttle = canDrive ? Throttle : 0f;
+        float steer = canDrive ? Steer : 0f;
+
+        // Engine force: constant power, capped by grip at low speed and by the governor at the top.
+        float force = 0;
+        if (canDrive && (Mathf.Abs(throttle) > 0.01f || Mathf.Abs(steer) > 0.01f))
+        {
+            float p = PowerKw * 1000f * Mobility.DrivetrainEfficiency;
+            force = Mathf.Min(p / Mathf.Max(Mathf.Abs(speed), 2.5f), mass * GunMath.Gravity * 0.5f);
+            float limit = throttle >= 0 ? _governor : _governor * 0.4f;
+            if (Mathf.Abs(throttle) > 0.01f && speed * Mathf.Sign(throttle) > limit) force = 0;
+            float burn = PowerKw * Mathf.Max(Mathf.Abs(throttle), Mathf.Abs(steer) * 0.5f) * Mobility.FuelPerKwSecond * dt;
+            FuelL = Mathf.Max(0, FuelL - burn);
+        }
+
+        PhysicsDirectSpaceState3D space = GetWorld3D().DirectSpaceState;
+        var exclude = new Godot.Collections.Array<Rid> { GetRid() };
+        int contacts = 0, leftTracks = 0, rightTracks = 0, trackContacts = 0;
+        foreach (WheelRt w in Wheels)
+        {
+            Vector3 mount = xf * w.Mount;
+            Vector3 end = mount - up * (w.Rest + w.Radius);
+            var query = PhysicsRayQueryParameters3D.Create(mount, end, GridRegistry.Layers.All, exclude);
+            Godot.Collections.Dictionary hit = space.IntersectRay(query);
+            w.Contact = hit.Count > 0;
+            if (w.Contact)
+            {
+                w.HitPos = hit["position"].AsVector3();
+                w.HitNormal = hit["normal"].AsVector3();
+                float dist = mount.DistanceTo(w.HitPos);
+                w.Offset = Mathf.Clamp(dist - w.Radius, 0, w.Rest);
+                w.Compression = w.Rest - w.Offset;
+                contacts++;
+                if (w.Kind == BlockKind.Track)
+                {
+                    trackContacts++;
+                    if (w.LeftSide) leftTracks++;
+                    else rightTracks++;
+                }
+            }
+            else
+            {
+                w.Offset = w.Rest;
+                w.Compression = 0;
+            }
+        }
+
+        bool coasting = Mathf.Abs(throttle) < 0.01f && (trackContacts == 0 || Mathf.Abs(steer) < 0.01f);
+        foreach (WheelRt w in Wheels)
+        {
+            if (w.Kind == BlockKind.SteerWheel)
+            {
+                float max = Mathf.DegToRad(Mobility.SteerAngleDeg) * (1f - 0.55f * Mathf.Clamp(Mathf.Abs(speed) / 25f, 0, 1));
+                w.SteerAngle = -steer * max;
+            }
+
+            if (!w.Contact) continue;
+            Vector3 p = w.HitPos;
+            Vector3 n = w.HitNormal;
+            Vector3 vp = vel + ang.Cross(p - comW);
+
+            float fs = _k * w.Compression - _c * vp.Dot(up);
+            fs = Mathf.Clamp(fs, 0, share * GunMath.Gravity * 6f);
+            ApplyForce(up * fs, p - xf.Origin);
+
+            Vector3 wf = w.Kind == BlockKind.SteerWheel ? fwd.Rotated(up, w.SteerAngle) : fwd;
+            wf = (wf - n * wf.Dot(n)).Normalized();
+            Vector3 wr = wf.Cross(n).Normalized();
+            float vLong = vp.Dot(wf);
+            float vLat = vp.Dot(wr);
+            float grip = Mobility.Grip(w.Kind) * fs;
+
+            float latLimit = grip * (w.Kind == BlockKind.Track && Mathf.Abs(steer) > 0.1f ? 0.45f : 1f);
+            float fLat = Mathf.Clamp(-vLat * share / dt * 0.35f, -latLimit, latLimit);
+
+            float fLong;
+            if (w.Kind == BlockKind.Track)
+            {
+                float cmd = Mathf.Clamp(throttle + (w.LeftSide ? steer : -steer), -1f, 1f);
+                int side = w.LeftSide ? leftTracks : rightTracks;
+                fLong = force * 0.5f * cmd / Mathf.Max(side, 1);
+            }
+            else
+            {
+                fLong = force * throttle / Mathf.Max(contacts - trackContacts, 1);
+            }
+
+            if (Braking || coasting)
+            {
+                float bf = Braking ? 0.9f : 0.25f;
+                fLong += Mathf.Clamp(-vLong * share / dt * 0.5f, -grip * bf, grip * bf);
+            }
+
+            if (Mathf.Abs(vLong) > 0.05f)
+                fLong -= Mathf.Sign(vLong) * Mathf.Min(_crr * fs, Mathf.Abs(vLong) * share / dt * 0.5f);
+
+            float total = Mathf.Sqrt(fLong * fLong + fLat * fLat);
+            if (total > grip && total > 0)
+            {
+                fLong *= grip / total;
+                fLat *= grip / total;
+            }
+
+            ApplyForce(wf * fLong + wr * fLat, p - xf.Origin);
+            if (w.Kind != BlockKind.Track) w.Spin += vLong / w.Radius * dt;
+        }
+
+        // Tracks skid-steer; a little assist keeps turning predictable.
+        if (trackContacts > 0 && canDrive && Mathf.Abs(steer) > 0.01f)
+        {
+            float yawRate = ang.Dot(up);
+            float target = -steer * 0.9f * (1f - 0.5f * Mathf.Clamp(Mathf.Abs(speed) / 15f, 0, 1));
+            float torque = Mathf.Clamp((target - yawRate) * _yawInertia * 3f, -_yawInertia * 2f, _yawInertia * 2f);
+            ApplyTorque(up * torque * (trackContacts / (float)Mathf.Max(Wheels.Count(w => w.Kind == BlockKind.Track), 1)));
+        }
+
+        ApplyCentralForce(-vel * vel.Length() * 0.5f * Mobility.AirDensity * Analysis.DragArea);
+
+        foreach (WheelRt w in Wheels)
+        {
+            if (w.Visual == null || !IsInstanceValid(w.Visual)) continue;
+            Basis b = new Basis(Vector3.Up, w.SteerAngle) * new Basis(Vector3.Right, -w.Spin);
+            w.Visual.Transform = new Transform3D(b, w.Mount - Vector3.Up * w.Offset);
+        }
+    }
+
+    private static float Wrap(float a)
+    {
+        while (a > Mathf.Pi) a -= Mathf.Tau;
+        while (a < -Mathf.Pi) a += Mathf.Tau;
+        return a;
+    }
+
+    private void Aim(float dt)
+    {
+        if (!HasAim || !DriverAlive) return;
+
+        Transform3D hull = View.SectionGlobal(0);
+        Vector3 local = hull.AffineInverse() * AimPoint;
+        foreach (TurretRt t in Turrets)
+        {
+            if (t.Lead == null || !Model.Sections[t.Section].Cells.Any()) continue;
+            Vector3 rel = local - t.PivotLocal;
+            rel.Y = 0;
+            if (rel.LengthSquared() < 0.01f) continue;
+            Vector3 f0 = t.Lead.Info.Forward.G();
+            float desired = Mathf.Atan2(Vector3.Up.Dot(f0.Cross(rel)), f0.Dot(rel));
+            float delta = Wrap(desired - t.Angle);
+            float step = t.SpeedRad * dt;
+            t.Angle = Wrap(t.Angle + Mathf.Clamp(delta, -step, step));
+            View.SetAngle(t.Section, t.Angle);
+        }
+
+        foreach (GunRt g in Guns)
+        {
+            if (!g.Alive || g.Info.GunSection < 0) continue;
+            Transform3D parent = View.SectionGlobal(g.Info.Section);
+            Vector3 pivot = parent * Conv.CellPos(g.Info.Breech);
+            Vector3 to = AimPoint - pivot;
+            var flat = new Vector3(to.X, 0, to.Z);
+            float dist = flat.Length();
+            float v = SelectedAmmo == AmmoType.AP ? g.Stats.MuzzleVelocity : g.Stats.HeVelocity;
+            if (!GunMath.SolveElevation(v, dist, to.Y, out float elev)) elev = Mathf.Pi / 4f;
+            Vector3 dirW = dist > 0.01f ? flat / dist * Mathf.Cos(elev) + Vector3.Up * Mathf.Sin(elev) : Vector3.Up;
+            Vector3 dirL = parent.Basis.Inverse() * dirW;
+            Vector3 f0 = g.Info.Forward.G();
+            Vector3 axis = g.Info.Right.G();
+            float desired = Mathf.Atan2(axis.Dot(f0.Cross(dirL)), f0.Dot(dirL));
+            desired = Mathf.Clamp(desired, Mathf.DegToRad(Mobility.MinElevationDeg), Mathf.DegToRad(Mobility.MaxElevationDeg));
+            float step = g.ElevSpeedRad * dt;
+            g.Pitch += Mathf.Clamp(desired - g.Pitch, -step, step);
+            View.SetAngle(g.Info.GunSection, g.Pitch);
+
+            Vector3 actual = (View.SectionGlobal(g.Info.GunSection).Basis * f0).Normalized();
+            g.AimError = Mathf.RadToDeg(actual.AngleTo(dirW));
+        }
+    }
+
+    /// <summary>World position and direction of a gun's muzzle right now.</summary>
+    public (Vector3 pos, Vector3 dir) Muzzle(GunRt g)
+    {
+        Transform3D gs = View.SectionGlobal(g.Info.GunSection);
+        Vector3 f = g.Info.Forward.G();
+        Vector3 pos = gs * (Conv.CellPos(g.Info.Breech) + f * Conv.CS * g.MuzzleDistanceCells);
+        return (pos, (gs.Basis * f).Normalized());
+    }
+
+    /// <summary>Fires every gun that's loaded and has ammo. Returns how many fired.</summary>
+    public int FireReady()
+    {
+        if (!DriverAlive || Combat.Instance == null) return 0;
+        int fired = 0;
+        foreach (GunRt g in Guns)
+        {
+            if (!g.Alive || g.ReloadLeft > 0 || g.Info.GunSection < 0) continue;
+            AmmoType type = SelectedAmmo;
+            if (Rounds(g, type) == 0) type = type == AmmoType.AP ? AmmoType.HE : AmmoType.AP;
+            if (!TakeRound(g, type)) continue;
+
+            (Vector3 muzzle, Vector3 dir) = Muzzle(g);
+            float spread = Mathf.DegToRad(g.Stats.SpreadDeg) * Mathf.Sqrt(_rng.Randf());
+            Vector3 side = dir.Cross(Mathf.Abs(dir.Y) > 0.9f ? Vector3.Right : Vector3.Up).Normalized();
+            dir = dir.Rotated(side, spread).Rotated(dir, _rng.RandfRange(0, Mathf.Tau)).Normalized();
+            float speed = type == AmmoType.AP ? g.Stats.MuzzleVelocity : g.Stats.HeVelocity;
+            Combat.Instance.Fire(this, muzzle, dir * speed + LinearVelocity, type, g.Stats, g.Info.BreechDef.Breech, PlayerControlled);
+
+            Vector3 breech = View.SectionGlobal(g.Info.GunSection) * Conv.CellPos(g.Info.Breech);
+            ApplyImpulse(-dir * g.Stats.RecoilImpulse, breech - GlobalPosition);
+            g.ReloadLeft = g.Stats.ReloadS;
+            Effects.MuzzleFlash(GetParent<Node3D>(), muzzle, dir, g.Stats.CaliberMm);
+            fired++;
+        }
+
+        return fired;
+    }
+
+    public bool IsUpsideDownOrStuck => GlobalTransform.Basis.Y.Normalized().Dot(Vector3.Up) < 0.5f;
+
+    /// <summary>Puts the vehicle back on its wheels where it is ("forgiving" recovery).</summary>
+    public void Recover()
+    {
+        Vector3 f = -GlobalTransform.Basis.Z;
+        f.Y = 0;
+        float yaw = f.LengthSquared() > 0.001f ? Mathf.Atan2(-f.X, -f.Z) : 0;
+        GlobalTransform = new Transform3D(new Basis(Vector3.Up, yaw), GlobalPosition + Vector3.Up * 2.5f);
+        LinearVelocity = Vector3.Zero;
+        AngularVelocity = Vector3.Zero;
+    }
+
+    public Vector3 VelocityAt(Vector3 worldPoint) =>
+        LinearVelocity + AngularVelocity.Cross(worldPoint - GlobalTransform * CenterOfMass);
+
+    public void OnBlocksRemoved()
+    {
+        if (Model.Blocks.Count == 0)
+        {
+            Vanish();
+            return;
+        }
+
+        RefreshStats();
+    }
+
+    public void Vanish()
+    {
+        GridRegistry.Remove(this);
+        if (IsInstanceValid(this)) QueueFree();
+    }
+}
