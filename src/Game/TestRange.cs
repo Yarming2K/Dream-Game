@@ -27,6 +27,13 @@ public partial class TestRange : Node3D
     private static readonly Vector3 SeaDepotCenter = new(240, Ocean.Level, 100);
     private const float SeaDepotRadius = 18f;
 
+    // Big ships (anything over 80 m) start further out, at the fleet anchorage, which also resupplies them.
+    private static readonly Vector3 Anchorage = new(470, Ocean.Level, 0);
+    private const float AnchorageRadius = 90f;
+    private const float BigShipLength = 80f;
+    private float _missingTimer;
+    private int _missing;
+
     // The airfield in the western hills.
     private static readonly Vector3 StripStart = new(Terrain.StripX, Ground, Terrain.StripHalfLength - 18f);
     private static readonly Vector3 Apron = new(Terrain.StripX, Ground, Terrain.StripHalfLength - 2f);
@@ -242,6 +249,23 @@ public partial class TestRange : Node3D
         }
 
         root.AddChild(Sign("NAVAL SUPPLY\nstop inside the ring", new Vector3(0, 7f, 0), 72));
+
+        // The fleet anchorage, for ships too big for the buoy ring: a wide ring of buoys far offshore.
+        var fleet = new Node3D { Name = "Anchorage", Position = Anchorage };
+        AddChild(fleet);
+        for (int i = 0; i < 24; i++)
+        {
+            float a = i * Mathf.Tau / 24f;
+            var at = new Vector3(Mathf.Cos(a) * AnchorageRadius, 0, Mathf.Sin(a) * AnchorageRadius);
+            fleet.AddChild(new MeshInstance3D { Mesh = new CylinderMesh { TopRadius = 0.8f, BottomRadius = 1.1f, Height = 2f }, MaterialOverride = red, Position = at + Vector3.Up * 0.4f });
+            fleet.AddChild(new MeshInstance3D
+            {
+                Mesh = new SphereMesh { Radius = 0.3f, Height = 0.6f }, Position = at + Vector3.Up * 1.8f,
+                MaterialOverride = BlockVisuals.Emissive(new Color(1f, 0.72f, 0.27f), 3f),
+            });
+        }
+
+        fleet.AddChild(Sign("FLEET ANCHORAGE\nbig ships start and resupply here", new Vector3(0, 30f, -AnchorageRadius), 200));
     }
 
     /// <summary>A concrete airstrip with centerline and threshold markings, an apron that resupplies, and a helipad.</summary>
@@ -302,7 +326,8 @@ public partial class TestRange : Node3D
         float apron = new Vector2(p.X - Apron.X, p.Z - Apron.Z).Length();
         float pad = new Vector2(p.X - HelipadCenter.X, p.Z - HelipadCenter.Z).Length();
         bool low = p.Y < Ground + 6f;
-        return (land <= DepotRadius && p.Y > DepotCenter.Y - 3f && low) || sea <= SeaDepotRadius ||
+        float anchorage = new Vector2(p.X - Anchorage.X, p.Z - Anchorage.Z).Length();
+        return (land <= DepotRadius && p.Y > DepotCenter.Y - 3f && low) || sea <= SeaDepotRadius || anchorage <= AnchorageRadius ||
                (apron <= ApronRadius && low) || (pad <= Terrain.HelipadRadius && low);
     }
 
@@ -399,6 +424,8 @@ public partial class TestRange : Node3D
         // airships floating above it; everything else on the firing line.
         Vector3 at = a.Mode switch
         {
+            MobilityMode.Ship or MobilityMode.Submarine when (a.Max.Z - a.Min.Z + 1) * Conv.CS > BigShipLength =>
+                new Vector3(Anchorage.X, VehicleBody.FloatHeight(a), Anchorage.Z),
             MobilityMode.Ship or MobilityMode.Submarine => new Vector3(SeaSpawn.X, VehicleBody.FloatHeight(a), SeaSpawn.Z),
             MobilityMode.Plane => StripStart + Vector3.Up * VehicleBody.SpawnHeight(a),
             MobilityMode.Helicopter or MobilityMode.Hover => HelipadCenter + Vector3.Up * VehicleBody.SpawnHeight(a),
@@ -459,7 +486,7 @@ public partial class TestRange : Node3D
         }
 
         _cam.MakeCurrent();
-        _dist = v.IsAir ? Mathf.Max(_dist, v.Radius * 1.6f + 8f) : _dist;
+        _dist = v.IsAir ? Mathf.Max(_dist, v.Radius * 1.6f + 8f) : v.Radius > 15f ? Mathf.Max(_dist, v.Radius * 1.3f) : _dist;
         _arm.ClearExcludedObjects();
         _arm.AddExcludedObject(v.GetRid());
         _pivot.GlobalPosition = v.GlobalTransform * v.CenterOfMass + Vector3.Up * 2f;
@@ -802,8 +829,9 @@ public partial class TestRange : Node3D
             }
 
             if (!Mounted) return;
-            if (mb.ButtonIndex == MouseButton.WheelUp && mb.Pressed) _dist = Mathf.Clamp(_dist - 1.2f, 5f, 60f);
-            if (mb.ButtonIndex == MouseButton.WheelDown && mb.Pressed) _dist = Mathf.Clamp(_dist + 1.2f, 5f, 60f);
+            float far = Mathf.Max(60f, _mount.Radius * 2.5f);
+            if (mb.ButtonIndex == MouseButton.WheelUp && mb.Pressed) _dist = Mathf.Clamp(_dist * 0.9f, 5f, far);
+            if (mb.ButtonIndex == MouseButton.WheelDown && mb.Pressed) _dist = Mathf.Clamp(_dist * 1.1f, 5f, far);
             if (mb.ButtonIndex == MouseButton.Right) _zoom = mb.Pressed && captured;
             return;
         }
@@ -1236,7 +1264,14 @@ public partial class TestRange : Node3D
         if (!v.IsNaval && v.Submerged > 0.25f) sb.Append($"[color={Ui.Hex(Ui.Warn)}]Deep water: land vehicles sink. Back out while the engine still runs.[/color]\n");
         if (v.IsUpsideDownOrStuck && (!v.IsAir || v.OnGround)) sb.Append($"[color={Ui.Hex(Ui.Warn)}]Tipped over: press R to get back up.[/color]\n");
         if (_resupplying) sb.Append($"[color={Ui.Hex(Ui.Good)}]Resupplying...[/color]\n");
-        int missing = v.MissingCount;
+        _missingTimer -= (float)GetProcessDeltaTime();
+        if (_missingTimer <= 0)
+        {
+            _missingTimer = 0.5f;
+            _missing = v.MissingCount;
+        }
+
+        int missing = _missing;
         if (missing > 0) sb.Append($"[color={Ui.Hex(Ui.Dim)}]{missing} block(s) missing: get out and weld them back (3).[/color]\n");
         _status.Text = sb.ToString().TrimEnd('\n');
 

@@ -132,8 +132,15 @@ public partial class VehicleBody : RigidBody3D, IGridHost
         v.CollisionMask = GridRegistry.Layers.All;
         v.Transform = where;
         v.CanSleep = false;
-        v.LinearDamp = 0.02f;
-        v.AngularDamp = 0.8f;
+        // Drag that isn't modeled anywhere else. This replaces the project default (0.1) instead of adding to it,
+        // because the default slowed ships and aircraft far below their design speeds. Damping like this pulls
+        // in proportion to mass, which on a 50,000 t battleship is more than all its turbines can push. Ships
+        // already model their own water drag, so they get almost none. Land vehicles keep what they've always had.
+        bool ground = a.Mode == MobilityMode.Ground;
+        v.LinearDampMode = DampMode.Replace;
+        v.AngularDampMode = DampMode.Replace;
+        v.LinearDamp = a.Mode switch { MobilityMode.Ground => 0.12f, MobilityMode.Ship or MobilityMode.Submarine => 0.002f, _ => 0.02f };
+        v.AngularDamp = ground ? 0.9f : 0.8f;
         v.CenterOfMassMode = CenterOfMassModeEnum.Custom;
 
         float cs = Conv.CS;

@@ -637,8 +637,8 @@ public static class ExampleDesigns
     }
 
     /// <summary>
-    /// A 300 m battleship, built from big blocks: a hull of hull plates and belt armor split into fourteen
-    /// compartments by bulkheads, a bed of lead along the keel, twelve turbines on four great screws, a bridge
+    /// A 300 m battleship, built from big blocks: a hull of hull plates and belt armor split into
+    /// compartments by a bulkhead every 20 m, a bed of lead along the keel, twelve turbines on four great screws, a bridge
     /// tower, and two twin 406 mm turrets, one forward and one aft.
     /// </summary>
     public static Blueprint Colossus()
@@ -684,10 +684,10 @@ public static class ExampleDesigns
         d.Tile(-5, 5, deck + 20, deck + 20, -109, -91, "hull_plate", 0, "armor_light");
 
         // Machinery aft of amidships: twelve turbines and their fuel.
-        foreach (int x in new[] { -14, -8, 6, 12 })
+        foreach (int x in new[] { -14, -8, 7, 13 })
         foreach (int z in new[] { 150, 160, 170 })
             d.Set(x, 3, z, "turbine");
-        foreach (int x in new[] { -20, 18 })
+        foreach (int x in new[] { -20, 19 })
         foreach (int z in new[] { 150, 158, 166, 174 })
             d.Set(x, 3, z, "fuel_bunker");
 
@@ -699,9 +699,12 @@ public static class ExampleDesigns
         }
 
         // Lead along the keel, so she sits deep and steady.
-        for (int x = -22; x <= 20; x += 2)
+        for (int x = 1; x <= 19; x += 2)
         for (int z = bow + 2; z <= stern - 3; z += 4)
+        {
             d.Set(x, 1, z, "ballast_block");
+            d.Set(-x - 1, 1, z, "ballast_block");
+        }
 
         // Four great screws under the stern, a great rudder behind each inner pair.
         foreach (int x in new[] { -16, -8, 8, 16 }) d.Set(x, 6, stern + 1, "great_screw");

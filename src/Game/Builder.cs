@@ -1124,7 +1124,7 @@ public partial class Builder : Node3D
         foreach ((string key, string what) in new[]
                  {
                      ("LMB", "place"), ("RMB", "remove"), ("MMB", "copy"), ("R T G", "rotate"), ("WASD Q E", "move"),
-                     ("M", "mirror"), ("F1", "help"),
+                     ("M", "mirror"), ("B", "box"), ("F1", "help"),
                  })
         {
             HBoxContainer pair = Ui.Row(5);

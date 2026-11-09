@@ -28,7 +28,7 @@ public partial class VehicleBody
 
     // Water drag on each submerged piece, per m³ under water (N per m/s). Sideways and up/down are high
     // (the hull is a keel and a raft); along the hull is low (hull resistance below does the rest).
-    private const float DragAlong = 30f, DragSide = 1500f, DragUp = 1500f;
+    private const float DragAlong = 2f, DragSide = 1500f, DragUp = 1500f;
 
     /// <summary>How far a submarine can be ordered down (meters below the surface, measured at the top of the hull).</summary>
     public const float MaxOrderedDepth = 50f;
@@ -72,11 +72,16 @@ public partial class VehicleBody
     public bool CanFireTorpedo => Tubes.Any(t => t.Alive && t.ReloadLeft <= 0 && TorpedoesFor(t) > 0);
 
     private FloatModel _float;
+    private readonly List<BlockInstance> _engines = new();
     private Dictionary<Int3, BlockDef> _designCells;
     private float _floatScale = 1f;
     private float _drownedKw;
     private float _hullK;
     private float _lengthM, _beamM, _heightM;
+
+    // How hard the water resists the hull swinging round (N·m per rad/s), summed each tick from the
+    // submerged pieces, so the rudder can push through it on a long hull.
+    private float _yawDamp;
     private float _wakeTimer;
     private float _lastFlood;
     private bool _saidDrowned;
@@ -121,9 +126,11 @@ public partial class VehicleBody
         }
 
         int props = 0, rudders = 0, planes = 0, pumps = 0, valves = 0;
+        _engines.Clear();
         foreach (BlockInstance b in Model.Instances)
         {
             if (!b.Alive) continue;
+            if (b.Def.PowerKw > 0) _engines.Add(b);
             switch (b.Def.Kind)
             {
                 case BlockKind.ShipPropeller: props++; break;
@@ -205,7 +212,7 @@ public partial class VehicleBody
         Vector3 vel = LinearVelocity, ang = AngularVelocity;
         float rhoG = Hydro.WaterDensity * GunMath.Gravity;
         Vector3 force = Vector3.Zero, torque = Vector3.Zero;
-        float under = 0, total = 0;
+        float under = 0, total = 0, yawDamp = 0;
 
         void Piece(Vector3 local, float buoyant, float bulk, float height)
         {
@@ -219,6 +226,8 @@ public partial class VehicleBody
             float wet = bulk * frac;
             Vector3 f = Vector3.Up * (rhoG * buoyant * frac) - (fwd * (pv.Dot(fwd) * DragAlong) + up * (pv.Dot(up) * DragUp)) * wet;
             Vector3 side = right * (-pv.Dot(right) * DragSide * wet);
+            float along = r.Dot(fwd);
+            yawDamp += DragSide * wet * along * along;
             force += f + side;
             // Sideways drag acts as if nearer the center of mass than it is (bilge keels, forgivingly), so
             // hard turns heel a boat over a little, not onto its beam ends.
@@ -237,6 +246,7 @@ public partial class VehicleBody
         ApplyCentralForce(force);
         ApplyTorque(torque);
         Submerged = total > 0 ? under / total : 0;
+        _yawDamp = yawDamp;
 
         // Hull resistance: streamlined for ships, a brick for anything else wading through.
         float vf = vel.Dot(fwd);
@@ -282,9 +292,9 @@ public partial class VehicleBody
     private void DrownedEngines(Transform3D xf)
     {
         float drowned = 0;
-        foreach (BlockInstance b in Model.Instances)
+        foreach (BlockInstance b in _engines)
         {
-            if (!b.Alive || b.Def.PowerKw <= 0) continue;
+            if (!b.Alive) continue;
             Compartment comp = _float.CompartmentAt(b.Cell);
             bool wet = comp != null ? _float.Flooded(comp, b.Cell.Y) : (xf * (b.Center.G() * Conv.CS)).Y < Ocean.Level;
 
@@ -294,6 +304,18 @@ public partial class VehicleBody
         _drownedKw = drowned;
         if (EngineDrowned && !_saidDrowned) Status?.Invoke(IsNaval ? "Engine room flooded!" : "Engine flooded: it stalls under water");
         _saidDrowned = EngineDrowned;
+    }
+
+    /// <summary>
+    /// The fastest a ship turns with the rudder hard over (rad/s). Short boats turn in about two of their
+    /// lengths; long ships a little tighter for their size, so a 300 m battleship still comes round in
+    /// about six minutes rather than a quarter of an hour.
+    /// </summary>
+    public static float MaxTurnRate(float lengthM)
+    {
+        float l = Mathf.Max(lengthM, 6f);
+        if (l > 40f) l = 40f * Mathf.Pow(l / 40f, 0.7f);
+        return 2.8f / l;
     }
 
     /// <summary>Propellers, rudders, dive planes and ballast.</summary>
@@ -339,11 +361,12 @@ public partial class VehicleBody
         {
             float flow = Mathf.Abs(vf) + (wetProps > 0 ? Mathf.Abs(throttle) * 2.5f : 0f);
             float authority = Mathf.Clamp(flow / 6f, 0, 1) * (RuddersAlive > 0 ? 1f : 0.25f);
-            float maxRate = 3.2f / Mathf.Max(_lengthM, 6f);
+            float maxRate = MaxTurnRate(_lengthM);
             float target = -RudderAngle * maxRate * authority * (vf < -0.3f ? -1f : 1f);
-            // About the world's vertical, so a heeled boat's steering doesn't lever it further over.
+            // About the world's vertical, so a heeled boat's steering doesn't lever it further over. The first
+            // part pushes through the water's resistance to turning; the second makes up the difference.
             float yawRate = AngularVelocity.Y;
-            float torque = Mathf.Clamp((target - yawRate) * _yawInertia * 6f, -_yawInertia * 0.6f, _yawInertia * 0.6f);
+            float torque = Mathf.Clamp(target * _yawDamp + (target - yawRate) * _yawInertia * 6f, -_yawInertia * 0.6f, _yawInertia * 0.6f);
             ApplyTorque(Vector3.Up * torque * Mathf.Max(authority, 0.2f));
         }
 
