@@ -411,31 +411,33 @@ public static class ExampleDesigns
 
     /// <summary>
     /// Fighter-bomber: one aero engine pulling a nose propeller, straight wings with ailerons at the tips,
-    /// a tailplane with elevators and a fin with a rudder, an autocannon in each wing, two bombs and a tail wheel.
+    /// a tailplane with elevators and a fin with a rudder, an autocannon in each wing, two bombs, and a
+    /// nose wheel.
     /// </summary>
     public static Blueprint Kestrel()
     {
         var d = new Draft();
         d.Set(0, 1, -8, "air_propeller");
         d.Set(0, 1, -7, "aero_engine");
-        d.Set(-1, 1, -3, "fuel_tank");
-        d.Set(1, 1, -3, "fuel_tank");
+        d.Set(-1, 1, 1, "fuel_tank");
+        d.Set(1, 1, 1, "fuel_tank");
         d.Set(0, 2, -2, "driver_seat");
 
-        // Wing guns, each with a rack of AP behind it, and the bombs hung under the wings.
+        // Wing guns at the leading edge, each with a rack of AP behind it, and the bombs hung under the wings.
         foreach (int x in new[] { -3, 3 })
         {
-            d.Set(x, 1, -4, "breech_40ac");
-            d.Set(x, 1, -5, "barrel");
-            d.Set(x, 1, -3, "ammo_ap");
+            d.Set(x, 1, -6, "breech_40ac");
+            d.Set(x, 1, -7, "barrel");
+            d.Set(x, 1, -5, "ammo_ap");
             d.Set(x * 5 / 3, 0, -2, "bomb_rack");
         }
 
-        // Ailerons on the outer trailing edge, then the rest of the wing.
-        d.Fill(7, 10, 1, 1, 0, 0, "control_surface");
-        d.Fill(-10, -7, 1, 1, 0, 0, "control_surface");
-        d.Fill(2, 10, 1, 1, -4, 0, "wing");
-        d.Fill(-10, -2, 1, 1, -4, 0, "wing");
+        // Ailerons on the outer trailing edge, then the rest of the wing. The wing sits far enough forward
+        // that it lifts just behind the center of mass: stable, but light enough on the nose to pitch.
+        d.Fill(7, 10, 1, 1, -2, -2, "control_surface");
+        d.Fill(-10, -7, 1, 1, -2, -2, "control_surface");
+        d.Fill(2, 10, 1, 1, -6, -2, "wing");
+        d.Fill(-10, -2, 1, 1, -6, -2, "wing");
 
         // Fuselage and tail boom.
         d.Fill(-1, 1, 1, 1, -6, 1, "airframe");
@@ -445,18 +447,19 @@ public static class ExampleDesigns
         d.Fill(0, 0, 1, 1, 2, 7, "airframe");
 
         // Tail: stabilizer and elevators, and a fin with a rudder.
-        d.Fill(1, 3, 1, 1, 6, 6, "wing");
-        d.Fill(-3, -1, 1, 1, 6, 6, "wing");
-        d.Fill(1, 3, 1, 1, 7, 7, "control_surface");
-        d.Fill(-3, -1, 1, 1, 7, 7, "control_surface");
+        d.Fill(1, 4, 1, 1, 6, 6, "wing");
+        d.Fill(-4, -1, 1, 1, 6, 6, "wing");
+        d.Fill(1, 4, 1, 1, 7, 7, "control_surface");
+        d.Fill(-4, -1, 1, 1, 7, 7, "control_surface");
         int upright = Orientations.RotateAroundZ(0, 1);
         d.Fill(0, 0, 2, 3, 6, 6, "wing", upright);
         d.Fill(0, 0, 2, 3, 7, 7, "control_surface", upright);
 
-        // Landing gear: main wheels under the wing roots, a steering tail wheel.
-        d.Set(-2, 0, -2, "wheel");
-        d.Set(2, 0, -2, "wheel");
-        d.Set(0, 0, 6, "wheel_steer");
+        // Tricycle landing gear: a steering nose wheel, and main wheels just behind the center of mass so
+        // the elevators can lift the nose for takeoff.
+        d.Set(0, 0, -6, "wheel_steer");
+        d.Set(-2, 0, -3, "wheel");
+        d.Set(2, 0, -3, "wheel");
         return d.Build("Kestrel (fighter-bomber)");
     }
 

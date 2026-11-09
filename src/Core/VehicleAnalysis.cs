@@ -801,6 +801,11 @@ public sealed class VehicleAnalysis
         air.WingAreaM2 = flat.Count * Aero.PanelArea;
         air.LiftCenterZ = flat.Count > 0 ? flat.Average(s => s.Cell.Z * cs) : CenterOfMass.Z;
         air.StaticMarginM = air.LiftCenterZ - CenterOfMass.Z;
+        // Elevator authority against stability: how far it can hold the nose up.
+        float elevator = Surfaces.Where(s => s.Role == SurfaceRole.Elevator)
+            .Sum(s => Aero.PanelArea * Aero.LiftSlope * Aero.ControlThrow * MathF.Abs(s.Cell.Z * cs - CenterOfMass.Z));
+        float stiffness = air.WingAreaM2 * Aero.LiftSlope * MathF.Max(air.StaticMarginM, 0.02f);
+        air.MaxPitchDeg = stiffness > 0 ? MathF.Min(elevator / stiffness, 1f) * 180f / MathF.PI : 0;
         air.HasRoll = Surfaces.Any(s => s.Role == SurfaceRole.Aileron);
         air.HasPitch = Surfaces.Any(s => s.Role == SurfaceRole.Elevator);
         air.HasYaw = Surfaces.Any(s => s.Role == SurfaceRole.Rudder);
@@ -901,9 +906,18 @@ public sealed class VehicleAnalysis
                 if (Wheels.Count == 0)
                     Warnings.Add(new DesignWarning(Severity.Warning,
                         "No landing gear. Put Wheels on the bottom row (a Steering Wheel at the nose or tail steers on the ground), or it can only start in the air."));
+                else if (CenterOfMass.Z < Wheels.Min(w => w.Cell.Z) * Blueprint.CellSize + 0.1f)
+                    Warnings.Add(new DesignWarning(Severity.Warning,
+                        "All the wheels are behind the center of mass, so it will tip onto its nose. Move the main wheels forward of the pink dot, or add one under the nose."));
+                else if (CenterOfMass.Z > Wheels.Max(w => w.Cell.Z) * Blueprint.CellSize - 0.1f)
+                    Warnings.Add(new DesignWarning(Severity.Warning,
+                        "All the wheels are ahead of the center of mass, so it will sit on its tail. Add a wheel at the tail."));
                 if (a.StaticMarginM < -0.25f)
                     Warnings.Add(new DesignWarning(Severity.Warning,
                         "The wings lift ahead of the center of mass, so it will pitch up and flip. Move the wings back, or add a tailplane of wing panels behind them."));
+                else if (a.HasPitch && a.MaxPitchDeg < 9f)
+                    Warnings.Add(new DesignWarning(Severity.Warning,
+                        $"Nose-heavy: the wings lift so far behind the center of mass that the elevators can only raise the nose about {a.MaxPitchDeg:0}°, too little to take off. Move the wings forward a little, or add elevators."));
                 if (!a.HasRoll)
                     Warnings.Add(new DesignWarning(Severity.Warning, "No ailerons, so it can't roll into a turn. Put Control Surfaces out at the wingtips."));
                 if (!a.HasPitch)

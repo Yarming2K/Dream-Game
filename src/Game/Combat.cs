@@ -49,6 +49,11 @@ public partial class Combat : Node3D
 
         /// <summary>Where the shell really is after this step, when it isn't the end of the segment (it hit the water).</summary>
         public Vector3? Moved;
+
+        /// <summary>Flak: bursts after this many meters (0 = only on contact or near an aircraft).</summary>
+        public float FuseM;
+        public float Travelled;
+        public IGridHost Owner;
     }
 
     private struct PendingBlast
@@ -92,7 +97,7 @@ public partial class Combat : Node3D
     /// Rifle rounds only get a visible tracer when <paramref name="tracer"/> is set.
     /// </summary>
     public void Fire(IGridHost owner, Vector3 pos, Vector3 vel, AmmoType type, in GunStats stats, BreechSpec breech, bool byPlayer,
-        float infantryDamage = -1f, Rid ignore = default, bool tracer = true, bool rocket = false)
+        float infantryDamage = -1f, Rid ignore = default, bool tracer = true, bool rocket = false, float fuseM = 0f)
     {
         var shell = Shell.FromGun(stats, type, vel.Length(), breech);
         var p = new Projectile
@@ -100,7 +105,7 @@ public partial class Combat : Node3D
             Pos = pos, Vel = vel, Shell = shell, Breech = breech, ByPlayer = byPlayer,
             DragK = type == AmmoType.AP ? stats.DragK : stats.HeDragK,
             InfantryDamage = infantryDamage >= 0 ? infantryDamage : InfantryDamage.FromShell(shell),
-            Ignore = ignore, Small = stats.CaliberMm < 20f,
+            Ignore = ignore, Small = stats.CaliberMm < 20f, FuseM = fuseM, Owner = owner,
         };
         if (rocket) p.Trail = Effects.RocketTrail(this, pos);
         else if (tracer) p.Tracer = Effects.Tracer(this, stats.CaliberMm, type);
@@ -120,7 +125,8 @@ public partial class Combat : Node3D
             p.Vel *= Mathf.Max(0f, 1f - (p.Underwater ? UnderwaterDrag : p.DragK) * speed * dt);
             if (p.Underwater) p.Shell.PenMm *= p.Vel.Length() / Mathf.Max(speed, 1f);
             Vector3 to = from + p.Vel * dt;
-            bool done = Step(p, from, to);
+            bool done = p.Shell.Type == AmmoType.Flak && FlakFuse(p, from, ref to);
+            if (!done) done = Step(p, from, to);
             if (!done)
             {
                 p.Pos = p.Moved ?? to;
@@ -139,7 +145,37 @@ public partial class Combat : Node3D
         }
 
         TorpedoTick(dt);
+        OrdnanceTick(dt);
         RunBlasts(dt);
+    }
+
+    /// <summary>
+    /// Flak shells burst when they pass close to an enemy aircraft, or when they've flown as far as the gun
+    /// was aimed. Returns true if it went off.
+    /// </summary>
+    private bool FlakFuse(Projectile p, Vector3 from, ref Vector3 to)
+    {
+        float len = from.DistanceTo(to);
+        if (len < 1e-4f) return false;
+        Vector3 dir = (to - from) / len;
+        float burstAt = float.PositiveInfinity;
+        if (p.FuseM > 0 && p.Travelled + len >= p.FuseM) burstAt = p.FuseM - p.Travelled;
+        foreach (IGridHost h in GridRegistry.Hosts)
+        {
+            if (h is not VehicleBody v || h == p.Owner || !v.IsAir || v.OnGround || !IsInstanceValid(v)) continue;
+            Vector3 c = v.GlobalTransform * v.CenterOfMass;
+            float t = Mathf.Clamp((c - from).Dot(dir), 0, len);
+            if ((from + dir * t).DistanceTo(c) <= v.Radius * 0.45f + 3.5f) burstAt = Mathf.Min(burstAt, t);
+        }
+
+        p.Travelled += len;
+        if (float.IsPositiveInfinity(burstAt) || p.Age < 0.05f) return false;
+
+        // Anything solid before the burst point gets hit first, as with any shell.
+        Vector3 at = from + dir * burstAt;
+        if (Step(p, from, at)) return true;
+        Explode(at, p.Shell.HeRadiusM * 2.6f, p.Shell.HeDamage * 1.3f, p.ByPlayer, "Flak", flak: true);
+        return true;
     }
 
     /// <summary>Drag on a shell in water, per meter per (m/s): a few dozen meters and it's spent.</summary>
@@ -317,10 +353,11 @@ public partial class Combat : Node3D
     }
 
     /// <summary>An explosion: damages blocks in range on every grid and shoves bodies away.</summary>
-    public void Explode(Vector3 center, float radius, float damage, bool byPlayer, string cause)
+    public void Explode(Vector3 center, float radius, float damage, bool byPlayer, string cause, bool flak = false)
     {
         // Under water there's no fireball, just a column of spray thrown up at the surface.
         if (center.Y < Ocean.Level - 0.4f) Effects.UnderwaterBlast(this, center, radius);
+        else if (flak) Effects.FlakBurst(this, center, radius);
         else Effects.Explosion(this, center, radius);
         Blast?.Invoke(center, radius, damage);
         var destroyedAll = new List<OrderedHit>();
@@ -388,6 +425,10 @@ public partial class Combat : Node3D
                 {
                     (float dmg, float r) = DamageModel.CookOff(b.AmmoUnits);
                     QueueBlast(at, r, dmg, byPlayer, "Ammo cook-off");
+                }
+                else if (b.Def.Kind == BlockKind.BombRack && b.AmmoUnits >= 1f)
+                {
+                    QueueBlast(at, Aero.BombRadiusM * 0.8f, Aero.BombDamage * 0.7f, byPlayer, "Bomb");
                 }
                 else if (b.Def.DeathExplosionDamage > 0)
                 {
@@ -477,5 +518,6 @@ public partial class Combat : Node3D
         _shells.Clear();
         _blasts.Clear();
         ClearTorpedoes();
+        ClearOrdnance();
     }
 }

@@ -25,6 +25,8 @@ public static class GameInput
         AddKeys("gunner_mode", Key.G);
         AddKeys("torpedo", Key.F);
         AddKeys("dive", Key.C);
+        AddKeys("bomb", Key.B);
+        AddKeys("vtol", Key.V);
     }
 
     private static void AddKeys(string action, params Key[] keys)

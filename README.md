@@ -2,7 +2,7 @@
 
 A military-industrial sandbox: design everything, then fight a war for a star system. Working title.
 
-The scope we agreed on is in [docs/DESIGN.md](docs/DESIGN.md). Built so far: **milestone 1** (the builder and test range), **milestone 2** (on foot, crew and field repair) and the **sea front** of milestone 3 (ships, submarines and torpedoes). Air and colossal machines are next.
+The scope we agreed on is in [docs/DESIGN.md](docs/DESIGN.md). Built so far: **milestone 1** (the builder and test range), **milestone 2** (on foot, crew and field repair) and the **sea and air fronts** of milestone 3 (ships, submarines and torpedoes; planes, helicopters, drones and airships, with bombs, missiles and flak). Colossal machines are next.
 
 ## Play it
 
@@ -51,6 +51,15 @@ The **parts drawer** on the left shows every block with a thumbnail; the card un
 - **Torpedo tubes** fire the way their arrow points and are fed by **Torpedo Racks** touching them (or through ammo feeds).
 - Try the **Corsair** (patrol boat) and **Barracuda** (submarine) examples.
 
+### Aircraft
+- **Planes:** rows of **Wing Panels** (Air) lift with speed. Put **Control Surfaces** at the wingtips (they roll), on a tailplane behind the wings (they pitch) and standing up on a tail fin (they turn); the dashboard shows what each one does. Pull with an **Air Propeller** and an engine (the **Aero Engine** is light and strong), or push with **Jet Engines**. Give it **Wheels** with one under the nose, and keep the main wheels just behind the pink dot.
+- **The wings should lift just behind the center of mass.** The dashboard warns if it's nose-heavy (it can't lift its nose to take off) or tail-heavy (it flips).
+- **Helicopters:** a **Rotor** on top lifts it (one big engine lifts about three tonnes). Keep 4.5 m around the rotor clear.
+- **Drones and VTOL:** four **Lift Fans** pointing up at the corners. A **Drone Core** instead of a seat means you fly it by remote. With wings and a propeller too, V switches between hovering and flying on the wings.
+- **Airships:** fill an envelope with **Gas Cells** (each holds up 20 kg) and hang a gondola underneath.
+- **Missiles** are built on a **Missile Rail**: line up a Rocket Motor, Fins, a Warhead and a seeker on the nose (Optical flies to your crosshair, Radar chases aircraft). More motors go faster and further, more warheads hit harder. **Bomb Racks** carry one bomb each. The **40 mm Autocannon** with a **Flak Rack** shoots down aircraft.
+- Examples: **Kestrel** (fighter-bomber), **Hornet** (helicopter), **Wasp** (drone), **Zephyr** (airship) and **Skyguard** (flak truck).
+
 Saved designs are `.json` files in your blueprints folder. The **Folder** button opens it, so you can send files to friends.
 
 ## Test range
@@ -96,6 +105,22 @@ The **welding torch** repairs damaged blocks and rebuilds destroyed ones. Missin
 
 Holes below the waterline flood the hull: the HUD shows each compartment filling. Get out, weld the holes shut, and the bilge pumps clear the water. Stop inside the **buoy ring** to rearm and refuel. In the water you swim: Space up, C down, and E climbs into a boat you're looking at.
 
+**In the air** (planes start on the airstrip in the western hills; helicopters, drones and airships at the helipad)
+
+| Do this | To |
+|---|---|
+| Mouse | Planes fly toward where you point. Helicopters and drones turn to face where you look |
+| W / S | Planes: throttle up / down (it stays where you leave it). Helicopters and drones: forward / back. Airships: telegraph |
+| A / D | Planes: roll (and steer on the ground). Helicopters and drones: sideways. Airships: turn |
+| Space / C | Helicopters, drones and airships: up / down (let go and they hold their height). Planes: Space brakes on the ground |
+| B | Drop a bomb: the yellow diamond shows where it will land |
+| F | Fire a missile: optical ones fly to your crosshair, so keep it on the target; radar ones chase the aircraft in the red box |
+| Q | Cycle AP, HE and FLAK |
+| V | VTOL: switch between hovering and flying on the wings |
+| R | Level out in the air (or flip upright on the ground) |
+
+Taking off: open the throttle (hold W), let the plane run down the strip, and pull the mouse up once the HUD says you're fast enough. Land the plane back at the south end of the strip, or a helicopter on the helipad, to rearm.
+
 **Anywhere**
 
 | Do this | To |
@@ -111,7 +136,7 @@ The circles on screen show where each gun will actually land: green when it's lo
 - **NO PEN**: the armor stopped it. Angled armor counts as thicker.
 - **RICOCHET**: the shell hit at a steep angle and bounced off.
 
-The range is an island. It has walls of each armor type (one angled), a bunker with ammo inside, two parked vehicles, pop-up targets for the rifle, slopes at 12°, 22° and 32°, and a wall at 300 m. A beach on the east coast runs down into open sea, where an enemy patrol boat lies broadside on and a submarine sits on the surface further out.
+The range is an island. It has walls of each armor type (one angled), a bunker with ammo inside, two parked vehicles, pop-up targets for the rifle, slopes at 12°, 22° and 32°, and a wall at 300 m. A beach on the east coast runs down into open sea, where an enemy patrol boat lies broadside on and a submarine sits on the surface further out. In the western hills there's an airstrip and a helipad. A target plane flies circuits round the island, a helicopter hovers over the eastern hills, and an airship floats off the north-east coast.
 
 Everything you hear is generated by the game itself (no sound files): gun blasts, impacts, ricochets, explosions, the engine and the builder's clunks. Distant explosions arrive late, the way sound really does.
 
@@ -125,6 +150,9 @@ Everything you hear is generated by the game itself (no sound files): gun blasts
 - **Crew:** Turn on live fire (L), drive the Warden, and press G so your gunner picks its own targets. Does the fight feel fair?
 - **Sea:** Load the Corsair and press Tab. Does it sit on the water and feel heavy but responsive? Torpedo the enemy boat (F), then shell it below the waterline: does it settle and sink the way you'd expect? Then try the Barracuda: dive (C), come up (Space), and see whether depth keeping feels right.
 - **Swimming:** Walk off the beach. Does swimming and climbing back onto a boat work?
+- **Flying:** Load the Kestrel. Can you take off from the strip, fly where you point, and bomb the bunker using the diamond? Is it too easy or too twitchy? Then the Hornet: does it hover steadily, and do its missiles go where you aim?
+- **Flak:** Load the Skyguard, press Q until FLAK is picked, turn on live fire (L), and shoot at the circling plane. Do the bursts feel right?
+- **Drones:** Load the Wasp, get out, look at it and press E. Flying it while your body stands there should feel odd in a good way.
 
 Screenshots, or the text from Godot's **Output** panel at the bottom when something goes wrong, help a lot.
 

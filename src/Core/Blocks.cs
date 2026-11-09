@@ -460,19 +460,19 @@ public static class BlockCatalog
         {
             Id = "airframe", Name = "Airframe", Category = "Air", Kind = BlockKind.Armor,
             Description = "Light aluminium skin for fuselages and gondolas. Very light, but bullets go straight through. Sealed, so a flying boat's hull floats.",
-            MassKg = 12, Hp = 45, ArmorMm = 4, ColorR = 0.62f, ColorG = 0.64f, ColorB = 0.62f, Metallic = 0.75f, Roughness = 0.35f,
+            MassKg = 10, Hp = 45, ArmorMm = 4, ColorR = 0.62f, ColorG = 0.64f, ColorB = 0.62f, Metallic = 0.75f, Roughness = 0.35f,
         },
         new BlockDef
         {
             Id = "wing", Name = "Wing Panel", Category = "Air", Kind = BlockKind.Wing,
             Description = "Makes lift when air flows over it edge-on. Lay panels flat in rows for wings, stand them up (G) for a tail fin. More panels lift more, but the plane still needs speed: it stalls if it's too slow or pitched up too far.",
-            MassKg = 7, Hp = 40, ArmorMm = 3, Watertight = false, ColorR = 0.55f, ColorG = 0.58f, ColorB = 0.52f, Metallic = 0.6f, Roughness = 0.45f,
+            MassKg = 5, Hp = 40, ArmorMm = 3, Watertight = false, ColorR = 0.55f, ColorG = 0.58f, ColorB = 0.52f, Metallic = 0.6f, Roughness = 0.45f,
         },
         new BlockDef
         {
             Id = "control_surface", Name = "Control Surface", Category = "Air", Kind = BlockKind.ControlSurface,
             Description = "A hinged panel that steers in the air. What it does depends on where it is: at the wingtips it rolls (aileron), on the tailplane it pitches (elevator), standing up on the tail it turns (rudder).",
-            MassKg = 9, Hp = 40, ArmorMm = 3, Watertight = false, ColorR = 0.7f, ColorG = 0.52f, ColorB = 0.26f, Metallic = 0.6f, Roughness = 0.45f,
+            MassKg = 6, Hp = 40, ArmorMm = 3, Watertight = false, ColorR = 0.7f, ColorG = 0.52f, ColorB = 0.26f, Metallic = 0.6f, Roughness = 0.45f,
         },
         new BlockDef
         {

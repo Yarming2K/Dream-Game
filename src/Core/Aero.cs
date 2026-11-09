@@ -91,6 +91,9 @@ public struct AirStats
     /// <summary>Where the horizontal surfaces lift, along the length (meters, design frame), and how far behind the center of mass that is.</summary>
     public float LiftCenterZ;
     public float StaticMarginM;
+
+    /// <summary>The most the elevators can pitch the wings up against the plane's own stability (degrees).</summary>
+    public float MaxPitchDeg;
     public bool HasRoll, HasPitch, HasYaw;
     public bool CanFly;
     public int Bombs;

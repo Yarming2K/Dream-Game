@@ -21,6 +21,12 @@ public static class Terrain
     /// <summary>Where the east coast's beach starts sloping into the sea.</summary>
     public const float CoastX = 135f;
 
+    /// <summary>The airstrip runs north-south through the western hills, flattened out of them.</summary>
+    public const float StripX = -105f, StripHalfWidth = 14f, StripHalfLength = 205f;
+
+    public static readonly Vector2 Helipad = new(-62f, 172f);
+    public const float HelipadRadius = 11f;
+
     public static float HeightAt(FastNoiseLite noise, float x, float z)
     {
         float half = (Samples - 1) * 0.5f;
@@ -31,8 +37,12 @@ public static class Terrain
         float east = 1f - Smooth(CoastX, CoastX + 60f, x + noise.GetNoise2D(z * 0.4f, 7f) * 12f);
         float rim = 1f - Smooth(half - 45f, half - 5f, MathF.Max(MathF.Abs(x), MathF.Abs(z)));
         float island = MathF.Min(east, rim);
-        // Hills flatten out towards the beach.
+        // Hills flatten out towards the beach, and are cut away for the airstrip and the helipad.
         land = LandHeight + (land - LandHeight) * Smooth(0.6f, 1f, island);
+        float strip = (1f - Smooth(StripHalfWidth + 4f, StripHalfWidth + 30f, MathF.Abs(x - StripX))) *
+                      (1f - Smooth(StripHalfLength, StripHalfLength + 30f, MathF.Abs(z)));
+        float pad = 1f - Smooth(HelipadRadius + 3f, HelipadRadius + 25f, MathF.Sqrt((x - Helipad.X) * (x - Helipad.X) + (z - Helipad.Y) * (z - Helipad.Y)));
+        land = LandHeight + (land - LandHeight) * (1f - MathF.Max(strip, pad));
         return SeabedDepth + (land - SeabedDepth) * island;
     }
 

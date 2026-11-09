@@ -111,6 +111,22 @@ Guns inside a turret group traverse (turn left and right); every gun elevates.
 - **Torpedoes** (fired from tubes and fed from torpedo racks, from any seat) drop in, settle just under the surface, turn onto the bearing the player aimed at, and run straight. They go off against a hull or passing just under the keel, and blow holes below the waterline. Shells that hit the sea splash; HE goes off on the surface; AP shells dive a few dozen meters, slowing fast.
 - Land vehicles that drive into deep water mostly sink (their blocks hold up about a third of their weight) and stall once the engine is under. People swim.
 
+### Air
+- The builder works out what an aircraft is from its parts: wings and propellers or jets make a **plane**, a rotor makes a **helicopter**, lift fans or upward jets make a **VTOL or drone**, and enough gas cells make an **airship**.
+- **Every wing panel and control surface lifts and drags where it sits**, depending on its angle to the airflow, and stalls past about 17°. A plane's stability comes from its shape: wings that lift just behind the center of mass are stable, too far behind is nose-heavy, and ahead of it flips. The builder shows stall speed and top speed, and warns about each of these, about missing control surfaces, and about landing gear the plane would tip off.
+- **Control surfaces map themselves** from where they are: at the wingtips they roll (ailerons), on the tailplane they pitch (elevators), standing up on the fin they turn (rudders). How hard a plane can turn depends on their size, how far out they sit, and the airspeed.
+- **Forgiving pilot assists:**
+  - Planes fly toward where the mouse points. The assist banks into turns, only as steeply as the wings can hold the weight, levels the wings on target, and won't pull into a stall. W / S set the throttle, and A / D roll by hand.
+  - Helicopters and drones move at the speed you ask for, stop and hover when you let go, hold their height, and turn to face where you look.
+  - Airships hold the height you order by venting and topping up gas, and use the telegraph like ships.
+- **Engines share their power** between everything they turn: air propellers (strong when slow, fading with speed), rotors and lift fans (momentum theory). **Jets** push on their own, at any speed, and only need fuel. **Gas cells** lift 20 kg each. That's far more than real gas at this size, so airships stay buildable.
+- **Drones** are flown by remote from a **Drone Core**: the player stays standing where they are (and can be shot), and losing the drone costs no one.
+- **Weapons:**
+  - **Bombs** (250 kg) hang in bomb racks and fall with the plane's speed; a bombsight diamond shows where they'll land.
+  - **Missiles are built from parts** lined up on a rail: rocket motors (push and burn time), warheads (blast), fins (how hard it turns) and a seeker on the nose (optical flies to the crosshair; radar locks on to the enemy aircraft nearest it and chases it). The parts leave the vehicle when fired, and supply points build new ones.
+  - The **40 mm autocannon** fires three rounds a second and elevates to 85°. **Flak** shells burst near aircraft, or at the range the gun is aimed at, in a puff of black smoke. Q cycles AP, HE and Flak.
+- The test range has an **airstrip** cut through the western hills and a **helipad**, both of which rearm aircraft. A target plane flies circuits round the island, a helicopter hovers over the eastern hills, and an airship floats off the north-east coast.
+
 ## Technical approach
 
 - **Engine:** Godot 4.7 with C# and Jolt physics.
@@ -118,6 +134,7 @@ Guns inside a turret group traverse (turn left and right); every gun elevates.
 - **Multiplayer-ready from day one.** Game logic runs as if a server is in charge, even in solo play, so co-op can arrive early instead of being bolted on.
 - **Scale:** a block is 0.5 m. Vehicles stay one physics body until pieces break off.
 - **Water** is a flat surface for physics (the waves are only drawn). Every block and every compartment cell under it pushes up on the hull where it is, so trim, list and capsizing come out of the shape. Water drag on each piece gives a ship its keel and its roll damping. Submarine depth keeping and rudder steering have gentle assists, and a standalone simulation checks the example ships float level, right themselves, turn and dive before each change ships.
+- **Flight** uses the same approach: every panel's lift and drag is applied where it is, and the assists are rate controllers on each axis, capped by what the control surfaces can do at the current airspeed. A standalone flight simulation checks the examples take off within the airstrip, hold level flight, turn, recover from a zoom climb, and (for helicopters, drones and airships) hover and hold height.
 - **Level of detail:** full block simulation near players. Far-off battles use the core stat math with no physics.
 
 ## Roadmap
@@ -136,9 +153,9 @@ Each milestone is playable on its own.
    - Gunner and commander seats; get in and out and switch seats; AI crew that follows your aim or fights on its own.
    - Field repair and rebuild by hand; supply pad; pop-up targets; live fire (the range's parked vehicles shoot back).
    - Not yet: the first co-op test. Controls already go through plain data (`VehicleControls`), so remote players can plug into the same path. That's next, along with enemy soldiers on foot.
-3. **Sea, air and machines of scale** *(sea built; air and scale next)*
+3. **Sea, air and machines of scale** *(sea and air built; scale next)*
    - **Sea** *(built)*: ships and submarines, buoyancy from sealed compartments, flooding and bilge pumps, propellers, rudders, dive planes, ballast and depth keeping, torpedoes, the engine telegraph, swimming. The test range is now an island with open sea off the east coast, an enemy patrol boat and a surfaced submarine.
-   - **Air** *(next)*: wings and control surfaces, air propellers, jets, rotors, thrusters and gas cells; planes (mouse aim), helicopters, VTOL and drones, airships; bombs with a bombsight, guided missiles built from parts (seeker, motor, warhead, fins), autocannons with air-burst flak; an airstrip and helipad.
+   - **Air** *(built)*: wing panels and self-mapping control surfaces, air propellers, aero engines, jets, rotors, lift fans and gas cells; planes (mouse aim), helicopters, VTOL and drones (flown by remote), airships; bombs with a bombsight, guided missiles built from parts (optical or radar), a 40 mm autocannon with air-burst flak; an airstrip, a helipad, and enemy aircraft on the range.
    - **Scale** *(after that)*: colossal machines, 300 m and up. Large multi-cell blocks, merged rendering, chunked buoyancy and damage, a much bigger build area, and box fill and delete tools.
 4. **Terrain + industry:** deformable terrain, mining, machines you design, conveyors, power, assembly bays that print blueprints.
 5. **Planet war:** a generated planet, a rival faction that designs its own vehicles, territory, the supply network, research, salvage, captured sites, simplified far-off battles.

@@ -27,6 +27,17 @@ public partial class TestRange : Node3D
     private static readonly Vector3 SeaDepotCenter = new(240, Ocean.Level, 100);
     private const float SeaDepotRadius = 18f;
 
+    // The airfield in the western hills.
+    private static readonly Vector3 StripStart = new(Terrain.StripX, Ground, Terrain.StripHalfLength - 18f);
+    private static readonly Vector3 Apron = new(Terrain.StripX, Ground, Terrain.StripHalfLength - 2f);
+    private const float ApronRadius = 16f;
+    private static readonly Vector3 HelipadCenter = new(Terrain.Helipad.X, Ground, Terrain.Helipad.Y);
+
+    private bool _remote;
+    private bool _bombQueued, _vtolQueued;
+    private Vector3? _bombImpact;
+    private VehicleBody _lock;
+
     private Godot.Environment _env;
     private float _airFogDensity;
     private Color _airFogColor;
@@ -102,6 +113,7 @@ public partial class TestRange : Node3D
         AddMarkers();
         AddDepot();
         AddSeaDepot();
+        AddAirfield();
         AddPopupTargets();
         _combat = new Combat { Name = "Combat" };
         AddChild(_combat);
@@ -232,11 +244,66 @@ public partial class TestRange : Node3D
         root.AddChild(Sign("NAVAL SUPPLY\nstop inside the ring", new Vector3(0, 7f, 0), 72));
     }
 
+    /// <summary>A concrete airstrip with centerline and threshold markings, an apron that resupplies, and a helipad.</summary>
+    private void AddAirfield()
+    {
+        var concrete = new StandardMaterial3D { AlbedoColor = new Color(0.5f, 0.5f, 0.48f), Roughness = 0.95f };
+        var paint = new StandardMaterial3D { AlbedoColor = new Color(0.92f, 0.92f, 0.88f), Roughness = 0.8f };
+        float len = Terrain.StripHalfLength * 2f, w = Terrain.StripHalfWidth * 1.6f;
+        AddChild(new MeshInstance3D
+        {
+            Mesh = new BoxMesh { Size = new Vector3(w, 0.1f, len) }, MaterialOverride = concrete,
+            Position = new Vector3(Terrain.StripX, Ground - 0.02f, 0), CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
+        });
+        for (float z = -Terrain.StripHalfLength + 30f; z < Terrain.StripHalfLength - 30f; z += 24f)
+            AddChild(new MeshInstance3D
+            {
+                Mesh = new BoxMesh { Size = new Vector3(0.6f, 0.02f, 10f) }, MaterialOverride = paint,
+                Position = new Vector3(Terrain.StripX, Ground + 0.04f, z), CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
+            });
+        foreach (float end in new[] { -1f, 1f })
+            for (int i = -3; i <= 3; i++)
+                AddChild(new MeshInstance3D
+                {
+                    Mesh = new BoxMesh { Size = new Vector3(1.4f, 0.02f, 12f) }, MaterialOverride = paint,
+                    Position = new Vector3(Terrain.StripX + i * 2.6f, Ground + 0.04f, end * (Terrain.StripHalfLength - 12f)),
+                    CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
+                });
+
+        AddChild(new MeshInstance3D
+        {
+            Mesh = new TorusMesh { InnerRadius = ApronRadius - 0.3f, OuterRadius = ApronRadius, Rings = 64, RingSegments = 6 },
+            Position = Apron + Vector3.Up * 0.06f, Scale = new Vector3(1, 0.15f, 1),
+            MaterialOverride = BlockVisuals.Emissive(new Color(1f, 0.72f, 0.27f), 1.2f),
+        });
+        AddChild(Sign("AIRSTRIP\ntaxi back here to rearm", Apron + new Vector3(ApronRadius + 3f, 4f, 0), 64));
+
+        // Helipad: a round pad with an H.
+        AddChild(new MeshInstance3D
+        {
+            Mesh = new CylinderMesh { TopRadius = Terrain.HelipadRadius, BottomRadius = Terrain.HelipadRadius, Height = 0.1f, RadialSegments = 48 },
+            MaterialOverride = concrete, Position = HelipadCenter + Vector3.Up * 0.01f,
+        });
+        AddChild(new MeshInstance3D
+        {
+            Mesh = new TorusMesh { InnerRadius = Terrain.HelipadRadius - 0.5f, OuterRadius = Terrain.HelipadRadius - 0.1f, Rings = 48, RingSegments = 6 },
+            Position = HelipadCenter + Vector3.Up * 0.08f, Scale = new Vector3(1, 0.15f, 1),
+            MaterialOverride = BlockVisuals.Emissive(new Color(1f, 0.72f, 0.27f), 1.2f),
+        });
+        foreach (var (size, offset) in new[] { (new Vector3(0.9f, 0.02f, 7f), new Vector3(-2.2f, 0, 0)), (new Vector3(0.9f, 0.02f, 7f), new Vector3(2.2f, 0, 0)), (new Vector3(3.5f, 0.02f, 0.9f), Vector3.Zero) })
+            AddChild(new MeshInstance3D { Mesh = new BoxMesh { Size = size }, MaterialOverride = paint, Position = HelipadCenter + offset + Vector3.Up * 0.08f });
+        AddChild(Sign("HELIPAD\nland here to rearm", HelipadCenter + new Vector3(0, 5f, -Terrain.HelipadRadius - 2f), 64));
+    }
+
     private static bool AtDepot(Vector3 p)
     {
         float land = new Vector2(p.X - DepotCenter.X, p.Z - DepotCenter.Z).Length();
         float sea = new Vector2(p.X - SeaDepotCenter.X, p.Z - SeaDepotCenter.Z).Length();
-        return (land <= DepotRadius && p.Y > DepotCenter.Y - 3f) || sea <= SeaDepotRadius;
+        float apron = new Vector2(p.X - Apron.X, p.Z - Apron.Z).Length();
+        float pad = new Vector2(p.X - HelipadCenter.X, p.Z - HelipadCenter.Z).Length();
+        bool low = p.Y < Ground + 6f;
+        return (land <= DepotRadius && p.Y > DepotCenter.Y - 3f && low) || sea <= SeaDepotRadius ||
+               (apron <= ApronRadius && low) || (pad <= Terrain.HelipadRadius && low);
     }
 
     private void AddPopupTargets()
@@ -280,6 +347,27 @@ public partial class TestRange : Node3D
         // At sea: an enemy patrol boat lying broadside on, and a submarine on the surface further out.
         AddDummy(ExampleDesigns.Corsair(), new Vector3(SeaSpawn.X + 70f, 0, SeaSpawn.Z - 260f), 90f);
         AddDummy(ExampleDesigns.Barracuda(), new Vector3(SeaSpawn.X + 160f, 0, SeaSpawn.Z - 420f), 30f);
+
+        // In the air: a target plane flying circuits round the island, a helicopter hovering over the
+        // eastern hills, and an airship off the north-east coast.
+        AddFlyer(ExampleDesigns.Kestrel(), new Vector3(380f, 150f, 0f), 0f, Vector3.Forward * 62f, patrol: true);
+        AddFlyer(ExampleDesigns.Hornet(), new Vector3(95f, 50f, -40f), -90f, Vector3.Zero);
+        AddFlyer(ExampleDesigns.Zephyr(), new Vector3(170f, 100f, -170f), 200f, Vector3.Zero);
+    }
+
+    private void AddFlyer(Blueprint bp, Vector3 pos, float yawDeg, Vector3 velocity, bool patrol = false)
+    {
+        var where = new Transform3D(new Basis(Vector3.Up, Mathf.DegToRad(yawDeg)), pos);
+        VehicleBody v = VehicleBody.Create(bp, where, false);
+        v.AiCrewActive = _liveFire;
+        v.Patrols = patrol;
+        v.PatrolCenter = Vector3.Zero;
+        v.PatrolRadius = 380f;
+        v.PatrolAltitude = pos.Y;
+        v.LinearVelocity = velocity;
+        if (patrol) v.SetAirThrottle(0.75f);
+        AddChild(v);
+        _targets.Add(v);
     }
 
     private void AddStructure(Blueprint bp, Vector3 pos, float yawDeg, string label)
@@ -307,8 +395,16 @@ public partial class TestRange : Node3D
         if (_mount != null && _mount == _vehicle) ExitVehicle(silent: true);
         if (_vehicle != null && IsInstanceValid(_vehicle)) _vehicle.Vanish();
         VehicleAnalysis a = VehicleAnalysis.Analyze(_bp);
-        // Ships and submarines start at sea; everything else on the firing line.
-        Vector3 at = a.IsNaval ? new Vector3(SeaSpawn.X, VehicleBody.FloatHeight(a), SeaSpawn.Z) : SpawnPoint + Vector3.Up * VehicleBody.SpawnHeight(a);
+        // Ships and submarines start at sea, planes on the airstrip, helicopters and drones on the helipad,
+        // airships floating above it; everything else on the firing line.
+        Vector3 at = a.Mode switch
+        {
+            MobilityMode.Ship or MobilityMode.Submarine => new Vector3(SeaSpawn.X, VehicleBody.FloatHeight(a), SeaSpawn.Z),
+            MobilityMode.Plane => StripStart + Vector3.Up * VehicleBody.SpawnHeight(a),
+            MobilityMode.Helicopter or MobilityMode.Hover => HelipadCenter + Vector3.Up * VehicleBody.SpawnHeight(a),
+            MobilityMode.Airship => HelipadCenter + Vector3.Up * 30f,
+            _ => SpawnPoint + Vector3.Up * VehicleBody.SpawnHeight(a),
+        };
         var where = new Transform3D(Basis.Identity, at);
         _vehicle = VehicleBody.Create(_bp, where, true);
         _vehicle.AiCrewActive = _liveFire;
@@ -324,8 +420,17 @@ public partial class TestRange : Node3D
         v.PlayerSeatDestroyed += () =>
         {
             if (v != _mount) return;
-            Big("Your seat was hit!");
             _mount = null;
+            if (_remote)
+            {
+                // Flying by remote: you lose the drone, not your life.
+                _remote = false;
+                _me.SetRemote(false);
+                Big("Drone lost");
+                return;
+            }
+
+            Big("Your seat was hit!");
             _me.Damage(999f);
         };
         AddChild(v);
@@ -345,9 +450,16 @@ public partial class TestRange : Node3D
         }
 
         _mount = v;
-        _me.SetActive(false);
-        _me.GlobalPosition = v.SeatWorldPos(seat);
+        _remote = seat.Info.Remote;
+        if (_remote) _me.SetRemote(true);
+        else
+        {
+            _me.SetActive(false);
+            _me.GlobalPosition = v.SeatWorldPos(seat);
+        }
+
         _cam.MakeCurrent();
+        _dist = v.IsAir ? Mathf.Max(_dist, v.Radius * 1.6f + 8f) : _dist;
         _arm.ClearExcludedObjects();
         _arm.AddExcludedObject(v.GetRid());
         _pivot.GlobalPosition = v.GlobalTransform * v.CenterOfMass + Vector3.Up * 2f;
@@ -355,7 +467,7 @@ public partial class TestRange : Node3D
         _yaw = Mathf.Atan2(-f.X, -f.Z);
         BuildGunRows();
         Sfx.Play2D(this, SoundId.PlaceLight, -6f, 0.8f);
-        Big($"{Crew.Name(seat.Role)} seat");
+        Big(_remote ? $"Flying {v.DisplayName} by remote" : $"{Crew.Name(seat.Role)} seat");
     }
 
     private void ExitVehicle(bool silent = false)
@@ -367,6 +479,17 @@ public partial class TestRange : Node3D
         }
 
         VehicleBody v = _mount;
+        if (_remote)
+        {
+            // Back to your own eyes, where you were standing.
+            v.Exit();
+            _mount = null;
+            _remote = false;
+            if (_me.Alive) _me.SetRemote(false);
+            if (!silent) Sfx.Play2D(this, SoundId.PlaceLight, -6f, 1.1f);
+            return;
+        }
+
         Vector3 spot = FindExitSpot(v);
         v.Exit();
         _mount = null;
@@ -448,6 +571,7 @@ public partial class TestRange : Node3D
     {
         if (Mounted) _mount.Exit();
         _mount = null;
+        _remote = false;
         _me.SetActive(false);
         _deadTime = 4f;
         Big("You were killed");
@@ -479,12 +603,18 @@ public partial class TestRange : Node3D
             Godot.Collections.Dictionary hit = space.IntersectRay(PhysicsRayQueryParameters3D.Create(
                 o, o + d * 2500f, GridRegistry.Layers.All | GridRegistry.Layers.Characters | GridRegistry.Layers.Targets, exclude));
             bool naval = _mount.IsNaval;
+            bool air = _mount.IsAir;
+            bool telegraph = naval || _mount.FlightMode == MobilityMode.Airship;
+            bool hover = _mount.FlightMode is MobilityMode.Helicopter or MobilityMode.Hover or MobilityMode.Airship;
+            float lift = captured && driving && air ? (Input.IsActionPressed("brake") ? 1f : 0f) - (Input.IsActionPressed("dive") ? 1f : 0f) : 0f;
             _mount.PlayerInput = new VehicleControls
             {
-                // Ships take their speed from the telegraph (W / S taps, in _UnhandledInput).
-                Throttle = captured && driving && !naval ? Input.GetAxis("move_back", "move_forward") : 0f,
+                // Ships and airships take their speed from the telegraph (W / S taps, in _UnhandledInput).
+                Throttle = captured && driving && !telegraph ? Input.GetAxis("move_back", "move_forward") : 0f,
                 Steer = captured && driving ? Input.GetAxis("steer_left", "steer_right") : 0f,
-                Brake = captured && driving && !naval && Input.IsActionPressed("brake"),
+                Brake = captured && driving && !naval && !hover && Input.IsActionPressed("brake"),
+                Lift = lift,
+                AimDir = d,
                 HasAim = true,
                 Aim = hit.Count > 0 ? hit["position"].AsVector3() : o + d * 1500f,
                 Fire = captured && !_holdFire && Input.IsActionPressed("fire"),
@@ -498,16 +628,40 @@ public partial class TestRange : Node3D
             if (_torpedoQueued)
             {
                 _torpedoQueued = false;
-                LaunchTorpedo();
+                if (_mount.MissilesReady > 0) LaunchMissile();
+                else LaunchTorpedo();
             }
 
-            _me.GlobalPosition = _mount.PlayerSeat != null ? _mount.SeatWorldPos(_mount.PlayerSeat) : _me.GlobalPosition;
+            if (_bombQueued)
+            {
+                _bombQueued = false;
+                if (_mount.DropBomb(true)) AddFeed($"[color={Ui.Hex(Ui.Info)}]BOMB AWAY  ·  {_mount.BombsLeft} left[/color]", true);
+                else
+                {
+                    Big(_mount.Analysis.BombRacks.Count == 0 ? "No bomb racks" : "Out of bombs");
+                    Sfx.Play2D(this, SoundId.Error, -10f);
+                }
+            }
+
+            if (_vtolQueued)
+            {
+                _vtolQueued = false;
+                if (_mount.ToggleVtol()) Big(_mount.FlightMode == MobilityMode.Plane ? "Wing-borne flight" : "Hovering");
+            }
+
+            _bombImpact = _mount.BombsLeft > 0 ? _mount.BombImpact(space) : null;
+            bool radar = _mount.Analysis.Missiles.Any(m => m.Valid && m.Stats.Seeker == SeekerKind.Radar) && _mount.MissilesReady > 0;
+            _lock = radar ? VehicleBody.RadarLock(o, d, _mount.Faction, 25f, 4000f) : null;
+
+            if (!_remote) _me.GlobalPosition = _mount.PlayerSeat != null ? _mount.SeatWorldPos(_mount.PlayerSeat) : _me.GlobalPosition;
             PredictImpacts(space, exclude);
         }
         else
         {
             _impacts.Clear();
-            _torpedoQueued = false;
+            _torpedoQueued = _bombQueued = _vtolQueued = false;
+            _bombImpact = null;
+            _lock = null;
         }
 
         _lookedAt = !Mounted && _me.Active && _me.Alive ? _me.LookedAtVehicle(5f) : null;
@@ -549,7 +703,7 @@ public partial class TestRange : Node3D
             if (!g.Alive || g.Info.GunSection < 0 || !_mount.PlayerDirects(g)) continue;
             (Vector3 p, Vector3 dir) = _mount.Muzzle(g);
             bool ap = _mount.SelectedAmmo == AmmoType.AP;
-            Vector3 v = dir * (ap ? g.Stats.MuzzleVelocity : g.Stats.HeVelocity) + _mount.LinearVelocity;
+            Vector3 v = dir * VehicleBody.ShellSpeed(g, _mount.SelectedAmmo) + _mount.LinearVelocity;
             float k = ap ? g.Stats.DragK : g.Stats.HeDragK;
             const float step = 0.04f;
             for (int i = 0; i < 70; i++)
@@ -575,7 +729,7 @@ public partial class TestRange : Node3D
                 p = next;
             }
 
-            _impacts.Add((p, g.ReloadLeft <= 0 && (_mount.Rounds(g, AmmoType.AP) + _mount.Rounds(g, AmmoType.HE)) > 0));
+            _impacts.Add((p, g.ReloadLeft <= 0 && (_mount.Rounds(g, AmmoType.AP) + _mount.Rounds(g, AmmoType.HE) + _mount.Rounds(g, AmmoType.Flak)) > 0));
         }
     }
 
@@ -585,7 +739,8 @@ public partial class TestRange : Node3D
         if (Mounted)
         {
             Vector3 target = _mount.GlobalTransform * _mount.CenterOfMass + Vector3.Up * 2f;
-            _pivot.GlobalPosition = _pivot.GlobalPosition.Lerp(target, Mathf.Min(1f, dt * 14f));
+            // Aircraft are too quick for a lagging camera: stay right on them.
+            _pivot.GlobalPosition = _mount.IsAir ? target : _pivot.GlobalPosition.Lerp(target, Mathf.Min(1f, dt * 14f));
         }
 
         _pivot.Rotation = new Vector3(_pitch, _yaw, 0);
@@ -631,7 +786,8 @@ public partial class TestRange : Node3D
         {
             float sens = _zoom ? (_mount.PlayerSeat?.Role == SeatRole.Commander ? 0.0004f : 0.0009f) : 0.0028f;
             _yaw -= mm.Relative.X * sens;
-            _pitch = Mathf.Clamp(_pitch - mm.Relative.Y * sens, -1.35f, 0.55f);
+            float up = _mount.IsAir ? 1.45f : 0.55f;
+            _pitch = Mathf.Clamp(_pitch - mm.Relative.Y * sens, -1.45f, up);
             return;
         }
 
@@ -646,8 +802,8 @@ public partial class TestRange : Node3D
             }
 
             if (!Mounted) return;
-            if (mb.ButtonIndex == MouseButton.WheelUp && mb.Pressed) _dist = Mathf.Clamp(_dist - 1.2f, 5f, 40f);
-            if (mb.ButtonIndex == MouseButton.WheelDown && mb.Pressed) _dist = Mathf.Clamp(_dist + 1.2f, 5f, 40f);
+            if (mb.ButtonIndex == MouseButton.WheelUp && mb.Pressed) _dist = Mathf.Clamp(_dist - 1.2f, 5f, 60f);
+            if (mb.ButtonIndex == MouseButton.WheelDown && mb.Pressed) _dist = Mathf.Clamp(_dist + 1.2f, 5f, 60f);
             if (mb.ButtonIndex == MouseButton.Right) _zoom = mb.Pressed && captured;
             return;
         }
@@ -659,8 +815,8 @@ public partial class TestRange : Node3D
             return;
         }
 
-        // Ships: W / S move the engine telegraph a notch, Space orders all stop.
-        if (captured && Mounted && _mount.IsNaval && _mount.PlayerSeat?.Role == SeatRole.Driver)
+        // Ships and airships: W / S move the engine telegraph a notch, Space orders all stop (ships).
+        if (captured && Mounted && (_mount.IsNaval || _mount.FlightMode == MobilityMode.Airship) && _mount.PlayerSeat?.Role == SeatRole.Driver)
         {
             int notch = e.IsActionPressed("move_forward") ? 1 : e.IsActionPressed("move_back") ? -1 : 0;
             if (notch != 0)
@@ -670,7 +826,7 @@ public partial class TestRange : Node3D
                 return;
             }
 
-            if (!_mount.IsSubmarine && e.IsActionPressed("brake"))
+            if (_mount.IsNaval && !_mount.IsSubmarine && e.IsActionPressed("brake"))
             {
                 _mount.AllStop();
                 Big(_mount.TelegraphName);
@@ -690,6 +846,8 @@ public partial class TestRange : Node3D
         else if (e.IsActionPressed("recover") && Mounted) _mount.Recover();
         else if (e.IsActionPressed("gunner_mode") && Mounted) ToggleGunnerMode();
         else if (e.IsActionPressed("torpedo") && Mounted) _torpedoQueued = true;
+        else if (e.IsActionPressed("bomb") && Mounted) _bombQueued = true;
+        else if (e.IsActionPressed("vtol") && Mounted) _vtolQueued = true;
         else if (e.IsActionPressed("respawn")) RespawnAll();
         else if (e.IsActionPressed("reset_targets"))
         {
@@ -699,6 +857,26 @@ public partial class TestRange : Node3D
         else if (e.IsActionPressed("live_fire")) ToggleLiveFire();
         else if (e.IsActionPressed("to_builder")) ExitRequested?.Invoke();
         else if (e.IsActionPressed("help")) _help.Visible = !_help.Visible;
+    }
+
+    private void LaunchMissile()
+    {
+        VehicleBody v = _mount;
+        if (v.FireMissile(true, v.PlayerInput.Aim))
+        {
+            MissileInfo next = v.Analysis.Missiles.FirstOrDefault(m => m.Valid);
+            string how = next?.Stats.Seeker switch
+            {
+                SeekerKind.Optical => "keep the crosshair on the target",
+                SeekerKind.Radar => _lock != null ? $"locked on {_lock.DisplayName}" : "no lock: it will look for one",
+                _ => "unguided",
+            };
+            AddFeed($"[color={Ui.Hex(Ui.Info)}]MISSILE AWAY  ·  {how}[/color]", true);
+            return;
+        }
+
+        Big("No missile ready");
+        Sfx.Play2D(this, SoundId.Error, -10f);
     }
 
     private void LaunchTorpedo()
@@ -888,7 +1066,7 @@ public partial class TestRange : Node3D
         _liveChip.OffsetTop = 14;
         _liveChip.AddThemeConstantOverride("outline_size", 6);
 
-        Label hint = Ui.Small("F1 help   ·   E get in / out   ·   F torpedo   ·   L live fire   ·   Tab builder");
+        Label hint = Ui.Small("F1 help   ·   E get in / out   ·   F torpedo / missile   ·   B bomb   ·   L live fire   ·   Tab builder");
         root.AddChild(hint);
         hint.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.BottomLeft);
         hint.GrowVertical = Control.GrowDirection.Begin;
@@ -935,6 +1113,11 @@ public partial class TestRange : Node3D
             "F fires a torpedo from any seat. It turns onto the bearing you're aiming at, then runs straight just under the surface. Torpedoes sink ships by flooding them.\n" +
             "Holes below the waterline flood compartments: get out, weld them shut (3), and the bilge pumps clear the water. Stop inside the buoy ring to rearm and refuel.\n" +
             "In the water you swim: Space up, C down, E to climb into a boat you're looking at.\n\n" +
+            "[b][color=#ffb845]In the air[/color][/b]\n" +
+            "Planes start on the airstrip in the western hills: W / S set the throttle, and the plane flies toward wherever you point the mouse (A / D roll, Space brakes on the ground). Open the throttle, let it run, and climb once you're past stall speed.\n" +
+            "Helicopters and drones start on the helipad: W A S D move, Space / C climb and descend, and they turn to face where you look. Let go and they stop and hover. V switches a VTOL between hovering and wing-borne flight.\n" +
+            "Airships: W / S telegraph, A / D turn, Space / C order it higher or lower. B drops a bomb where the diamond is. F fires a missile: optical ones fly to your crosshair, radar ones chase the aircraft in the red box.\n" +
+            "Q cycles AP, HE and FLAK: flak bursts near aircraft, or at the range you're aiming at. Drones are flown by remote: you stay standing where you were.\n\n" +
             "[b][color=#ffb845]On foot[/color][/b]\n" +
             "W A S D move · Shift sprint · Space jump · Mouse look · Right click aim\n" +
             "1 rifle · 2 AT rocket · 3 welding torch · Left click fire · R reload\n" +
@@ -1020,6 +1203,9 @@ public partial class TestRange : Node3D
         Camera3D cam = mounted ? _cam : _me.Camera;
         foreach ((Vector3 p, bool ready) in _impacts)
             if (!cam.IsPositionBehind(p)) _reticle.Marks.Add((cam.UnprojectPosition(p), ready));
+        _reticle.BombMark = mounted && _bombImpact is Vector3 bomb && !cam.IsPositionBehind(bomb) ? cam.UnprojectPosition(bomb) : null;
+        Vector3? lockAt = mounted && _lock != null && IsInstanceValid(_lock) ? _lock.GlobalTransform * _lock.CenterOfMass : null;
+        _reticle.LockMark = lockAt is Vector3 la && !cam.IsPositionBehind(la) ? cam.UnprojectPosition(la) : null;
         _reticle.QueueRedraw();
 
         if (!_me.Alive)
@@ -1038,16 +1224,17 @@ public partial class TestRange : Node3D
         var sb = new StringBuilder();
         sb.Append($"[b]{v.DisplayName}[/b]\n");
         if (v.IsNaval) NavalStatus(v, sb);
+        else if (v.IsAir) AirStatus(v, sb);
         else sb.Append($"[font_size=22][b]{Mathf.Abs(v.SpeedKmh):0}[/b][/font_size] km/h   ");
         sb.Append($"Fuel {v.FuelL:0}/{v.FuelCapacityL:0} L   Engines {v.UsablePowerKw:0} kW\n");
         if (!v.DriverAlive) sb.Append($"[color={Ui.Hex(Ui.Bad)}]Driver knocked out. Get out (E) and weld the seat back, or Backspace.[/color]\n");
         else if (v.PowerKw <= 0) sb.Append($"[color={Ui.Hex(Ui.Bad)}]Engines destroyed.[/color]\n");
         else if (v.EngineDrowned) sb.Append($"[color={Ui.Hex(Ui.Bad)}]{(v.IsNaval ? "Engine room flooded: pump it out or weld the holes." : "Engine flooded: it won't run under water. Backspace to respawn.")}[/color]\n");
         else if (v.FuelL <= 0) sb.Append($"[color={Ui.Hex(Ui.Bad)}]Out of fuel: {(v.IsNaval ? "stop inside the buoy ring." : "drive onto the supply pad.")}[/color]\n");
-        else if (!v.IsNaval && v.Wheels.Count == 0) sb.Append($"[color={Ui.Hex(Ui.Bad)}]No wheels left.[/color]\n");
+        else if (!v.IsNaval && !v.IsAir && v.Wheels.Count == 0) sb.Append($"[color={Ui.Hex(Ui.Bad)}]No wheels left.[/color]\n");
         else if (v.IsNaval && v.PropsAlive == 0) sb.Append($"[color={Ui.Hex(Ui.Bad)}]Propellers destroyed.[/color]\n");
         if (!v.IsNaval && v.Submerged > 0.25f) sb.Append($"[color={Ui.Hex(Ui.Warn)}]Deep water: land vehicles sink. Back out while the engine still runs.[/color]\n");
-        if (v.IsUpsideDownOrStuck) sb.Append($"[color={Ui.Hex(Ui.Warn)}]Tipped over: press R to get back up.[/color]\n");
+        if (v.IsUpsideDownOrStuck && (!v.IsAir || v.OnGround)) sb.Append($"[color={Ui.Hex(Ui.Warn)}]Tipped over: press R to get back up.[/color]\n");
         if (_resupplying) sb.Append($"[color={Ui.Hex(Ui.Good)}]Resupplying...[/color]\n");
         int missing = v.MissingCount;
         if (missing > 0) sb.Append($"[color={Ui.Hex(Ui.Dim)}]{missing} block(s) missing: get out and weld them back (3).[/color]\n");
@@ -1072,24 +1259,65 @@ public partial class TestRange : Node3D
 
         var gs = new StringBuilder();
         bool ap = v.SelectedAmmo == AmmoType.AP;
-        gs.Append($"Ammo: {(ap ? "[b][color=#ffb845][AP][/color][/b]  HE" : "AP  [b][color=#ffb845][HE][/color][/b]")}   [color={Ui.Hex(Ui.Dim)}](Q switches)[/color]");
+        string Pick(AmmoType t, string name) => v.SelectedAmmo == t ? $"[b][color=#ffb845][{name}][/color][/b]" : name;
+        gs.Append($"Ammo: {Pick(AmmoType.AP, "AP")}  {Pick(AmmoType.HE, "HE")}{(v.HasFlak ? "  " + Pick(AmmoType.Flak, "FLAK") : "")}   [color={Ui.Hex(Ui.Dim)}](Q switches)[/color]");
         if (v.Guns.Count == 0) gs.Append($"\n[color={Ui.Hex(Ui.Dim)}]No guns on this design.[/color]");
         _guns.Text = gs.ToString();
 
         foreach (GunRow row in _gunRows)
         {
             VehicleBody.GunRt g = row.Gun;
-            int apRounds = v.Rounds(g, AmmoType.AP), heRounds = v.Rounds(g, AmmoType.HE);
+            int apRounds = v.Rounds(g, AmmoType.AP), heRounds = v.Rounds(g, AmmoType.HE), flakRounds = v.Rounds(g, AmmoType.Flak);
             SeatRt who = v.ControllerOf(g);
             if (!g.Alive) Paint(row.State, "DESTROYED", Ui.Bad);
             else if (who == null) Paint(row.State, "NO GUNNER", Ui.Bad);
-            else if (apRounds + heRounds == 0) Paint(row.State, "OUT OF AMMO", Ui.Bad);
+            else if (apRounds + heRounds + flakRounds == 0) Paint(row.State, "OUT OF AMMO", Ui.Bad);
             else if (g.ReloadLeft > 0) Paint(row.State, $"RELOADING {g.ReloadLeft:0.0}s", Ui.Warn);
             else Paint(row.State, v.PlayerDirects(g) ? "READY" : "AI GUNNER", v.PlayerDirects(g) ? Ui.Good : Ui.Info);
             float progress = g.Alive ? 1f - g.ReloadLeft / Mathf.Max(g.Stats.ReloadS, 0.01f) : 0f;
             row.Reload.Set(progress, 1f, g.ReloadLeft > 0 ? Ui.Warn : Ui.Good);
-            row.Ammo.Text = $"AP {apRounds}   HE {heRounds}   ·   {g.Stats.ApPenMm:0} mm pen";
+            row.Ammo.Text = $"AP {apRounds}   HE {heRounds}{(g.Info.FlakRacks.Count > 0 ? $"   FLAK {flakRounds}" : "")}   ·   {g.Stats.ApPenMm:0} mm pen";
         }
+    }
+
+    /// <summary>Airspeed, height, climb, throttle or lift, stall warnings, bombs and missiles.</summary>
+    private void AirStatus(VehicleBody v, StringBuilder sb)
+    {
+        string dim = Ui.Hex(Ui.Dim);
+        sb.Append($"[font_size=22][b]{v.AirspeedKmh:0}[/b][/font_size] km/h   ");
+        sb.Append($"[b]{v.HeightAboveGroundM:0}[/b] m up [color={dim}]({v.AltitudeM:0} m above sea)[/color]   ");
+        sb.Append($"climb {v.ClimbRate:+0.0;-0.0} m/s\n");
+        switch (v.FlightMode)
+        {
+            case MobilityMode.Plane:
+                sb.Append($"Throttle [b]{v.AirThrottle * 100f:0}%[/b]   [color={dim}]W / S throttle · mouse steers · A / D roll{(v.OnGround ? " · Space brakes" : "")}[/color]\n");
+                if (v.Stalled) sb.Append($"[color={Ui.Hex(Ui.Bad)}][b]STALL[/b]: push the nose down and open the throttle.[/color]\n");
+                else if (!v.OnGround && v.AirspeedKmh < v.Analysis.Air.StallSpeedMs * 3.6f * 1.1f)
+                    sb.Append($"[color={Ui.Hex(Ui.Warn)}]Slow: it stalls below about {v.Analysis.Air.StallSpeedMs * 3.6f:0} km/h.[/color]\n");
+                else if (v.OnGround && v.AirspeedKmh < v.Analysis.Air.StallSpeedMs * 3.6f)
+                    sb.Append($"[color={dim}]Full throttle, then pull the mouse up once you pass {v.Analysis.Air.StallSpeedMs * 3.6f * 0.9f:0} km/h.[/color]\n");
+                if (!v.OnGround && v.HeightAboveGroundM < 40f && v.ClimbRate < -8f) sb.Append($"[color={Ui.Hex(Ui.Bad)}][b]PULL UP[/b][/color]\n");
+                if (v.CanSwitchVtol) sb.Append($"[color={dim}]V switches back to hovering[/color]\n");
+                break;
+            case MobilityMode.Airship:
+                sb.Append($"[b][color=#ffb845]{v.TelegraphName}[/color][/b]   holding {v.HoldAltitude:0} m   gas {v.LiftOutput * 100f:0}%\n");
+                sb.Append($"[color={dim}]W / S telegraph · A / D turn · Space / C higher / lower[/color]\n");
+                break;
+            default:
+                sb.Append($"Lift [b]{v.LiftOutput * 100f:0}%[/b]   [color={dim}]W A S D move · Space / C up and down · it faces where you look[/color]\n");
+                if (v.LiftOutput > 0.97f) sb.Append($"[color={Ui.Hex(Ui.Warn)}]At full power: it can't climb any harder.[/color]\n");
+                if (v.CanSwitchVtol) sb.Append($"[color={dim}]V switches to wing-borne flight[/color]\n");
+                break;
+        }
+
+        if (v.Analysis.BombRacks.Count > 0) sb.Append($"Bombs [b]{v.BombsLeft}[/b] [color={dim}]B drops · the diamond shows where[/color]   ");
+        if (v.Analysis.Missiles.Count > 0)
+        {
+            sb.Append($"Missiles [b]{v.MissilesReady}[/b] [color={dim}]F fires[/color]");
+            if (_lock != null) sb.Append($"   [color={Ui.Hex(Ui.Bad)}]LOCK {_lock.DisplayName}[/color]");
+        }
+
+        if (v.Analysis.BombRacks.Count > 0 || v.Analysis.Missiles.Count > 0) sb.Append('\n');
     }
 
     /// <summary>Speed in knots, the telegraph, rudder, depth and ballast, flooding, and torpedoes.</summary>
@@ -1183,7 +1411,8 @@ public partial class TestRange : Node3D
 
         VehicleBody looked = _lookedAt != null && IsInstanceValid(_lookedAt) ? _lookedAt : null;
         _prompt.Text = looked == null ? "" : looked.Faction != 0 ? "Enemy vehicle"
-            : looked.HasFreeSeat ? $"E  get into {looked.DisplayName}" : "No free seats";
+            : !looked.HasFreeSeat ? "No free seats"
+            : looked.Seats.All(s => s.Info.Remote) ? $"E  fly {looked.DisplayName} by remote" : $"E  get into {looked.DisplayName}";
         if (_me.Swimming && _prompt.Text.Length == 0) _prompt.Text = "Swimming  ·  Space up  ·  C down";
         if (_resupplying) _prompt.Text = (_prompt.Text.Length > 0 ? _prompt.Text + "\n" : "") + "Resupplying...";
     }

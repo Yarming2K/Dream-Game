@@ -42,7 +42,10 @@ public partial class PlayerCharacter : CharacterBody3D, ICharacter
     public bool Alive => Health > 0;
 
     /// <summary>Only a person out in the open can be targeted (inside a vehicle, the vehicle is the target).</summary>
-    public bool Targetable => Alive && Active;
+    public bool Targetable => Alive && (Active || Remote);
+
+    /// <summary>Standing still, flying a drone by remote: still out in the open, and still a target.</summary>
+    public bool Remote { get; private set; }
     public bool Active { get; private set; } = true;
     public int Faction => 0;
     public Vector3 AimCenter => GlobalPosition + Vector3.Up * 1.1f;
@@ -113,9 +116,26 @@ public partial class PlayerCharacter : CharacterBody3D, ICharacter
 
     public override void _ExitTree() => Hittables.Remove(this);
 
+    /// <summary>Stands the player still while they fly a drone (on), or hands control back (off).</summary>
+    public void SetRemote(bool on)
+    {
+        Remote = on;
+        if (!on)
+        {
+            SetActive(true);
+            return;
+        }
+
+        Active = false;
+        Visible = true;
+        Velocity = Vector3.Zero;
+        StopWelding();
+    }
+
     /// <summary>Turns the walking player on (on foot) or off (sitting in a vehicle).</summary>
     public void SetActive(bool active)
     {
+        if (active) Remote = false;
         Active = active;
         Visible = active;
         CollisionLayer = active ? GridRegistry.Layers.Characters : 0;

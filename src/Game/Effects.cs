@@ -703,6 +703,23 @@ public static class Effects
         Sfx.At(world, at, SoundId.Splash, 2f, Rng.RandfRange(0.6f, 0.7f), 30f);
     }
 
+    private static readonly Gradient FlakSmoke = Ramp(
+        (0f, new Color(0.12f, 0.11f, 0.1f, 0.95f)), (0.5f, new Color(0.16f, 0.15f, 0.14f, 0.75f)), (1f, new Color(0.2f, 0.2f, 0.2f, 0f)));
+
+    /// <summary>A flak shell going off in the air: a sharp flash and a hanging black puff.</summary>
+    public static void FlakBurst(Node3D world, Vector3 pos, float radius)
+    {
+        FxNode fx = Spawn(world, pos, 7f);
+        Flash(fx, new Color(1f, 0.8f, 0.5f), radius * 3f, 0.08f);
+        Emit(fx, new Burst
+        {
+            Mat = Smoke, Size = radius * 0.9f, Amount = 14, Life = 6f, LifeRandom = 0.3f, Dir = Vector3.Up, Spread = 180,
+            VelMin = 1f, VelMax = 3.5f, DampMin = 2.5f, DampMax = 3.5f, Gravity = new Vector3(0, 0.15f, 0),
+            Colors = FlakSmoke, ScaleFrom = 0.4f, ScaleTo = 1.3f, EmitRadius = radius * 0.2f,
+        });
+        Sfx.At(world, pos, SoundId.ExplosionSmall, 0f, Rng.RandfRange(1.15f, 1.35f), 30f);
+    }
+
     /// <summary>A puff of foam at the surface above a running torpedo.</summary>
     public static void Wake(Node3D world, Vector3 pos)
     {

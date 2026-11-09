@@ -31,6 +31,10 @@ public struct VehicleControls
     public bool HasAim;
     public Vector3 Aim;
     public bool Fire;
+
+    /// <summary>Aircraft: climb (+1) or descend (-1), and the direction the player wants to fly (from the camera).</summary>
+    public float Lift;
+    public Vector3 AimDir;
 }
 
 public enum WeldState
@@ -236,10 +240,12 @@ public partial class VehicleBody
 
         // Pick the right shell: armor-piercing for vehicles, high explosive for people.
         bool playerHasGuns = Guns.Any(PlayerDirects);
-        if (!playerHasGuns) SelectedAmmo = _aiVehicleTarget != null ? AmmoType.AP : AmmoType.HE;
+        if (!playerHasGuns)
+            SelectedAmmo = _aiVehicleTarget == null ? AmmoType.HE
+                : _aiVehicleTarget.IsAir && !_aiVehicleTarget.OnGround && HasFlak ? AmmoType.Flak : AmmoType.AP;
 
         (Vector3 muzzle, _) = Muzzle(lead);
-        float speed = SelectedAmmo == AmmoType.AP ? lead.Stats.MuzzleVelocity : lead.Stats.HeVelocity;
+        float speed = ShellSpeed(lead, SelectedAmmo);
         Vector3 aim = GunMath.LeadTarget(muzzle.N(), targetPos.N(), targetVel.N(), speed).G();
 
         // Gunners start a little off and settle in; a commander makes them quicker and steadier.
@@ -494,7 +500,8 @@ public partial class VehicleBody
         }
     }
 
-    public int MissingCount => Repair.Missing(Analysis, Model).Count;
+    /// <summary>Destroyed blocks waiting to be welded back (fired missiles don't count: supply points rebuild those).</summary>
+    public int MissingCount => Repair.Missing(Analysis, Model).Count(c => !Analysis.Defs[c].IsMissilePart);
 
     /// <summary>Refills ammo racks and fuel a little at a time (while parked at a supply point).</summary>
     public bool Resupply(float dt)
@@ -513,6 +520,6 @@ public partial class VehicleBody
             changed = true;
         }
 
-        return changed;
+        return ResupplyOrdnance(dt) || changed;
     }
 }

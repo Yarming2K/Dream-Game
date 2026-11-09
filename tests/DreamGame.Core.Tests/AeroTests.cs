@@ -20,6 +20,10 @@ public class AeroTests
         Assert.True(a.Air.HasRoll && a.Air.HasPitch && a.Air.HasYaw);
         Assert.Equal(3, a.Wheels.Count);
         Assert.Equal(2, a.Air.Bombs);
+        Assert.True(a.Air.MaxPitchDeg > 10f, $"elevators can only raise the nose {a.Air.MaxPitchDeg:0}°");
+        // Sits on its wheels: nose wheel ahead of the center of mass, main wheels just behind it.
+        Assert.True(a.Wheels.Min(w => w.Cell.Z) * Blueprint.CellSize < a.CenterOfMass.Z);
+        Assert.True(a.Wheels.Max(w => w.Cell.Z) * Blueprint.CellSize > a.CenterOfMass.Z);
         Assert.Equal(0, a.ErrorCount);
     }
 
@@ -28,11 +32,11 @@ public class AeroTests
     {
         VehicleAnalysis a = A(ExampleDesigns.Kestrel());
         SurfaceRole RoleAt(int x, int y, int z) => a.Surfaces.Single(s => s.Cell == new Int3(x, y, z)).Role;
-        Assert.Equal(SurfaceRole.Aileron, RoleAt(10, 1, 0));
-        Assert.Equal(SurfaceRole.Aileron, RoleAt(-8, 1, 0));
+        Assert.Equal(SurfaceRole.Aileron, RoleAt(10, 1, -2));
+        Assert.Equal(SurfaceRole.Aileron, RoleAt(-8, 1, -2));
         Assert.Equal(SurfaceRole.Elevator, RoleAt(2, 1, 7));
         Assert.Equal(SurfaceRole.Rudder, RoleAt(0, 3, 7));
-        Assert.Equal(SurfaceRole.Wing, RoleAt(5, 1, -2));
+        Assert.Equal(SurfaceRole.Wing, RoleAt(5, 1, -4));
     }
 
     [Fact]
@@ -144,5 +148,16 @@ public class AeroTests
         Assert.All(a.Guns, g => Assert.True(g.FlakRounds > 0 && g.HeRounds > 0));
         Assert.True(BlockCatalog.AutoCannon40.MaxElevationDeg >= 80f);
         Assert.True(a.Guns[0].Stats.ReloadS < 0.5f);
+    }
+
+    [Fact]
+    public void ANoseHeavyPlaneIsFlagged()
+    {
+        // Pull the Kestrel's wing right back: the lift moves far behind the center of mass.
+        var cells = ExampleDesigns.Kestrel().ToCellMap().Values
+            .Select(b => BlockCatalog.Get(b.Id).Kind is BlockKind.Wing && b.Cell.Z < 0 ? new BlueprintBlock(b.Id, b.Cell + new Int3(0, 0, 6), b.O) : b)
+            .GroupBy(b => b.Cell).Select(g => g.First()).ToList();
+        VehicleAnalysis a = VehicleAnalysis.Analyze(Blueprint.FromCellMap("nose heavy", cells));
+        Assert.Contains(a.Warnings, w => w.Text.Contains("Nose-heavy"));
     }
 }

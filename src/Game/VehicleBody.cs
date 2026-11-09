@@ -85,7 +85,9 @@ public partial class VehicleBody : RigidBody3D, IGridHost
     public bool DriverAlive { get; private set; } = true;
     public float SpeedKmh { get; private set; }
     public AmmoType SelectedAmmo { get; private set; } = AmmoType.AP;
-    public bool CanDrive => DriverAlive && UsablePowerKw > 0 && FuelL > 0 && (Wheels.Count > 0 || PropsAlive > 0);
+    public bool CanDrive => DriverAlive && FuelL > 0 && (IsAir
+        ? UsablePowerKw > 0 || AirThrusters.Any(t => t.Alive && t.Info.Kind == BlockKind.JetEngine)
+        : UsablePowerKw > 0 && (Wheels.Count > 0 || PropsAlive > 0));
     public bool HasLiveEngine => PowerKw > 0;
 
     public readonly List<WheelRt> Wheels = new();
@@ -141,6 +143,7 @@ public partial class VehicleBody : RigidBody3D, IGridHost
         v.SetupGuns();
         v.SetupSeats();
         v.SetupNaval();
+        v.SetupAir();
         v.RefreshStats();
         v.FuelL = v.FuelCapacityL;
         return v;
@@ -175,8 +178,8 @@ public partial class VehicleBody : RigidBody3D, IGridHost
         }
 
         if (!_engineSound.Playing) _engineSound.Play();
-        float load = Mathf.Max(Mathf.Abs(Throttle), Mathf.Abs(Steer) * 0.6f);
-        float rev = Mathf.Clamp(Mathf.Abs(SpeedKmh / 3.6f) / Mathf.Max(_governor, 1f), 0, 1);
+        float load = IsAir ? _soundLoad : Mathf.Max(Mathf.Abs(Throttle), Mathf.Abs(Steer) * 0.6f);
+        float rev = IsAir ? _soundLoad : Mathf.Clamp(Mathf.Abs(SpeedKmh / 3.6f) / Mathf.Max(_governor, 1f), 0, 1);
         float pitch = 0.62f + 0.85f * rev + 0.28f * load;
         _engineSound.PitchScale = Mathf.Lerp(_engineSound.PitchScale, pitch, 0.08f);
         float quieter = PlayerSeat != null ? 0f : -5f;
@@ -286,12 +289,20 @@ public partial class VehicleBody : RigidBody3D, IGridHost
         }
 
         RefreshNaval();
+        RefreshAir();
     }
+
+    private static List<Int3> RacksFor(GunRt g, AmmoType type) => type switch
+    {
+        AmmoType.AP => g.Info.ApRacks,
+        AmmoType.HE => g.Info.HeRacks,
+        _ => g.Info.FlakRacks,
+    };
 
     public int Rounds(GunRt g, AmmoType type)
     {
         float units = 0;
-        foreach (Int3 c in type == AmmoType.AP ? g.Info.ApRacks : g.Info.HeRacks)
+        foreach (Int3 c in RacksFor(g, type))
             if (Model.Blocks.TryGetValue(c, out BlockInstance b) && b.Alive) units += b.AmmoUnits;
         return (int)(units / g.Stats.ShellUnits);
     }
@@ -299,7 +310,7 @@ public partial class VehicleBody : RigidBody3D, IGridHost
     private bool TakeRound(GunRt g, AmmoType type)
     {
         int units = g.Stats.ShellUnits;
-        foreach (Int3 c in type == AmmoType.AP ? g.Info.ApRacks : g.Info.HeRacks)
+        foreach (Int3 c in RacksFor(g, type))
         {
             if (!Model.Blocks.TryGetValue(c, out BlockInstance b) || !b.Alive || b.AmmoUnits < units) continue;
             b.AmmoUnits -= units;
@@ -309,13 +320,31 @@ public partial class VehicleBody : RigidBody3D, IGridHost
         return false;
     }
 
-    public void ToggleAmmo() => SelectedAmmo = SelectedAmmo == AmmoType.AP ? AmmoType.HE : AmmoType.AP;
+    private static readonly AmmoType[] ShellTypes = { AmmoType.AP, AmmoType.HE, AmmoType.Flak };
+
+    /// <summary>Cycles AP → HE → Flak, skipping any this vehicle carries none of.</summary>
+    public void ToggleAmmo()
+    {
+        int at = System.Array.IndexOf(ShellTypes, SelectedAmmo);
+        for (int i = 1; i <= ShellTypes.Length; i++)
+        {
+            AmmoType next = ShellTypes[(at + i) % ShellTypes.Length];
+            if (next == AmmoType.Flak && !Guns.Any(g => g.Info.FlakRacks.Count > 0)) continue;
+            SelectedAmmo = next;
+            return;
+        }
+    }
+
+    public bool HasFlak => Guns.Any(g => g.Info.FlakRacks.Count > 0);
+
+    public static float ShellSpeed(GunRt g, AmmoType type) => type == AmmoType.AP ? g.Stats.MuzzleVelocity : g.Stats.HeVelocity;
 
     public override void _PhysicsProcess(double delta)
     {
         float dt = (float)delta;
         SeatRt driver = DriverSeat();
-        if (driver != null && driver.Occupant == Occupant.Player)
+        bool playerDrives = driver != null && driver.Occupant == Occupant.Player;
+        if (playerDrives)
         {
             Throttle = PlayerInput.Throttle;
             Steer = PlayerInput.Steer;
@@ -334,8 +363,10 @@ public partial class VehicleBody : RigidBody3D, IGridHost
         Drive(dt);
         if (IsNaval || PropsAlive > 0) NavalDrive(dt);
         WaterTick(dt);
+        AirTick(dt, playerDrives);
         CrewTick(dt);
         TorpedoTick(dt);
+        AiMissiles(dt);
         Aim(dt);
         if (PlayerInput.Fire) FirePlayerGuns();
         foreach (GunRt g in Guns)
@@ -366,8 +397,9 @@ public partial class VehicleBody : RigidBody3D, IGridHost
         float mass = Mass;
         float share = mass / Wheels.Count;
         bool canDrive = CanDrive;
-        float throttle = canDrive ? Throttle : 0f;
-        float steer = canDrive ? Steer : 0f;
+        // Aircraft wheels roll free: the propellers do the pulling.
+        float throttle = canDrive && !IsAir ? Throttle : 0f;
+        float steer = canDrive || IsAir ? Steer : 0f;
 
         // Engine force: constant power, capped by grip at low speed and by the governor at the top.
         float force = 0;
@@ -413,7 +445,7 @@ public partial class VehicleBody : RigidBody3D, IGridHost
             }
         }
 
-        bool coasting = Mathf.Abs(throttle) < 0.01f && (trackContacts == 0 || Mathf.Abs(steer) < 0.01f);
+        bool coasting = !IsAir && Mathf.Abs(throttle) < 0.01f && (trackContacts == 0 || Mathf.Abs(steer) < 0.01f);
         foreach (WheelRt w in Wheels)
         {
             if (w.Kind == BlockKind.SteerWheel)
@@ -482,7 +514,7 @@ public partial class VehicleBody : RigidBody3D, IGridHost
             ApplyTorque(up * torque * (trackContacts / (float)Mathf.Max(Wheels.Count(w => w.Kind == BlockKind.Track), 1)));
         }
 
-        ApplyCentralForce(-vel * vel.Length() * 0.5f * Mobility.AirDensity * Analysis.DragArea);
+        if (!IsAir) ApplyCentralForce(-vel * vel.Length() * 0.5f * Mobility.AirDensity * Analysis.DragArea);
 
         foreach (WheelRt w in Wheels)
         {
@@ -530,14 +562,14 @@ public partial class VehicleBody : RigidBody3D, IGridHost
             Vector3 to = aim - pivot;
             var flat = new Vector3(to.X, 0, to.Z);
             float dist = flat.Length();
-            float v = SelectedAmmo == AmmoType.AP ? g.Stats.MuzzleVelocity : g.Stats.HeVelocity;
+            float v = ShellSpeed(g, SelectedAmmo);
             if (!GunMath.SolveElevation(v, dist, to.Y, out float elev)) elev = Mathf.Pi / 4f;
             Vector3 dirW = dist > 0.01f ? flat / dist * Mathf.Cos(elev) + Vector3.Up * Mathf.Sin(elev) : Vector3.Up;
             Vector3 dirL = parent.Basis.Inverse() * dirW;
             Vector3 f0 = g.Info.Forward.G();
             Vector3 axis = g.Info.Right.G();
             float desired = Mathf.Atan2(axis.Dot(f0.Cross(dirL)), f0.Dot(dirL));
-            desired = Mathf.Clamp(desired, Mathf.DegToRad(Mobility.MinElevationDeg), Mathf.DegToRad(Mobility.MaxElevationDeg));
+            desired = Mathf.Clamp(desired, Mathf.DegToRad(Mobility.MinElevationDeg), Mathf.DegToRad(g.Info.BreechDef.Breech.MaxElevationDeg));
             float step = g.ElevSpeedRad * dt;
             g.Pitch += Mathf.Clamp(desired - g.Pitch, -step, step);
             View.SetAngle(g.Info.GunSection, g.Pitch);
@@ -570,15 +602,17 @@ public partial class VehicleBody : RigidBody3D, IGridHost
     {
         if (Combat.Instance == null || !g.Alive || g.ReloadLeft > 0 || g.Info.GunSection < 0) return false;
         AmmoType type = SelectedAmmo;
-        if (Rounds(g, type) == 0) type = type == AmmoType.AP ? AmmoType.HE : AmmoType.AP;
+        if (Rounds(g, type) == 0) type = ShellTypes.FirstOrDefault(t => Rounds(g, t) > 0, type);
         if (!TakeRound(g, type)) return false;
 
         (Vector3 muzzle, Vector3 dir) = Muzzle(g);
         float spread = Mathf.DegToRad(g.Stats.SpreadDeg) * Mathf.Sqrt(_rng.Randf());
         Vector3 side = dir.Cross(Mathf.Abs(dir.Y) > 0.9f ? Vector3.Right : Vector3.Up).Normalized();
         dir = dir.Rotated(side, spread).Rotated(dir, _rng.RandfRange(0, Mathf.Tau)).Normalized();
-        float speed = type == AmmoType.AP ? g.Stats.MuzzleVelocity : g.Stats.HeVelocity;
-        Combat.Instance.Fire(this, muzzle, dir * speed + LinearVelocity, type, g.Stats, g.Info.BreechDef.Breech, byPlayer);
+        float speed = ShellSpeed(g, type);
+        // Flak is fused to burst at the range of whatever the gun is aimed at.
+        float fuse = type == AmmoType.Flak && AimFor(g, out Vector3 aimAt) ? Mathf.Clamp(muzzle.DistanceTo(aimAt), 40f, 4000f) : 0f;
+        Combat.Instance.Fire(this, muzzle, dir * speed + LinearVelocity, type, g.Stats, g.Info.BreechDef.Breech, byPlayer, fuseM: fuse);
 
         Vector3 breech = View.SectionGlobal(g.Info.GunSection) * Conv.CellPos(g.Info.Breech);
         ApplyImpulse(-dir * g.Stats.RecoilImpulse, breech - GlobalPosition);
@@ -593,6 +627,12 @@ public partial class VehicleBody : RigidBody3D, IGridHost
     /// <summary>Puts the vehicle back on its wheels where it is ("forgiving" recovery).</summary>
     public void Recover()
     {
+        if (IsAir && !OnGround && HeightAboveGroundM > 3f)
+        {
+            RecoverInAir();
+            return;
+        }
+
         if (IsNaval && Submerged > 0.05f)
         {
             RecoverAfloat();

@@ -1056,6 +1056,81 @@ public partial class Builder : Node3D
         return f;
     }
 
+    /// <summary>What kind of aircraft it is, how it lifts, and which way each control surface steers it.</summary>
+    private void AirSection(VehicleAnalysis a)
+    {
+        AirStats s = a.Air;
+        _dash.AddChild(Ui.Section(VehicleAnalysis.ModeName(a.Mode)));
+        HFlowContainer chips = ChipFlow();
+        float weightT = a.MassKg / 1000f;
+        switch (a.Mode)
+        {
+            case MobilityMode.Plane:
+                _dash.AddChild(Ui.Small("Wing panels lift with speed. Control surfaces steer it: at the wingtips they roll, on the tailplane they pitch, upright on the fin they turn."));
+                chips.AddChild(Ui.Chip("Wing", $"{s.WingAreaM2:0} m²"));
+                chips.AddChild(Ui.Chip("Push", $"{s.StaticThrustN / 1000f:0.0} kN"));
+                chips.AddChild(Ui.Chip("Roll", s.HasRoll ? "yes" : "no", s.HasRoll ? Ui.Good : Ui.Bad));
+                chips.AddChild(Ui.Chip("Pitch", s.HasPitch ? "yes" : "no", s.HasPitch ? Ui.Good : Ui.Bad));
+                chips.AddChild(Ui.Chip("Turn", s.HasYaw ? "yes" : "no", s.HasYaw ? Ui.Good : Ui.Warn));
+                chips.AddChild(Ui.Chip("Balance", s.StaticMarginM >= 0 ? "stable" : "nose-up", s.StaticMarginM >= 0 ? Ui.Good : Ui.Warn));
+                break;
+            case MobilityMode.Airship:
+                _dash.AddChild(Ui.Small("Gas cells hold it up; it vents or tops up gas to hold the height you order."));
+                chips.AddChild(Ui.Chip("Gas lift", $"{s.GasLiftKg / 1000f:0.0} t", s.CanFly ? Ui.Good : Ui.Bad));
+                chips.AddChild(Ui.Chip("Weight", $"{weightT:0.0} t"));
+                chips.AddChild(Ui.Chip("Push", $"{s.StaticThrustN / 1000f:0.0} kN"));
+                break;
+            default:
+                _dash.AddChild(Ui.Small("Rotors and lift fans hold it up; it tilts to move and stops when you let go."));
+                chips.AddChild(Ui.Chip("Can lift", $"{s.HoverThrustN / GunMath.Gravity / 1000f:0.0} t", s.CanFly ? Ui.Good : Ui.Bad));
+                chips.AddChild(Ui.Chip("Weight", $"{weightT:0.0} t"));
+                chips.AddChild(Ui.Chip("Spare lift", $"{(s.HoverThrustN / GunMath.Gravity / Mathf.Max(a.MassKg, 1f) - 1f) * 100f:0}%",
+                    s.HoverThrustN > a.MassKg * GunMath.Gravity * 1.2f ? Ui.Good : Ui.Warn));
+                break;
+        }
+
+        if (s.Bombs > 0) chips.AddChild(Ui.Chip("Bombs", $"{s.Bombs}", Ui.Accent));
+        if (a.Seats.Any(x => x.Remote)) chips.AddChild(Ui.Chip("Flown", "by remote", Ui.Info));
+        _dash.AddChild(chips);
+    }
+
+    private void MissileSection(VehicleAnalysis a)
+    {
+        _dash.AddChild(Ui.Section("Missiles"));
+        foreach (MissileInfo m in a.Missiles)
+        {
+            PanelContainer card = Ui.Card();
+            VBoxContainer col = Ui.Column(6);
+            card.AddChild(col);
+            HBoxContainer top = Ui.Row(8);
+            string kind = !m.Valid ? "Not ready" : m.Stats.Seeker switch
+            {
+                SeekerKind.Optical => "Optical: flies to your crosshair",
+                SeekerKind.Radar => "Radar: chases aircraft",
+                _ => "Unguided rocket",
+            };
+            top.AddChild(Ui.Heading($"{m.Parts.Count}-part missile"));
+            top.AddChild(Ui.Spacer());
+            top.AddChild(Ui.Caption(kind, m.Valid ? Ui.Info : Ui.Bad));
+            col.AddChild(top);
+            if (m.Valid)
+            {
+                HFlowContainer chips = ChipFlow();
+                chips.AddChild(Ui.Chip("Speed", $"{m.Stats.BurnoutSpeed * 3.6f:0} km/h", Ui.Accent));
+                chips.AddChild(Ui.Chip("Reach", $"{m.Stats.RangeM:0} m"));
+                chips.AddChild(Ui.Chip("Blast", $"{m.Stats.Damage:0} · {m.Stats.RadiusM:0.0} m"));
+                chips.AddChild(Ui.Chip("Turns", m.Stats.MaxTurnAccel > 0 ? $"{m.Stats.MaxTurnAccel / GunMath.Gravity:0} g" : "no", m.Stats.MaxTurnAccel > 0 ? Ui.Text : Ui.Dim));
+                col.AddChild(chips);
+            }
+            else if (m.Problem != null)
+            {
+                col.AddChild(Ui.Wrapped(m.Problem, 14, Ui.Bad));
+            }
+
+            _dash.AddChild(card);
+        }
+    }
+
     /// <summary>How the hull floats, how much flooding it can take, and (submarines) whether it can dive and come back up.</summary>
     private void HullSection(VehicleAnalysis a)
     {
@@ -1118,7 +1193,14 @@ public partial class Builder : Node3D
         grid.AddChild(StatTile("Mass", $"{a.MassKg / 1000f:0.0}", "t", Ui.Text));
         grid.AddChild(StatTile("Top speed", $"{a.TopSpeedKmh:0}", "km/h", Ui.Grade(a.TopSpeedKmh, 20, 35)));
         grid.AddChild(StatTile("Power", $"{a.PowerToWeight:0.0}", "kW/t", Ui.Grade(a.PowerToWeight, 8, 12)));
-        if (a.IsNaval)
+        if (a.IsAir)
+            grid.AddChild(a.Mode switch
+            {
+                MobilityMode.Plane => StatTile("Stalls below", $"{a.Air.StallSpeedMs * 3.6f:0}", "km/h", Ui.Grade(200f - a.Air.StallSpeedMs * 3.6f, 20f, 50f)),
+                MobilityMode.Airship => StatTile("Gas lift", $"{a.Air.GasLiftKg / 1000f:0.0}", "t", a.Air.CanFly ? Ui.Good : Ui.Bad),
+                _ => StatTile("Can lift", $"{a.Air.HoverThrustN / GunMath.Gravity / 1000f:0.0}", "t", a.Air.CanFly ? Ui.Good : Ui.Bad),
+            });
+        else if (a.IsNaval)
             grid.AddChild(a.Water.Floats
                 ? StatTile("Freeboard", $"{a.Water.FreeboardM:0.0}", "m", Ui.Grade(a.Water.FreeboardM, 0.5f, 1.2f))
                 : StatTile("Freeboard", "sinks", "", Ui.Bad));
@@ -1131,6 +1213,8 @@ public partial class Builder : Node3D
         _dash.AddChild(grid);
 
         if (a.IsNaval) HullSection(a);
+        if (a.IsAir) AirSection(a);
+        if (a.Missiles.Count > 0) MissileSection(a);
 
         _dash.AddChild(Ui.Section("Armor"));
         _dash.AddChild(Ui.Small("How much armor a shell must get through to reach the insides. The tick is the weakest spot."));

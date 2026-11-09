@@ -405,9 +405,106 @@ public static class BlockVisuals
                 for (int i = 0; i < 4; i++)
                 {
                     var p = new Vector3(i % 2 == 0 ? -0.11f : 0.11f, 0.2f, i < 2 ? -0.11f : 0.11f);
-                    Add(root, Cylinder(0.07f, 0.1f, 0.02f), def.Ammo == AmmoType.HE ? RedTip : Brass, p);
+                    Add(root, Cylinder(0.07f, 0.1f, 0.02f), def.Ammo == AmmoType.HE ? RedTip : def.Ammo == AmmoType.Flak ? Steel : Brass, p);
                 }
 
+                break;
+            case BlockKind.Wing:
+                Add(root, Box(new Vector3(full, 0.07f, full)), mat, Vector3.Zero);
+                break;
+            case BlockKind.ControlSurface:
+            {
+                // A fixed strip at the front, and the flap hinged behind it (swings in flight).
+                Add(root, Box(new Vector3(full, 0.07f, 0.12f)), mat, new Vector3(0, 0, -0.19f));
+                var flap = new Node3D { Name = "Flap", Position = new Vector3(0, 0, -0.13f) };
+                root.AddChild(flap);
+                Add(flap, Box(new Vector3(full * 0.98f, 0.05f, 0.37f)), mat, new Vector3(0, 0, 0.19f));
+                Add(root, Cylinder(0.025f, full), Steel, new Transform3D(AlongX, new Vector3(0, 0, -0.13f)));
+                break;
+            }
+            case BlockKind.AirPropeller:
+            {
+                Add(root, Cylinder(0.12f, 0.3f), Dark, new Transform3D(AlongZ, new Vector3(0, 0, 0.05f)));
+                var spin = new Node3D { Name = "Spinner", Position = new Vector3(0, 0, -0.14f) };
+                root.AddChild(spin);
+                Add(spin, Cylinder(0.13f, 0.18f, 0.02f), mat, new Transform3D(new Basis(Vector3.Right, -Mathf.Pi / 2), new Vector3(0, 0, -0.08f)));
+                Add(spin, Box(new Vector3(0.16f, Aero.PropRadiusM * 2f, 0.03f)), mat, new Transform3D(new Basis(Vector3.Up, 0.25f), Vector3.Zero));
+                Add(spin, Box(new Vector3(Aero.PropRadiusM * 2f, 0.16f, 0.03f)), mat, new Transform3D(new Basis(Vector3.Right, 0.25f), Vector3.Zero));
+                break;
+            }
+            case BlockKind.JetEngine:
+                Add(root, Cylinder(0.24f, full * 0.98f), mat, new Transform3D(AlongZ, Vector3.Zero));
+                Add(root, Cylinder(0.25f, 0.06f), Dark, new Transform3D(AlongZ, new Vector3(0, 0, -0.23f)));
+                Add(root, Cylinder(0.18f, 0.1f, 0.14f), Dark, new Transform3D(AlongZ, new Vector3(0, 0, 0.27f)));
+                Add(root, Cylinder(0.12f, 0.02f), Glow(new Color(1f, 0.55f, 0.2f), 2.5f), new Transform3D(AlongZ, new Vector3(0, 0, 0.32f)));
+                break;
+            case BlockKind.Rotor:
+            {
+                Add(root, Cylinder(0.14f, full), Steel, Vector3.Zero);
+                var spin = new Node3D { Name = "Spinner", Position = new Vector3(0, 0.22f, 0) };
+                root.AddChild(spin);
+                Add(spin, Cylinder(0.22f, 0.1f), Dark, Vector3.Zero);
+                Add(spin, Box(new Vector3(0.32f, 0.05f, Aero.RotorRadiusM * 2f)), mat, Vector3.Zero);
+                Add(spin, Box(new Vector3(Aero.RotorRadiusM * 2f, 0.05f, 0.32f)), mat, Vector3.Zero);
+                break;
+            }
+            case BlockKind.LiftFan:
+            {
+                // Its arrow (forward) is the way it blows; the duct ring sits across that axis.
+                var duct = new TorusMesh { InnerRadius = Aero.FanRadiusM * 0.92f, OuterRadius = Aero.FanRadiusM * 1.05f, Rings = 32, RingSegments = 8 };
+                Add(root, duct, mat, new Transform3D(AlongZ, Vector3.Zero));
+                Add(root, Bevel(new Vector3(0.3f, 0.3f, full * 0.9f), 0.04f), Dark, Vector3.Zero);
+                var spin = new Node3D { Name = "Spinner" };
+                root.AddChild(spin);
+                Add(spin, Box(new Vector3(0.12f, Aero.FanRadiusM * 1.8f, 0.03f)), Steel, Vector3.Zero);
+                Add(spin, Box(new Vector3(Aero.FanRadiusM * 1.8f, 0.12f, 0.03f)), Steel, Vector3.Zero);
+                break;
+            }
+            case BlockKind.GasCell:
+                Add(root, Bevel(new Vector3(full * 0.99f, full * 0.99f, full * 0.99f), 0.09f), mat, Vector3.Zero);
+                break;
+            case BlockKind.DroneCore:
+                Add(root, Bevel(new Vector3(full, full * 0.7f, full)), mat, new Vector3(0, -0.075f, 0));
+                Add(root, Cylinder(0.015f, 0.3f), Steel, new Vector3(0.12f, 0.3f, 0.1f));
+                Add(root, Box(new Vector3(0.1f, 0.04f, 0.04f)), Glow(new Color(0.35f, 1f, 0.5f), 2f), new Vector3(0, 0.18f, -0.2f));
+                break;
+            case BlockKind.BombRack:
+            {
+                Add(root, Box(new Vector3(full * 0.7f, 0.05f, full)), Dark, new Vector3(0, 0.22f, 0));
+                Add(root, Box(new Vector3(0.04f, 0.12f, 0.04f)), Steel, new Vector3(0, 0.15f, -0.12f));
+                Add(root, Box(new Vector3(0.04f, 0.12f, 0.04f)), Steel, new Vector3(0, 0.15f, 0.12f));
+                var payload = new Node3D { Name = "Payload" };
+                root.AddChild(payload);
+                Add(payload, Cylinder(0.17f, 0.42f), mat, new Transform3D(AlongZ, new Vector3(0, -0.02f, 0)));
+                Add(payload, Cylinder(0.17f, 0.12f, 0.04f), mat, new Transform3D(new Basis(Vector3.Right, -Mathf.Pi / 2), new Vector3(0, -0.02f, -0.27f)));
+                Add(payload, Box(new Vector3(0.36f, 0.02f, 0.1f)), Dark, new Vector3(0, -0.02f, 0.26f));
+                Add(payload, Box(new Vector3(0.02f, 0.36f, 0.1f)), Dark, new Vector3(0, -0.02f, 0.26f));
+                break;
+            }
+            case BlockKind.MissileRail:
+                Add(root, Box(new Vector3(0.3f, 0.12f, 0.3f)), mat, new Vector3(0, -0.12f, 0));
+                Add(root, Box(new Vector3(0.1f, 0.06f, full)), Steel, new Vector3(0, -0.03f, 0));
+                break;
+            case BlockKind.MissileSeeker when def.Seeker == SeekerKind.Radar:
+                Add(root, Cylinder(0.13f, 0.36f, 0.01f), mat, new Transform3D(new Basis(Vector3.Right, -Mathf.Pi / 2), new Vector3(0, 0, -0.06f)));
+                Add(root, Cylinder(0.13f, 0.14f), Dark, new Transform3D(AlongZ, new Vector3(0, 0, 0.18f)));
+                break;
+            case BlockKind.MissileSeeker:
+                Add(root, Cylinder(0.13f, 0.3f), mat, new Transform3D(AlongZ, new Vector3(0, 0, 0.1f)));
+                Add(root, new SphereMesh { Radius = 0.12f, Height = 0.24f }, Glow(new Color(0.25f, 0.55f, 0.9f), 0.8f), new Vector3(0, 0, -0.07f));
+                break;
+            case BlockKind.MissileWarhead:
+                Add(root, Cylinder(0.13f, full * 1.01f), mat, new Transform3D(AlongZ, Vector3.Zero));
+                Add(root, Cylinder(0.135f, 0.06f), Brass, new Transform3D(AlongZ, new Vector3(0, 0, -0.1f)));
+                break;
+            case BlockKind.MissileMotor:
+                Add(root, Cylinder(0.13f, full * 1.01f), mat, new Transform3D(AlongZ, Vector3.Zero));
+                Add(root, Cylinder(0.08f, 0.08f, 0.11f), Dark, new Transform3D(AlongZ, new Vector3(0, 0, 0.27f)));
+                break;
+            case BlockKind.MissileFins:
+                Add(root, Cylinder(0.13f, full * 1.01f), mat, new Transform3D(AlongZ, Vector3.Zero));
+                Add(root, Box(new Vector3(0.56f, 0.025f, 0.22f)), Dark, new Vector3(0, 0, 0.1f));
+                Add(root, Box(new Vector3(0.025f, 0.56f, 0.22f)), Dark, new Vector3(0, 0, 0.1f));
                 break;
             case BlockKind.AmmoFeed:
                 Add(root, Bevel(new Vector3(0.3f, 0.3f, 0.3f), 0.03f), mat, Vector3.Zero);
@@ -420,7 +517,8 @@ public static class BlockVisuals
                 break;
         }
 
-        if (hints && (def.Kind == BlockKind.Breech || def.Kind == BlockKind.TorpedoTube || def.Kind == BlockKind.ShipPropeller))
+        if (hints && def.Kind is BlockKind.Breech or BlockKind.TorpedoTube or BlockKind.ShipPropeller or BlockKind.AirPropeller
+                or BlockKind.JetEngine or BlockKind.LiftFan or BlockKind.MissileRail)
         {
             // Arrow showing which way the gun fires (where the barrels go).
             Add(root, Cylinder(0.09f, 0.2f, 0f), Glow(new Color(1f, 0.85f, 0.2f), 2f),

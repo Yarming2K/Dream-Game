@@ -11,6 +11,10 @@ public partial class ReticleOverlay : Control
     /// <summary>1 right after one of your shells gets through, fading to 0: draws the hit marker.</summary>
     public float HitFlash;
 
+    /// <summary>Bombsight: where a bomb dropped now would land. Lock: the aircraft a radar missile would chase.</summary>
+    public Vector2? BombMark;
+    public Vector2? LockMark;
+
     public override void _Draw()
     {
         Vector2 c = Size / 2f;
@@ -26,6 +30,20 @@ public partial class ReticleOverlay : Control
             float a = 9f + 6f * (1f - HitFlash), b = a + 8f;
             foreach (Vector2 d in new[] { new Vector2(1, 1), new Vector2(-1, 1), new Vector2(1, -1), new Vector2(-1, -1) })
                 DrawLine(c + d.Normalized() * a, c + d.Normalized() * b, hc, 3f);
+        }
+
+        if (BombMark is Vector2 bomb)
+        {
+            var bc = new Color(1f, 0.82f, 0.35f, 0.95f);
+            Vector2[] pts = { bomb + new Vector2(0, -11), bomb + new Vector2(11, 0), bomb + new Vector2(0, 11), bomb + new Vector2(-11, 0) };
+            for (int i = 0; i < 4; i++) DrawLine(pts[i], pts[(i + 1) % 4], bc, 2f);
+            DrawCircle(bomb, 2f, bc);
+        }
+
+        if (LockMark is Vector2 l)
+        {
+            var lc = new Color(1f, 0.35f, 0.3f, 0.95f);
+            DrawRect(new Rect2(l - new Vector2(14, 14), new Vector2(28, 28)), lc, false, 2f);
         }
 
         foreach ((Vector2 pos, bool ready) in Marks)
