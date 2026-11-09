@@ -15,7 +15,9 @@ public class SynthTests
         ("penetration", () => Synth.Penetration()), ("clang", () => Synth.Clang()), ("ricochet", () => Synth.Ricochet()),
         ("dirt", () => Synth.Dirt()), ("place", () => Synth.Place(0.5f)), ("remove", () => Synth.Remove()),
         ("tick", () => Synth.Tick()), ("error", Synth.Error), ("reload", () => Synth.Reload()),
-        ("engine", () => Synth.EngineLoop()),
+        ("engine", () => Synth.EngineLoop()), ("rifle", () => Synth.Rifle()), ("rocket", () => Synth.RocketLaunch()),
+        ("bullet metal", () => Synth.BulletMetal()), ("bullet dirt", () => Synth.BulletDirt()),
+        ("footstep", () => Synth.Footstep(1)), ("hurt", () => Synth.Hurt()), ("weld", () => Synth.WeldLoop()),
     }.Select(p => new object[] { p.Item1, p.Item2 });
 
     [Theory]
@@ -29,7 +31,7 @@ public class SynthTests
         Assert.InRange(peak, 0.3f, 0.95f);
         double rms = Math.Sqrt(s.Average(v => (double)v * v));
         Assert.True(rms > 0.005, $"{name} is nearly silent");
-        if (name != "engine") Assert.True(Math.Abs(s[0]) < 0.1f, $"{name} starts with a click"); // the loop is checked separately
+        if (name != "engine" && name != "weld") Assert.True(Math.Abs(s[0]) < 0.1f, $"{name} starts with a click"); // the loop is checked separately
     }
 
     [Fact]

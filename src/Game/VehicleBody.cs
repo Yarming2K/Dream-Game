@@ -35,6 +35,9 @@ public partial class VehicleBody : RigidBody3D, IGridHost
     public sealed class GunRt
     {
         public GunInfo Info;
+
+        /// <summary>Position in the design's gun list (used to find who fires it).</summary>
+        public int Index;
         public BlockInstance Breech;
         public GunStats Stats;
         public int Barrels;
@@ -66,14 +69,15 @@ public partial class VehicleBody : RigidBody3D, IGridHost
     public Blueprint Blueprint { get; private set; }
     public VehicleAnalysis Analysis { get; private set; }
     public string DisplayName => Blueprint.Name;
-    public bool PlayerControlled;
+    /// <summary>0 is the player's side; anything else is hostile to it.</summary>
+    public int Faction;
 
-    // Controls, set by whoever drives this (the player or, later, AI).
+    public bool IsPlayers => Faction == 0;
+
+    // What the driver is doing this tick (from the player's input, or held still).
     public float Throttle;
     public float Steer;
     public bool Braking = true;
-    public bool HasAim;
-    public Vector3 AimPoint;
 
     public float PowerKw { get; private set; }
     public float FuelL { get; private set; }
@@ -82,6 +86,7 @@ public partial class VehicleBody : RigidBody3D, IGridHost
     public float SpeedKmh { get; private set; }
     public AmmoType SelectedAmmo { get; private set; } = AmmoType.AP;
     public bool CanDrive => DriverAlive && PowerKw > 0 && FuelL > 0 && Wheels.Count > 0;
+    public bool HasLiveEngine => PowerKw > 0;
 
     public readonly List<WheelRt> Wheels = new();
     public readonly List<GunRt> Guns = new();
@@ -105,7 +110,7 @@ public partial class VehicleBody : RigidBody3D, IGridHost
     public static VehicleBody Create(Blueprint bp, Transform3D where, bool player)
     {
         VehicleAnalysis a = VehicleAnalysis.Analyze(bp);
-        var v = new VehicleBody { Name = player ? "PlayerVehicle" : "Vehicle", Blueprint = bp, Analysis = a, PlayerControlled = player };
+        var v = new VehicleBody { Name = player ? "PlayerVehicle" : "Vehicle", Blueprint = bp, Analysis = a, Faction = player ? 0 : 1 };
         v.Model = GridModel.FromAnalysis(a);
         foreach (Int3 c in a.Disconnected)
             if (v.Model.Blocks.TryGetValue(c, out BlockInstance b)) v.Model.Remove(b);
@@ -134,6 +139,7 @@ public partial class VehicleBody : RigidBody3D, IGridHost
 
         v.SetupWheels();
         v.SetupGuns();
+        v.SetupSeats();
         v.RefreshStats();
         v.FuelL = v.FuelCapacityL;
         return v;
@@ -152,7 +158,6 @@ public partial class VehicleBody : RigidBody3D, IGridHost
 
     public override void _Ready()
     {
-        if (!PlayerControlled) return;
         _engineSound = Sfx.Loop(this, SoundId.Engine, -14f);
         BlockInstance engine = Model.Blocks.Values.FirstOrDefault(b => b.Def.Kind == BlockKind.Engine);
         if (engine != null) _engineSound.Position = Conv.CellPos(engine.Cell);
@@ -173,7 +178,8 @@ public partial class VehicleBody : RigidBody3D, IGridHost
         float rev = Mathf.Clamp(Mathf.Abs(SpeedKmh / 3.6f) / Mathf.Max(_governor, 1f), 0, 1);
         float pitch = 0.62f + 0.85f * rev + 0.28f * load;
         _engineSound.PitchScale = Mathf.Lerp(_engineSound.PitchScale, pitch, 0.08f);
-        _engineSound.VolumeDb = Mathf.Lerp(_engineSound.VolumeDb, -15f + 9f * load + 3f * rev, 0.1f);
+        float quieter = PlayerSeat != null ? 0f : -5f;
+        _engineSound.VolumeDb = Mathf.Lerp(_engineSound.VolumeDb, -15f + 9f * load + 3f * rev + quieter, 0.1f);
     }
     public override void _ExitTree() => GridRegistry.Remove(this);
 
@@ -194,10 +200,11 @@ public partial class VehicleBody : RigidBody3D, IGridHost
 
     private void SetupGuns()
     {
-        foreach (GunInfo g in Analysis.Guns)
+        for (int i = 0; i < Analysis.Guns.Count; i++)
         {
+            GunInfo g = Analysis.Guns[i];
             if (!g.Valid || !Model.Blocks.TryGetValue(g.Breech, out BlockInstance breech)) continue;
-            Guns.Add(new GunRt { Info = g, Breech = breech });
+            Guns.Add(new GunRt { Info = g, Breech = breech, Index = i });
         }
 
         foreach (TurretInfo t in Analysis.Turrets)
@@ -228,6 +235,7 @@ public partial class VehicleBody : RigidBody3D, IGridHost
         if (_hadEngine && PowerKw <= 0) Status?.Invoke("Engine destroyed");
         _hadEngine = PowerKw > 0;
 
+        CheckPlayerSeat();
         Wheels.RemoveAll(w => !w.Block.Alive || !Model.Blocks.ContainsKey(w.Block.Cell));
         int tracks = Wheels.Count(w => w.Kind == BlockKind.Track);
         float trackFraction = Wheels.Count > 0 ? tracks / (float)Wheels.Count : 0;
@@ -303,7 +311,14 @@ public partial class VehicleBody : RigidBody3D, IGridHost
     public override void _PhysicsProcess(double delta)
     {
         float dt = (float)delta;
-        if (!PlayerControlled)
+        SeatRt driver = DriverSeat();
+        if (driver != null && driver.Occupant == Occupant.Player)
+        {
+            Throttle = PlayerInput.Throttle;
+            Steer = PlayerInput.Steer;
+            Braking = PlayerInput.Brake;
+        }
+        else
         {
             Throttle = 0;
             Steer = 0;
@@ -311,12 +326,14 @@ public partial class VehicleBody : RigidBody3D, IGridHost
         }
 
         Drive(dt);
+        CrewTick(dt);
         Aim(dt);
+        if (PlayerInput.Fire) FirePlayerGuns();
         foreach (GunRt g in Guns)
         {
             if (g.ReloadLeft <= 0) continue;
             g.ReloadLeft = Mathf.Max(0, g.ReloadLeft - dt);
-            if (g.ReloadLeft <= 0 && g.Alive && PlayerControlled && g.Info.GunSection >= 0)
+            if (g.ReloadLeft <= 0 && g.Alive && PlayerSeat != null && g.Info.GunSection >= 0)
                 Sfx.At(GetParent<Node3D>(), View.SectionGlobal(g.Info.Section) * Conv.CellPos(g.Info.Breech), SoundId.Reload,
                     -3f, _rng.RandfRange(0.95f, 1.05f), 6f, delayByDistance: false);
         }
@@ -473,16 +490,19 @@ public partial class VehicleBody : RigidBody3D, IGridHost
         return a;
     }
 
+    /// <summary>
+    /// Turns turrets and elevates guns toward whatever the person controlling each one is aiming at
+    /// (the player's crosshair or the AI gunner's target), with automatic drop compensation.
+    /// </summary>
     private void Aim(float dt)
     {
-        if (!HasAim || !DriverAlive) return;
-
         Transform3D hull = View.SectionGlobal(0);
-        Vector3 local = hull.AffineInverse() * AimPoint;
+        Transform3D toHull = hull.AffineInverse();
         foreach (TurretRt t in Turrets)
         {
             if (t.Lead == null || !Model.Sections[t.Section].Cells.Any()) continue;
-            Vector3 rel = local - t.PivotLocal;
+            if (!AimFor(t.Lead, out Vector3 aimWorld)) continue;
+            Vector3 rel = toHull * aimWorld - t.PivotLocal;
             rel.Y = 0;
             if (rel.LengthSquared() < 0.01f) continue;
             Vector3 f0 = t.Lead.Info.Forward.G();
@@ -495,10 +515,10 @@ public partial class VehicleBody : RigidBody3D, IGridHost
 
         foreach (GunRt g in Guns)
         {
-            if (!g.Alive || g.Info.GunSection < 0) continue;
+            if (!g.Alive || g.Info.GunSection < 0 || !AimFor(g, out Vector3 aim)) continue;
             Transform3D parent = View.SectionGlobal(g.Info.Section);
             Vector3 pivot = parent * Conv.CellPos(g.Info.Breech);
-            Vector3 to = AimPoint - pivot;
+            Vector3 to = aim - pivot;
             var flat = new Vector3(to.X, 0, to.Z);
             float dist = flat.Length();
             float v = SelectedAmmo == AmmoType.AP ? g.Stats.MuzzleVelocity : g.Stats.HeVelocity;
@@ -527,34 +547,36 @@ public partial class VehicleBody : RigidBody3D, IGridHost
         return (pos, (gs.Basis * f).Normalized());
     }
 
-    /// <summary>Fires every gun that's loaded and has ammo. Returns how many fired.</summary>
-    public int FireReady()
+    /// <summary>Fires every gun the player is directing that's loaded and has ammo.</summary>
+    public int FirePlayerGuns()
     {
-        if (!DriverAlive || Combat.Instance == null) return 0;
         int fired = 0;
         foreach (GunRt g in Guns)
-        {
-            if (!g.Alive || g.ReloadLeft > 0 || g.Info.GunSection < 0) continue;
-            AmmoType type = SelectedAmmo;
-            if (Rounds(g, type) == 0) type = type == AmmoType.AP ? AmmoType.HE : AmmoType.AP;
-            if (!TakeRound(g, type)) continue;
-
-            (Vector3 muzzle, Vector3 dir) = Muzzle(g);
-            float spread = Mathf.DegToRad(g.Stats.SpreadDeg) * Mathf.Sqrt(_rng.Randf());
-            Vector3 side = dir.Cross(Mathf.Abs(dir.Y) > 0.9f ? Vector3.Right : Vector3.Up).Normalized();
-            dir = dir.Rotated(side, spread).Rotated(dir, _rng.RandfRange(0, Mathf.Tau)).Normalized();
-            float speed = type == AmmoType.AP ? g.Stats.MuzzleVelocity : g.Stats.HeVelocity;
-            Combat.Instance.Fire(this, muzzle, dir * speed + LinearVelocity, type, g.Stats, g.Info.BreechDef.Breech, PlayerControlled);
-
-            Vector3 breech = View.SectionGlobal(g.Info.GunSection) * Conv.CellPos(g.Info.Breech);
-            ApplyImpulse(-dir * g.Stats.RecoilImpulse, breech - GlobalPosition);
-            g.ReloadLeft = g.Stats.ReloadS;
-            Effects.MuzzleFlash(GetParent<Node3D>(), muzzle, dir, g.Stats.CaliberMm, g.HasBrake);
-            Fired?.Invoke(g);
-            fired++;
-        }
-
+            if (PlayerDirects(g) && FireGun(g, true)) fired++;
         return fired;
+    }
+
+    /// <summary>Fires one gun if it's loaded and has ammo.</summary>
+    public bool FireGun(GunRt g, bool byPlayer)
+    {
+        if (Combat.Instance == null || !g.Alive || g.ReloadLeft > 0 || g.Info.GunSection < 0) return false;
+        AmmoType type = SelectedAmmo;
+        if (Rounds(g, type) == 0) type = type == AmmoType.AP ? AmmoType.HE : AmmoType.AP;
+        if (!TakeRound(g, type)) return false;
+
+        (Vector3 muzzle, Vector3 dir) = Muzzle(g);
+        float spread = Mathf.DegToRad(g.Stats.SpreadDeg) * Mathf.Sqrt(_rng.Randf());
+        Vector3 side = dir.Cross(Mathf.Abs(dir.Y) > 0.9f ? Vector3.Right : Vector3.Up).Normalized();
+        dir = dir.Rotated(side, spread).Rotated(dir, _rng.RandfRange(0, Mathf.Tau)).Normalized();
+        float speed = type == AmmoType.AP ? g.Stats.MuzzleVelocity : g.Stats.HeVelocity;
+        Combat.Instance.Fire(this, muzzle, dir * speed + LinearVelocity, type, g.Stats, g.Info.BreechDef.Breech, byPlayer);
+
+        Vector3 breech = View.SectionGlobal(g.Info.GunSection) * Conv.CellPos(g.Info.Breech);
+        ApplyImpulse(-dir * g.Stats.RecoilImpulse, breech - GlobalPosition);
+        g.ReloadLeft = g.Stats.ReloadS;
+        Effects.MuzzleFlash(GetParent<Node3D>(), muzzle, dir, g.Stats.CaliberMm, g.HasBrake);
+        Fired?.Invoke(g);
+        return true;
     }
 
     public bool IsUpsideDownOrStuck => GlobalTransform.Basis.Y.Normalized().Dot(Vector3.Up) < 0.5f;

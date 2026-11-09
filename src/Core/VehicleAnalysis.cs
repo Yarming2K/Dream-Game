@@ -106,6 +106,12 @@ public sealed class VehicleAnalysis
     public List<GunInfo> Guns = new();
     public List<TurretInfo> Turrets = new();
     public List<WheelInfo> Wheels = new();
+    public List<SeatInfo> Seats = new();
+
+    /// <summary>For each gun (by index), the seat whose occupant aims and fires it.</summary>
+    public Dictionary<int, Int3> GunController = new();
+
+    public bool HasCommander;
     public HashSet<Int3> Disconnected = new();
     public List<DesignWarning> Warnings = new();
 
@@ -156,6 +162,7 @@ public sealed class VehicleAnalysis
         a.ComputeMobility();
         a.ComputeTurrets();
         a.ComputeArmor();
+        a.AssignCrew();
         a.CollectWarnings();
         return a;
     }
@@ -540,6 +547,33 @@ public sealed class VehicleAnalysis
             : new ArmorProfile { AvgMm = total / samples, MinMm = lowest, Samples = samples };
     }
 
+    /// <summary>
+    /// Works out who fires each gun: a gunner in the same turret if there is one, otherwise the nearest
+    /// gunner anywhere, otherwise the driver.
+    /// </summary>
+    private void AssignCrew()
+    {
+        foreach (Int3 c in Sorted(Defs.Keys))
+        {
+            SeatRole? role = Crew.RoleOf(Defs[c].Kind);
+            if (role == null || Disconnected.Contains(c)) continue;
+            Seats.Add(new SeatInfo { Cell = c, Role = role.Value, Section = SectionOf[c] });
+        }
+
+        HasCommander = Seats.Any(s => s.Role == SeatRole.Commander);
+        SeatInfo driver = Seats.FirstOrDefault(s => s.Role == SeatRole.Driver);
+        for (int i = 0; i < Guns.Count; i++)
+        {
+            GunInfo g = Guns[i];
+            if (!g.Valid) continue;
+            SeatInfo best = Seats.Where(s => s.Role == SeatRole.Gunner)
+                .OrderBy(s => s.Section == g.Section ? 0 : 1)
+                .ThenBy(s => (s.Cell - g.Breech).ManhattanLength)
+                .FirstOrDefault() ?? driver;
+            if (best != null) GunController[i] = best.Cell;
+        }
+    }
+
     private void CollectWarnings()
     {
         if (!HasDriver)
@@ -572,6 +606,10 @@ public sealed class VehicleAnalysis
                 Warnings.Add(new DesignWarning(Severity.Warning,
                     $"The {g.Label} gun's muzzle is blocked by a block right in front of it. It will shoot itself."));
         }
+
+        if (Guns.Any(g => g.Valid) && HasDriver && Seats.All(s => s.Role != SeatRole.Gunner))
+            Warnings.Add(new DesignWarning(Severity.Info,
+                "No gunner seat, so the driver aims the guns. Add a Gunner Seat and an AI gunner will shoot while you drive."));
 
         if (Disconnected.Count > 0)
             Warnings.Add(new DesignWarning(Severity.Warning,

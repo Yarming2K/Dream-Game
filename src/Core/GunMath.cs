@@ -1,4 +1,5 @@
 using System;
+using System.Numerics;
 
 namespace DreamGame.Core;
 
@@ -63,6 +64,21 @@ public static class GunMath
         speed <= 0 ? 0 : b.BasePenMm * MathF.Pow(speed / b.BaseVelocity, 1.2f);
 
     public static float SpeedAtRange(float v0, float dragK, float meters) => v0 * MathF.Exp(-dragK * meters);
+
+    /// <summary>
+    /// Where to aim to hit a moving target: where it will be when the shell arrives (a few refinement passes).
+    /// </summary>
+    public static Vector3 LeadTarget(Vector3 shooter, Vector3 target, Vector3 targetVelocity, float shellSpeed, int passes = 3)
+    {
+        Vector3 aim = target;
+        for (int i = 0; i < passes; i++)
+        {
+            float t = Vector3.Distance(shooter, aim) / MathF.Max(shellSpeed, 1f);
+            aim = target + targetVelocity * t;
+        }
+
+        return aim;
+    }
 
     /// <summary>
     /// Low-arc launch angle (radians above horizontal) to hit a point <paramref name="horizontal"/> meters away

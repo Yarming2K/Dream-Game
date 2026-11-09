@@ -326,6 +326,16 @@ public static class BlockVisuals
                 Add(root, Bevel(new Vector3(full, full, full)), mat, Vector3.Zero);
                 Add(root, Box(new Vector3(0.3f, 0.07f, 0.04f)), Glow(new Color(0.4f, 0.85f, 1f), 1.5f), new Vector3(0, 0.15f, -0.25f));
                 break;
+            case BlockKind.GunnerSeat:
+                Add(root, Bevel(new Vector3(full, full, full)), mat, Vector3.Zero);
+                Add(root, Box(new Vector3(0.12f, 0.1f, 0.06f)), Dark, new Vector3(0.08f, 0.16f, -0.25f));
+                Add(root, Box(new Vector3(0.05f, 0.04f, 0.02f)), Glow(new Color(1f, 0.35f, 0.25f), 2f), new Vector3(0.08f, 0.16f, -0.285f));
+                break;
+            case BlockKind.CommanderSeat:
+                Add(root, Bevel(new Vector3(full, full, full)), mat, Vector3.Zero);
+                Add(root, Cylinder(0.07f, 0.16f), Dark, new Vector3(0, 0.32f, 0));
+                Add(root, Box(new Vector3(0.12f, 0.04f, 0.03f)), Glow(new Color(0.4f, 0.85f, 1f), 1.5f), new Vector3(0, 0.36f, -0.07f));
+                break;
             case BlockKind.TurretRing:
                 Add(root, Cylinder(0.25f, full), mat, Vector3.Zero);
                 Add(root, Cylinder(0.2f, 0.04f), Dark, new Vector3(0, 0.25f, 0));

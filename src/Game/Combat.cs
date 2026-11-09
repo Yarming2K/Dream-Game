@@ -15,6 +15,9 @@ public struct CombatEvent
     public bool ByPlayer;
     public int BlocksHit;
     public int BlocksDestroyed;
+
+    /// <summary>Rifle-caliber hit (kept out of the hit feed, which would flood).</summary>
+    public bool Small;
 }
 
 /// <summary>
@@ -36,6 +39,10 @@ public partial class Combat : Node3D
         public bool HitSomething;
         public float Age;
         public TracerFx Tracer;
+        public CpuParticles3D Trail;
+        public float InfantryDamage;
+        public Rid Ignore;
+        public bool Small;
     }
 
     private struct PendingBlast
@@ -74,15 +81,23 @@ public partial class Combat : Node3D
         public int GetHashCode(OrderedHit h) => h.Block.GetHashCode();
     }
 
-    public void Fire(IGridHost owner, Vector3 pos, Vector3 vel, AmmoType type, in GunStats stats, BreechSpec breech, bool byPlayer)
+    /// <summary>
+    /// Launches a shell, bullet or rocket. <paramref name="ignore"/> is a body the shot can't hit (the shooter).
+    /// Rifle rounds only get a visible tracer when <paramref name="tracer"/> is set.
+    /// </summary>
+    public void Fire(IGridHost owner, Vector3 pos, Vector3 vel, AmmoType type, in GunStats stats, BreechSpec breech, bool byPlayer,
+        float infantryDamage = -1f, Rid ignore = default, bool tracer = true, bool rocket = false)
     {
         var shell = Shell.FromGun(stats, type, vel.Length(), breech);
         var p = new Projectile
         {
             Pos = pos, Vel = vel, Shell = shell, Breech = breech, ByPlayer = byPlayer,
             DragK = type == AmmoType.AP ? stats.DragK : stats.HeDragK,
+            InfantryDamage = infantryDamage >= 0 ? infantryDamage : InfantryDamage.FromShell(shell),
+            Ignore = ignore, Small = stats.CaliberMm < 20f,
         };
-        p.Tracer = Effects.Tracer(this, stats.CaliberMm, type);
+        if (rocket) p.Trail = Effects.RocketTrail(this, pos);
+        else if (tracer) p.Tracer = Effects.Tracer(this, stats.CaliberMm, type);
         _shells.Add(p);
     }
 
@@ -102,13 +117,15 @@ public partial class Combat : Node3D
             if (!done)
             {
                 p.Pos = to;
-                Effects.UpdateTracer(p.Tracer, from, to);
+                if (p.Tracer != null) Effects.UpdateTracer(p.Tracer, from, to);
+                Effects.Follow(p.Trail, to);
                 if (p.Age > 8f || to.Y < -100f) done = true;
             }
 
             if (done)
             {
                 Effects.EndTracer(p.Tracer);
+                Effects.StopTrail(p.Trail);
                 _shells.RemoveAt(i);
             }
         }
@@ -135,7 +152,31 @@ public partial class Combat : Node3D
             terrainT = from.DistanceTo(terrainPos);
         }
 
-        CollectGridHits(from, dir, Mathf.Min(len, terrainT));
+        // People and practice targets.
+        float bodyT = float.PositiveInfinity;
+        IHittable body = null;
+        Vector3 bodyPos = Vector3.Zero;
+        var bodyQuery = PhysicsRayQueryParameters3D.Create(from, to, GridRegistry.Layers.Characters | GridRegistry.Layers.Targets);
+        if (p.Ignore.IsValid) bodyQuery.Exclude = new Godot.Collections.Array<Rid> { p.Ignore };
+        Godot.Collections.Dictionary bodyHit = GetWorld3D().DirectSpaceState.IntersectRay(bodyQuery);
+        if (bodyHit.Count > 0 && bodyHit["collider"].AsGodotObject() is IHittable h)
+        {
+            bodyPos = bodyHit["position"].AsVector3();
+            float t = from.DistanceTo(bodyPos);
+            if (t < terrainT)
+            {
+                bodyT = t;
+                body = h;
+            }
+        }
+
+        CollectGridHits(from, dir, Mathf.Min(len, Mathf.Min(terrainT, bodyT)));
+        if (_hits.Count == 0 && body != null)
+        {
+            if (p.Shell.Type == AmmoType.HE) Explode(bodyPos, p.Shell.HeRadiusM, p.Shell.HeDamage, p.ByPlayer, "HE");
+            body.TakeHit(p.InfantryDamage, bodyPos, dir, p.ByPlayer);
+            return true;
+        }
 
         if (p.Shell.Type == AmmoType.AP)
         {
@@ -151,11 +192,12 @@ public partial class Combat : Node3D
                     Vector3 at = _hitPoints[first];
                     var firstHost = (IGridHost)first.Owner;
                     Node3D surface = IsInstanceValid(firstHost.Body) ? firstHost.View.SectionNode(first.Block.Section) : null;
-                    Effects.Impact(this, at, _hitNormals[first], dir, reports[0].Kind, p.Shell.CaliberMm, surface);
+                    if (p.Small) Effects.BulletImpact(this, at, _hitNormals[first], dir, true, surface);
+                    else Effects.Impact(this, at, _hitNormals[first], dir, reports[0].Kind, p.Shell.CaliberMm, surface);
                     Event?.Invoke(new CombatEvent
                     {
                         Report = reports[0], Position = at, ByPlayer = p.ByPlayer, BlocksHit = reports.Count,
-                        BlocksDestroyed = damaged.Count(d => d.Item2),
+                        BlocksDestroyed = damaged.Count(d => d.Item2), Small = p.Small,
                     });
                 }
 
@@ -165,7 +207,8 @@ public partial class Combat : Node3D
 
             if (terrainT < float.PositiveInfinity)
             {
-                Effects.Dirt(this, terrainPos, terrainNormal, p.Shell.CaliberMm);
+                if (p.Small) Effects.BulletImpact(this, terrainPos, terrainNormal, dir, false, null);
+                else Effects.Dirt(this, terrainPos, terrainNormal, p.Shell.CaliberMm);
                 return true;
             }
 
@@ -260,6 +303,13 @@ public partial class Combat : Node3D
                 Vector3 away = (rb.GlobalPosition - center).Normalized();
                 rb.ApplyImpulse(away * Mathf.Min(damage * 6f, rb.Mass * 3f), center - rb.GlobalPosition);
             }
+        }
+
+        // People and targets caught in the blast.
+        foreach (IBlastable b in Hittables.Blastables.ToArray())
+        {
+            float dmg = InfantryDamage.FromBlast(b.BlastCenter.DistanceTo(center), radius, damage);
+            if (dmg > 0) b.TakeBlast(dmg, center, byPlayer);
         }
 
         if (hurtCount > 0)

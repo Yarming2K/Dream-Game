@@ -315,6 +315,109 @@ public static class Synth
         return b;
     }
 
+    /// <summary>A rifle shot: sharp crack, short bark, a little echo.</summary>
+    public static float[] Rifle(uint seed = 12)
+    {
+        var r = new Rng(seed);
+        float[] b = Buffer(1.0f);
+        Noise(b, r, 0, 0.0002f, 0.003f, 2000, 15000, 1.0f);
+        Noise(b, r, 0, 0.0005f, 0.035f, 200, 4500, 0.95f);
+        Sweep(b, 0, 170, 70, 0.03f, 0.001f, 0.03f, 0.6f);
+        Noise(b, r, 0.005f, 0.01f, 0.18f, 100, 1200, 0.25f);
+        Echo(b, 0.19f, 0.2f, 1500);
+        return Finish(b, 1.7f);
+    }
+
+    /// <summary>A rocket leaving the tube: thump and a long whoosh.</summary>
+    public static float[] RocketLaunch(uint seed = 13)
+    {
+        var r = new Rng(seed);
+        float[] b = Buffer(1.8f);
+        Sweep(b, 0, 95, 40, 0.1f, 0.002f, 0.1f, 0.9f);
+        Noise(b, r, 0, 0.03f, 0.5f, 300, 5000, 0.9f);
+        Noise(b, r, 0, 0.01f, 0.35f, 2000, 12000, 0.35f);
+        Echo(b, 0.24f, 0.15f, 1000);
+        return Finish(b, 1.5f);
+    }
+
+    /// <summary>A bullet pinging off steel.</summary>
+    public static float[] BulletMetal(uint seed = 14)
+    {
+        var r = new Rng(seed);
+        float[] b = Buffer(0.3f);
+        Noise(b, r, 0, 0.0002f, 0.002f, 2500, 15000, 0.8f);
+        Ring(b, 0, 2130 * (1f + 0.05f * r.Next()), 0.05f, 0.3f);
+        Ring(b, 0, 3790, 0.03f, 0.2f);
+        Ring(b, 0, 5230, 0.02f, 0.12f);
+        return Finish(b, 1.2f, 0.7f);
+    }
+
+    /// <summary>A bullet thudding into dirt.</summary>
+    public static float[] BulletDirt(uint seed = 15)
+    {
+        var r = new Rng(seed);
+        float[] b = Buffer(0.25f);
+        Noise(b, r, 0, 0.0005f, 0.02f, 200, 3000, 0.9f);
+        Sweep(b, 0, 140, 80, 0.02f, 0.001f, 0.02f, 0.4f);
+        return Finish(b, 1.2f, 0.6f);
+    }
+
+    /// <summary>A boot on gravel. Different seeds give different steps.</summary>
+    public static float[] Footstep(uint seed)
+    {
+        var r = new Rng(seed);
+        float[] b = Buffer(0.2f);
+        Noise(b, r, 0, 0.002f, 0.025f, 100, 2500, 0.8f);
+        Sweep(b, 0, 90, 60, 0.02f, 0.001f, 0.02f, 0.5f);
+        for (int i = 0; i < 6; i++) Noise(b, r, r.Unit() * 0.06f, 0.0003f, 0.004f, 1500, 8000, 0.15f);
+        return Finish(b, 1.2f, 0.55f);
+    }
+
+    /// <summary>Getting hit: a heavy thud.</summary>
+    public static float[] Hurt(uint seed = 16)
+    {
+        var r = new Rng(seed);
+        float[] b = Buffer(0.35f);
+        Sweep(b, 0, 120, 60, 0.06f, 0.002f, 0.06f, 1f);
+        Noise(b, r, 0, 0.001f, 0.05f, 80, 800, 0.6f);
+        return Finish(b, 1.4f, 0.8f);
+    }
+
+    /// <summary>A seamless one-second welding loop: crackling arc and hiss.</summary>
+    public static float[] WeldLoop(uint seed = 17)
+    {
+        var r = new Rng(seed);
+        int n = Rate;
+        var b = new float[n];
+        var hissLp = new OnePole(9000);
+        var hissHp = new OnePole(2500);
+        var noise = new float[n];
+        for (int i = 0; i < n; i++) noise[i] = r.Next();
+        for (int pass = 0; pass < 2; pass++)
+            for (int i = 0; i < n; i++)
+            {
+                float x = hissLp.Low(noise[i]);
+                x -= hissHp.Low(x);
+                if (pass == 1) b[i] = x * 0.35f + MathF.Sin(MathF.Tau * 120f * i / Rate) * 0.04f;
+            }
+
+        // Crackle: short bursts written around the loop so they wrap cleanly.
+        for (int k = 0; k < 140; k++)
+        {
+            int start = (int)(r.Unit() * n);
+            float amp = 0.2f + 0.5f * r.Unit() * r.Unit();
+            int len = (int)(0.004f * Rate);
+            var lp = new OnePole(7000);
+            for (int i = 0; i < len; i++)
+                b[(start + i) % n] += lp.Low(r.Next()) * amp * MathF.Exp(-i / (0.0012f * Rate));
+        }
+
+        float max = 1e-6f;
+        foreach (float v in b) max = MathF.Max(max, MathF.Abs(v));
+        for (int i = 0; i < n; i++) b[i] = MathF.Tanh(b[i] / max * 1.3f) * 0.6f;
+        return b;
+    }
+
     /// <summary>Converts to 16-bit little-endian PCM.</summary>
     public static byte[] ToPcm16(float[] samples)
     {

@@ -13,6 +13,8 @@ public enum BlockKind
     SteerWheel,
     Track,
     DriverSeat,
+    GunnerSeat,
+    CommanderSeat,
     Breech,
     Barrel,
     MuzzleBrake,
@@ -101,6 +103,7 @@ public sealed class BlockDef
     public bool IsArmorLike => Kind == BlockKind.Armor || Kind == BlockKind.Frame;
     public bool ConductsAmmo => Kind == BlockKind.AmmoRack || Kind == BlockKind.AmmoFeed || Kind == BlockKind.TurretRing;
     public bool IsWheelLike => Kind == BlockKind.Wheel || Kind == BlockKind.SteerWheel || Kind == BlockKind.Track;
+    public bool IsSeat => Kind == BlockKind.DriverSeat || Kind == BlockKind.GunnerSeat || Kind == BlockKind.CommanderSeat;
 }
 
 public static class BlockCatalog
@@ -222,6 +225,20 @@ public static class BlockCatalog
             Id = "driver_seat", Name = "Driver Seat", Category = "Control", Kind = BlockKind.DriverSeat,
             Description = "Where you drive from. Every vehicle needs one. If it's destroyed, the vehicle is knocked out.",
             MassKg = 90, Hp = 80, ArmorMm = 5, ColorR = 0.2f, ColorG = 0.32f, ColorB = 0.5f,
+            Metallic = 0.3f, Roughness = 0.6f,
+        },
+        new BlockDef
+        {
+            Id = "gunner_seat", Name = "Gunner Seat", Category = "Control", Kind = BlockKind.GunnerSeat,
+            Description = "Whoever sits here aims and fires the guns in the same turret (or the hull guns, if it's in the hull). Empty seats get an AI crew member, so you can drive while your gunner shoots.",
+            MassKg = 90, Hp = 80, ArmorMm = 5, ColorR = 0.42f, ColorG = 0.26f, ColorB = 0.2f,
+            Metallic = 0.3f, Roughness = 0.6f,
+        },
+        new BlockDef
+        {
+            Id = "commander_seat", Name = "Commander Seat", Category = "Control", Kind = BlockKind.CommanderSeat,
+            Description = "A periscope with strong zoom. A commander spots targets, so AI gunners find and track them much faster.",
+            MassKg = 90, Hp = 80, ArmorMm = 5, ColorR = 0.24f, ColorG = 0.38f, ColorB = 0.3f,
             Metallic = 0.3f, Roughness = 0.6f,
         },
         new BlockDef

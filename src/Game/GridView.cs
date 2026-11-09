@@ -43,6 +43,12 @@ public sealed class GridView
         foreach (BlockInstance b in model.Blocks.Values) AddNodes(b);
     }
 
+    /// <summary>Puts a block that was added after spawning (welded back on) on screen and into physics.</summary>
+    public void AddBlock(BlockInstance b)
+    {
+        if (!_nodes.ContainsKey(b)) AddNodes(b);
+    }
+
     private void AddNodes(BlockInstance b)
     {
         float caliber = _caliberOf?.Invoke(b.Cell) ?? 76f;

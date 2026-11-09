@@ -22,6 +22,15 @@ public enum SoundId
     Error,
     Reload,
     Engine,
+    Rifle,
+    RocketLaunch,
+    BulletMetal,
+    BulletDirt,
+    Step1,
+    Step2,
+    Step3,
+    Hurt,
+    Weld,
 }
 
 /// <summary>Generates, caches and plays sound effects, and sets up the audio buses (outdoor reverb, limiter).</summary>
@@ -76,6 +85,15 @@ public static class Sfx
             SoundId.Error => Synth.Error(),
             SoundId.Reload => Synth.Reload(),
             SoundId.Engine => Synth.EngineLoop(),
+            SoundId.Rifle => Synth.Rifle(),
+            SoundId.RocketLaunch => Synth.RocketLaunch(),
+            SoundId.BulletMetal => Synth.BulletMetal(),
+            SoundId.BulletDirt => Synth.BulletDirt(),
+            SoundId.Step1 => Synth.Footstep(41),
+            SoundId.Step2 => Synth.Footstep(42),
+            SoundId.Step3 => Synth.Footstep(43),
+            SoundId.Hurt => Synth.Hurt(),
+            SoundId.Weld => Synth.WeldLoop(),
             _ => Synth.Tick(),
         };
 
@@ -86,7 +104,7 @@ public static class Sfx
             MixRate = Synth.Rate,
             Stereo = false,
         };
-        if (id == SoundId.Engine)
+        if (id == SoundId.Engine || id == SoundId.Weld)
         {
             s.LoopMode = AudioStreamWav.LoopModeEnum.Forward;
             s.LoopBegin = 0;

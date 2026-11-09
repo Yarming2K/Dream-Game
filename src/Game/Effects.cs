@@ -533,6 +533,124 @@ public static class Effects
         };
     }
 
+    // ---------- Small arms ----------
+
+    public static void RifleFlash(Node3D world, Vector3 pos, Vector3 dir)
+    {
+        FxNode fx = Spawn(world, pos, 1.2f);
+        Flash(fx, new Color(1f, 0.8f, 0.5f), 0.55f, 0.04f, dir * 0.08f);
+        Light(fx, new Color(1f, 0.75f, 0.45f), 2.5f, 4f, 0.05f);
+        Emit(fx, new Burst
+        {
+            Mat = Smoke, Size = 0.25f, Amount = 3, Life = 0.9f, Dir = dir, Spread = 20, VelMin = 0.6f, VelMax = 1.6f,
+            DampMin = 1, DampMax = 2, Gravity = new Vector3(0, 0.4f, 0), Colors = GunSmoke, ScaleFrom = 0.3f,
+        });
+    }
+
+    /// <summary>A bullet striking metal (sparks, ping) or dirt (puff, thud).</summary>
+    public static void BulletImpact(Node3D world, Vector3 pos, Vector3 normal, Vector3 dir, bool metal, Node3D surface)
+    {
+        FxNode fx = Spawn(world, pos, 1.5f);
+        if (metal)
+        {
+            Emit(fx, new Burst
+            {
+                Mat = Sparks, Size = 0.06f, Amount = 10, Life = 0.35f, Dir = Reflect(dir, normal), Spread = 35,
+                VelMin = 4, VelMax = 12, Colors = SparkRamp, ScaleFrom = 1f, ScaleTo = 0.3f,
+            });
+            Decals.Place(surface != null && GodotObject.IsInstanceValid(surface) ? surface : world, pos, normal,
+                FxTextures.Scuff, 0.1f, 0.15f, null, 30f);
+            Sfx.At(world, pos, SoundId.BulletMetal, -8f, Rng.RandfRange(0.85f, 1.2f), 8f);
+        }
+        else
+        {
+            Emit(fx, new Burst
+            {
+                Mat = Smoke, Size = 0.1f, Amount = 7, Life = 0.6f, Dir = normal, Spread = 30, VelMin = 2, VelMax = 5,
+                Gravity = new Vector3(0, -12f, 0), Colors = ClodRamp, ScaleFrom = 0.8f, ScaleTo = 0.6f,
+            });
+            Emit(fx, new Burst
+            {
+                Mat = Smoke, Size = 0.5f, Amount = 3, Life = 1.2f, Dir = normal, Spread = 40, VelMin = 0.5f, VelMax = 1.5f,
+                DampMin = 1, DampMax = 2, Gravity = new Vector3(0, 0.2f, 0), Colors = DustRamp, ScaleFrom = 0.3f,
+            });
+            Sfx.At(world, pos, SoundId.BulletDirt, -8f, Rng.RandfRange(0.85f, 1.15f), 7f);
+        }
+    }
+
+    /// <summary>The blast out of the back of a rocket launcher.</summary>
+    public static void Backblast(Node3D world, Vector3 pos, Vector3 forward)
+    {
+        FxNode fx = Spawn(world, pos, 3f);
+        Emit(fx, new Burst
+        {
+            Mat = Fire, Size = 0.6f, Amount = 8, Life = 0.15f, Dir = -forward, Spread = 15, VelMin = 10, VelMax = 22,
+            DampMin = 90, DampMax = 120, Gravity = Vector3.Zero, Colors = FireRamp,
+        });
+        Emit(fx, new Burst
+        {
+            Mat = Smoke, Size = 1.4f, Amount = 14, Life = 2.4f, Dir = -forward, Spread = 25, VelMin = 4, VelMax = 12,
+            DampMin = 4, DampMax = 6, Gravity = new Vector3(0, 0.4f, 0), Colors = GunSmoke, ScaleFrom = 0.3f,
+        });
+        Light(fx, new Color(1f, 0.7f, 0.4f), 5f, 6f, 0.08f);
+        Sfx.At(world, pos, SoundId.RocketLaunch, 0f, Rng.RandfRange(0.95f, 1.05f), 16f, delayByDistance: false);
+    }
+
+    /// <summary>A smoke trail that follows a rocket. Move it with <see cref="Follow"/>; stop it with <see cref="StopTrail"/>.</summary>
+    public static CpuParticles3D RocketTrail(Node3D world, Vector3 pos)
+    {
+        var scale = new Curve();
+        scale.AddPoint(new Vector2(0, 0.35f));
+        scale.AddPoint(new Vector2(1, 1f));
+        var p = new CpuParticles3D
+        {
+            Amount = 80, Lifetime = 1.6, Explosiveness = 0f, Direction = Vector3.Up, Spread = 180, InitialVelocityMin = 0.2f,
+            InitialVelocityMax = 0.8f, Gravity = new Vector3(0, 0.35f, 0), ScaleAmountMin = 0.5f, ScaleAmountMax = 0.8f,
+            ScaleAmountCurve = scale, ColorRamp = GunSmoke, AngleMin = 0, AngleMax = 360,
+            Mesh = new QuadMesh { Size = Vector2.One, Material = Smoke }, Emitting = true, LocalCoords = false,
+        };
+        world.AddChild(p);
+        p.GlobalPosition = pos;
+        var flame = new MeshInstance3D
+        {
+            Mesh = new QuadMesh { Size = Vector2.One }, MaterialOverride = SpriteMat(FxTextures.Flare, new Color(1f, 0.7f, 0.35f)),
+            Scale = Vector3.One * 0.9f, CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
+        };
+        p.AddChild(flame);
+        var light = new OmniLight3D { LightColor = new Color(1f, 0.65f, 0.35f), LightEnergy = 2f, OmniRange = 5f };
+        p.AddChild(light);
+        return p;
+    }
+
+    public static void Follow(CpuParticles3D trail, Vector3 pos)
+    {
+        if (trail != null && GodotObject.IsInstanceValid(trail)) trail.GlobalPosition = pos;
+    }
+
+    public static void StopTrail(CpuParticles3D trail)
+    {
+        if (trail == null || !GodotObject.IsInstanceValid(trail)) return;
+        trail.Emitting = false;
+        foreach (Node c in trail.GetChildren()) c.QueueFree();
+        trail.GetTree().CreateTimer(2.0).Timeout += () =>
+        {
+            if (GodotObject.IsInstanceValid(trail)) trail.QueueFree();
+        };
+    }
+
+    /// <summary>A handful of welding sparks and a flicker of blue-white light. Called repeatedly while welding.</summary>
+    public static void WeldSparks(Node3D world, Vector3 pos, Vector3 normal)
+    {
+        FxNode fx = Spawn(world, pos, 0.8f);
+        Emit(fx, new Burst
+        {
+            Mat = Sparks, Size = 0.05f, Amount = 8, Life = 0.45f, Dir = normal, Spread = 70, VelMin = 1.5f, VelMax = 5f,
+            Colors = SparkRamp, ScaleFrom = 1f, ScaleTo = 0.3f,
+        });
+        Flash(fx, new Color(0.7f, 0.85f, 1f), 0.35f, 0.05f);
+        Light(fx, new Color(0.7f, 0.85f, 1f), 3f + Rng.Randf() * 2f, 4f, 0.08f, flicker: true);
+    }
+
     /// <summary>Chunks flying off a destroyed block.</summary>
     public static void Shatter(Node3D world, Vector3 pos, BlockDef def, Vector3 velocity, Vector3 away)
     {

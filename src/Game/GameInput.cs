@@ -20,6 +20,9 @@ public static class GameInput
         AddKeys("reset_targets", Key.T);
         AddKeys("to_builder", Key.Tab);
         AddKeys("help", Key.F1);
+        AddKeys("interact", Key.E);
+        AddKeys("live_fire", Key.L);
+        AddKeys("gunner_mode", Key.G);
     }
 
     private static void AddKeys(string action, params Key[] keys)

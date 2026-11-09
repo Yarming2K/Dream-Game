@@ -47,6 +47,12 @@ public static class GridRegistry
         /// <summary>Little chunks from destroyed blocks. Shells, wheels and the camera ignore them.</summary>
         public const uint Fragments = 16;
 
+        /// <summary>People (the player, later soldiers).</summary>
+        public const uint Characters = 32;
+
+        /// <summary>Pop-up practice targets.</summary>
+        public const uint Targets = 64;
+
         public const uint All = World | Vehicles | Structures | Debris;
     }
 }

@@ -30,7 +30,7 @@ public static class ExampleDesigns
 
     public static IReadOnlyList<Blueprint> All => new[] { Warden(), Jackal(), Bulwark() };
 
-    /// <summary>Medium tank: sloped front, 76 mm gun in a turret, ammo stored low in the hull.</summary>
+    /// <summary>Medium tank: sloped front, 76 mm gun in a turret with a gunner and commander, ammo stored low in the hull.</summary>
     public static Blueprint Warden()
     {
         var d = new Draft();
@@ -77,6 +77,8 @@ public static class ExampleDesigns
         d.Set(-1, 3, -1, "loader");
         d.Set(1, 3, -1, "loader");
         d.Set(0, 3, 0, "propellant");
+        d.Set(1, 3, 0, "gunner_seat");
+        d.Set(-1, 3, 0, "commander_seat");
         d.Fill(-2, 2, 3, 3, -3, -2, "armor_heavy");
         d.Fill(-2, -2, 3, 3, -1, 1, "armor_heavy");
         d.Fill(2, 2, 3, 3, -1, 1, "armor_heavy");
@@ -87,7 +89,7 @@ public static class ExampleDesigns
         return d.Build("Warden (medium tank)");
     }
 
-    /// <summary>Fast wheeled scout with a small 37 mm turret.</summary>
+    /// <summary>Fast wheeled scout with a small 37 mm turret. No gunner seat: the driver aims.</summary>
     public static Blueprint Jackal()
     {
         var d = new Draft();
@@ -160,6 +162,8 @@ public static class ExampleDesigns
         d.Set(1, 2, -2, "loader");
         d.Set(0, 3, -2, "loader");
         d.Set(0, 2, -1, "propellant");
+        d.Set(-2, 2, -3, "gunner_seat");
+        d.Set(2, 2, -3, "commander_seat");
 
         d.Fill(-2, 2, 0, 0, -6, -6, "armor_heavy");
         d.Fill(-3, 3, 1, 1, -6, -6, "armor_heavy_slope");

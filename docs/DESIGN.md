@@ -81,6 +81,19 @@ Guns inside a turret group traverse (turn left and right); every gun elevates.
 - When blocks are destroyed, the grid checks what's still connected. Pieces cut off from the main body become separate physics debris.
 - Losing key blocks has effects: no driver means the vehicle is disabled, no engine means no power, and a destroyed ammo rack can cook off.
 
+### Crew
+- Three seat types: **Driver** (drives), **Gunner** (aims and fires the guns in its turret, or hull guns from the hull) and **Commander** (high-zoom periscope; AI gunners lock on faster and steadier with a commander aboard).
+- Each gun is fired by a gunner in the same turret, otherwise the nearest gunner anywhere, otherwise the driver. A design with only a driver seat still works: the driver aims everything.
+- Every seat starts with an AI crew member. The player takes over a seat (1/2/3 switch seats). With the player aboard, the AI gunner **follows the player's aim** by default; **weapons free** (G) lets it pick its own targets.
+- AI gunners pick the nearest visible enemy (vehicles first, people if much closer), lead moving targets, start a little off and settle in, and choose AP for vehicles, HE for people.
+- A destroyed seat takes its crew member with it. If it's the player's seat, the player dies.
+
+### On foot
+- **First person.** It gives a proper shooter feel without needing an animated character model yet.
+- Weapons: **battle rifle** (automatic, lethal to people, sparks off armor) and **AT rocket** (slow, drops, about 280 mm shaped charge that blows up inside). Both use the same shells and damage rules as vehicle guns. Customizable infantry weapons come later, built from parts like vehicle guns are.
+- **Welding torch:** repairs damaged blocks and rebuilds destroyed ones exactly as designed (shown as blue outlines while the torch is out). A block can only be rebuilt where it attaches to something, so you rebuild from the inside out. Rebuilt ammo racks start empty.
+- **Supply points** rearm and refuel parked vehicles, and heal and restock people. This is the seed of the logistics network.
+
 ### Mobility
 - Wheels and track segments both use raycast suspension. Wheels steer; tracks skid-steer.
 - Engine power and vehicle mass set acceleration and top speed.
@@ -98,14 +111,18 @@ Guns inside a turret group traverse (turn left and right); every gun elevates.
 
 Each milestone is playable on its own.
 
-1. **Builder + test range** *(built; being playtested)*
+1. **Builder + test range** *(built; polish pass done after the first playtest)*
    - Block-by-block builder: about 25 blocks, mirror mode, live stats and warnings, save and load.
    - Guns built from components; turrets.
    - Drive with real mass and recoil.
    - Block-by-block damage and break-off debris.
    - A test range with target structures, range markers and hit feedback (penetration vs. armor).
    - Example designs.
-2. **On foot + crew:** walk around, enter and leave seats, AI crew, infantry weapons, welding and repair by hand. First co-op test.
+2. **On foot + crew** *(built; being playtested)*
+   - First-person on foot: move, sprint, jump, rifle, AT rocket, welding torch.
+   - Gunner and commander seats; get in and out and switch seats; AI crew that follows your aim or fights on its own.
+   - Field repair and rebuild by hand; supply pad; pop-up targets; live fire (the range's parked vehicles shoot back).
+   - Not yet: the first co-op test. Controls already go through plain data (`VehicleControls`), so remote players can plug into the same path. That's next, along with enemy soldiers on foot.
 3. **Terrain + industry:** deformable terrain, mining, machines you design, conveyors, power, assembly bays that print blueprints.
 4. **Planet war:** a generated planet, a rival faction that designs its own vehicles, territory, the supply network, research, salvage, captured sites, simplified far-off battles.
 5. **Space:** the system map, capital ships, orbital strikes, landings, scouting, supply between planets.
