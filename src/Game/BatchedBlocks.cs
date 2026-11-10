@@ -35,6 +35,51 @@ public partial class BatchedBlocks : Node3D
 
     private Livery _livery;
     private float? _waterline;
+    private bool _armorView;
+
+    /// <summary>
+    /// Armor view: every block colored by how thick its armor is (grey for parts that aren't armor), so
+    /// thin spots stand out.
+    /// </summary>
+    public bool ArmorView
+    {
+        get => _armorView;
+        set
+        {
+            if (value == _armorView) return;
+            _armorView = value;
+            foreach (Int3 key in _chunks.Keys) _dirty.Add(key);
+        }
+    }
+
+    /// <summary>The armor view's color for a thickness (the legend uses the same).</summary>
+    public static Color ArmorColor(float mm)
+    {
+        (float at, Color c)[] stops =
+        {
+            (0f, new Color(0.3f, 0.3f, 0.32f)), (25f, new Color(0.25f, 0.5f, 0.95f)), (50f, new Color(0.3f, 0.8f, 0.45f)),
+            (80f, new Color(0.95f, 0.82f, 0.25f)), (110f, new Color(1f, 0.5f, 0.15f)), (200f, new Color(0.9f, 0.15f, 0.15f)),
+        };
+        if (mm <= 0) return stops[0].c;
+        for (int i = 1; i < stops.Length; i++)
+            if (mm <= stops[i].at) return stops[i - 1].c.Lerp(stops[i].c, (mm - stops[i - 1].at) / (stops[i].at - stops[i - 1].at));
+        return stops[^1].c;
+    }
+
+    private static readonly Dictionary<string, StandardMaterial3D> ArmorMats = new();
+
+    private static StandardMaterial3D ArmorMaterial(BlockDef def, bool plating)
+    {
+        string key = $"{def.Id}:{plating}";
+        if (ArmorMats.TryGetValue(key, out StandardMaterial3D m)) return m;
+        Color c = def.IsArmorLike ? ArmorColor(def.ArmorMm) : new Color(0.24f, 0.24f, 0.25f);
+        m = new StandardMaterial3D
+        {
+            AlbedoColor = c, Roughness = 0.7f, Metallic = 0.1f, VertexColorUseAsAlbedo = plating,
+            CullMode = plating ? BaseMaterial3D.CullModeEnum.Back : BaseMaterial3D.CullModeEnum.Disabled,
+        };
+        return ArmorMats[key] = m;
+    }
 
     /// <summary>Shows the design in a paint job (null or factory for the blocks' own colors); for ships, with the ship rules at <paramref name="waterline"/>.</summary>
     public void SetPaint(Livery livery, float? waterline)
@@ -195,7 +240,8 @@ public partial class BatchedBlocks : Node3D
             Transform3D at = Conv.BlockTransform(a, e.Orientation);
             void AddPart(Mesh mesh, Material own, Transform3D local, Paint finish)
             {
-                Material mat = _livery != null && Liveries.Paints(e.Def, finish) ? Paintwork.Part(e.Def, _livery, finish == Paint.SelfDark, _waterline) : own;
+                Material mat = _armorView ? ArmorMaterial(e.Def, false)
+                    : _livery != null && Liveries.Paints(e.Def, finish) ? Paintwork.Part(e.Def, _livery, finish == Paint.SelfDark, _waterline) : own;
                 var gk = (mesh, mat, e.Tinted);
                 if (!groups.TryGetValue(gk, out List<Transform3D> list)) groups[gk] = list = new List<Transform3D>();
                 list.Add(at * local);
@@ -232,7 +278,8 @@ public partial class BatchedBlocks : Node3D
         {
             if (s.Indices.Count == 0) continue;
             BlockDef def = _surfaceDefs[mat];
-            Material m = def.Glass ? Paintwork.Glass(def, _livery, plating: true)
+            Material m = _armorView ? ArmorMaterial(def, true)
+                : def.Glass ? Paintwork.Glass(def, _livery, plating: true)
                 : _livery != null ? Paintwork.Plating(def, _livery, _waterline) : BlockVisuals.SurfaceMaterial(def);
             var hull = new MeshInstance3D { Mesh = BlockVisuals.HullMesh(s), MaterialOverride = m };
             node.AddChild(hull);

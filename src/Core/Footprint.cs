@@ -51,6 +51,18 @@ public static class Footprint
         anchor.ToVector3() + Orientations.Apply(orientation, LocalCenter(def));
 
     /// <summary>How many cells the block reaches from its anchor in world direction <paramref name="dir"/> (0 for a single cell).</summary>
+    /// <summary>The anchor of a block's mirror image across X = 0 (big blocks with an even size need nudging to land exactly).</summary>
+    public static Int3 MirrorAnchor(BlockDef def, Int3 anchor, int o)
+    {
+        var m = new Int3(-anchor.X, anchor.Y, anchor.Z);
+        if (!def.IsMultiCell) return m;
+        int mo = Orientations.MirrorX(o);
+        int want = int.MaxValue, have = int.MaxValue;
+        foreach (Int3 c in Cells(def, anchor, o)) want = System.Math.Min(want, -c.X);
+        foreach (Int3 c in Cells(def, m, mo)) have = System.Math.Min(have, c.X);
+        return m + new Int3(want - have, 0, 0);
+    }
+
     public static int Reach(BlockDef def, int orientation, Int3 dir)
     {
         int best = 0;

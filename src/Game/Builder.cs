@@ -45,9 +45,23 @@ public partial class Builder : Node3D
         Fill,
         Hollow,
         Clear,
+
+        /// <summary>Drag out a box to copy what's in it (then paste it anywhere, turned or flipped).</summary>
+        Copy,
     }
 
     private BoxMode _boxMode;
+
+    // Copy and paste: the clipboard, and whether clicks place it.
+    private Clip _clip;
+    private bool _pasting;
+    private Node3D _clipGhost;
+    private bool _clipGhostOk = true;
+    private Button _savePartButton;
+    private Button _armorButton;
+    private PanelContainer _armorLegend;
+    private const string PartsDir = "user://blueprints/parts";
+    private const int MaxGhostBlocks = 500;
     private bool _boxActive;
     private Int3 _boxStart, _boxEnd;
     private int _boxLift;
@@ -307,16 +321,7 @@ public partial class Builder : Node3D
     }
 
     /// <summary>The anchor of the mirror image of a block (big blocks with an even size need nudging to land exactly).</summary>
-    private static Int3 MirrorAnchor(BlockDef def, Int3 anchor, int o)
-    {
-        var m = new Int3(-anchor.X, anchor.Y, anchor.Z);
-        if (!def.IsMultiCell) return m;
-        int mo = Orientations.MirrorX(o);
-        int want = int.MaxValue, have = int.MaxValue;
-        foreach (Int3 c in Footprint.Cells(def, anchor, o)) want = Math.Min(want, -c.X);
-        foreach (Int3 c in Footprint.Cells(def, m, mo)) have = Math.Min(have, c.X);
-        return m + new Int3(want - have, 0, 0);
-    }
+    private static Int3 MirrorAnchor(BlockDef def, Int3 anchor, int o) => Footprint.MirrorAnchor(def, anchor, o);
 
     private bool Place(Int3 anchor, List<Change> into)
     {
@@ -547,6 +552,9 @@ public partial class Builder : Node3D
             case MouseButton.WheelDown when mb.Pressed:
                 _goalDist = Mathf.Clamp(_goalDist * 1.12f, 3f, 700f);
                 break;
+            case MouseButton.Left when _pasting && _boxMode == BoxMode.Off:
+                if (mb.Pressed && !OverUi()) PasteHere();
+                break;
             case MouseButton.Left when _boxMode != BoxMode.Off:
                 if (mb.Pressed && BoxCorner(out Int3 corner))
                 {
@@ -596,7 +604,9 @@ public partial class Builder : Node3D
                 else if (_rmbDown)
                 {
                     _rmbDown = false;
-                    if (!_dragged && PickCell(out Int3 removeCell, out _, out bool onBlockR) && onBlockR) Remove(removeCell);
+                    // While pasting, a right click (not a drag to turn the camera) stops pasting instead of removing.
+                    if (_pasting && !_dragged) StopPaste();
+                    else if (!_dragged && PickCell(out Int3 removeCell, out _, out bool onBlockR) && onBlockR) Remove(removeCell);
                 }
 
                 break;
@@ -653,8 +663,38 @@ public partial class Builder : Node3D
     {
         bool ctrl = k.CtrlPressed || k.MetaPressed;
         int dir = k.ShiftPressed ? -1 : 1;
+        if (_pasting && !ctrl)
+        {
+            switch (k.PhysicalKeycode)
+            {
+                case Key.R:
+                    SetClip(_clip.Turned(1, dir));
+                    return;
+                case Key.T:
+                    SetClip(_clip.Turned(0, dir));
+                    return;
+                case Key.G:
+                    SetClip(_clip.Turned(2, dir));
+                    return;
+                case Key.H:
+                    SetClip(_clip.Flipped());
+                    Toast("Flipped left to right.");
+                    return;
+                case Key.Escape:
+                    StopPaste();
+                    return;
+            }
+        }
+
         switch (k.PhysicalKeycode)
         {
+            case Key.C when ctrl:
+                SetBoxMode(BoxMode.Copy);
+                break;
+            case Key.V when ctrl:
+                if (_clip != null) StartPaste(_clip);
+                else Toast("Nothing copied yet: Ctrl+C, then drag out a box round what you want.");
+                break;
             case Key.Z when ctrl:
                 Undo(redo: k.ShiftPressed);
                 break;
@@ -676,12 +716,15 @@ public partial class Builder : Node3D
             case Key.V:
                 CycleShape(dir);
                 break;
+            case Key.O:
+                SetArmorView(!_batch.ArmorView);
+                break;
             case Key.M:
                 SetMirror(!_mirror);
                 Sfx.Play2D(this, SoundId.Tick, -6f);
                 break;
             case Key.B:
-                SetBoxMode((BoxMode)(((int)_boxMode + 1) % 4));
+                SetBoxMode((BoxMode)(((int)_boxMode + 1) % 5));
                 break;
             case Key.F:
                 FocusCamera();
@@ -864,7 +907,24 @@ public partial class Builder : Node3D
             _outlineMat.AlbedoColor = _rmbDown ? new Color(1f, 0.35f, 0.3f, 1f) : new Color(1, 1, 1, 0.75f);
         }
 
-        bool show = free && !_rmbDown && _boxMode == BoxMode.Off;
+        if (_clipGhost != null)
+        {
+            bool showClip = _pasting && free && _boxMode == BoxMode.Off;
+            _clipGhost.Visible = showClip;
+            if (showClip)
+            {
+                Int3 baseCell = hit + n;
+                _clipGhost.Position = Conv.CellPos(_clip.Origin(baseCell));
+                bool fits = ClipFits(baseCell);
+                if (fits != _clipGhostOk)
+                {
+                    _clipGhostOk = fits;
+                    BlockVisuals.SetOverride(_clipGhost, fits ? BlockVisuals.GhostOk : BlockVisuals.GhostBad);
+                }
+            }
+        }
+
+        bool show = free && !_rmbDown && _boxMode == BoxMode.Off && !_pasting;
         Int3 cell = show ? hit + n * (1 + Footprint.Reach(_selected, _orientation, -n)) : default;
         string key = $"{_selected.Id}:{_orientation}";
         if (key != _ghostKey)
@@ -952,6 +1012,122 @@ public partial class Builder : Node3D
         _waterlineLabel.Text = a.Water.Floats ? $"waterline · {a.Water.DraftM:0.0} m draft" : "sinks";
     }
 
+    // ---------- Armor view ----------
+
+    private void SetArmorView(bool on)
+    {
+        _batch.ArmorView = on;
+        _armorButton?.SetPressedNoSignal(on);
+        if (_armorLegend != null) _armorLegend.Visible = on;
+        Toast(on ? "Armor view: blocks colored by thickness. Slopes count as thicker than they look. O turns it off." : "Armor view off.");
+        Sfx.Play2D(this, SoundId.Tick, -6f, on ? 1.1f : 0.9f);
+    }
+
+    private PanelContainer BuildArmorLegend()
+    {
+        var panel = new PanelContainer { Visible = false, MouseFilter = Control.MouseFilterEnum.Ignore };
+        HBoxContainer row = Ui.Row(8);
+        panel.AddChild(row);
+        row.AddChild(Ui.Caption("Armor"));
+        foreach ((float mm, string label) in new[] { (5f, "<10"), (25f, "25"), (50f, "50"), (80f, "80"), (110f, "110"), (200f, "200+ mm") })
+        {
+            row.AddChild(new ColorRect { Color = BatchedBlocks.ArmorColor(mm), CustomMinimumSize = new Vector2(18, 14), MouseFilter = Control.MouseFilterEnum.Ignore });
+            row.AddChild(Ui.Small(label));
+        }
+
+        row.AddChild(new ColorRect { Color = new Color(0.24f, 0.24f, 0.25f), CustomMinimumSize = new Vector2(18, 14), MouseFilter = Control.MouseFilterEnum.Ignore });
+        row.AddChild(Ui.Small("not armor"));
+        return panel;
+    }
+
+    // ---------- Copy and paste ----------
+
+    private void StartPaste(Clip clip)
+    {
+        _pasting = true;
+        SetClip(clip);
+        if (_savePartButton != null) _savePartButton.Disabled = false;
+    }
+
+    private void StopPaste()
+    {
+        _pasting = false;
+        if (_clipGhost != null) _clipGhost.Visible = false;
+        Toast("Stopped pasting. Ctrl+V pastes again.");
+    }
+
+    /// <summary>Sets the clipboard and rebuilds its see-through preview (a plain box for very big pieces).</summary>
+    private void SetClip(Clip clip)
+    {
+        _clip = clip;
+        _clipGhost?.QueueFree();
+        _clipGhost = new Node3D { Name = "ClipGhost", Visible = false };
+        AddChild(_clipGhost);
+        if (clip.Count <= MaxGhostBlocks)
+        {
+            foreach (BlueprintBlock b in clip.Blocks)
+            {
+                Node3D v = BlockVisuals.Create(BlockCatalog.Get(b.Id), 76f);
+                v.Transform = Conv.BlockTransform(b.Cell, b.O);
+                _clipGhost.AddChild(v);
+            }
+        }
+        else
+        {
+            Vector3 size = clip.Size.G() * Conv.CS;
+            _clipGhost.AddChild(new MeshInstance3D { Mesh = new BoxMesh { Size = size }, Position = size * 0.5f - Vector3.One * Conv.CS * 0.5f });
+        }
+
+        _clipGhostOk = true;
+        BlockVisuals.SetOverride(_clipGhost, BlockVisuals.GhostOk);
+        Sfx.Play2D(this, SoundId.Tick, -8f, 1.05f);
+    }
+
+    private bool ClipFits(Int3 baseCell)
+    {
+        foreach ((BlockDef def, Int3 anchor, int o) in _clip.PlacedAt(baseCell))
+            if (!Fits(def, anchor, o)) return false;
+        return true;
+    }
+
+    private void PasteHere()
+    {
+        if (_clip == null || !PickCell(out Int3 hit, out Int3 n, out _)) return;
+        Int3 baseCell = hit + n;
+        if (!ClipFits(baseCell))
+        {
+            Toast("It doesn't fit there: something's in the way, or it goes outside the build area.");
+            Sfx.Play2D(this, SoundId.Error, -8f);
+            return;
+        }
+
+        var changes = new List<Change>();
+        bool animate = _clip.Count <= 24;
+        foreach ((BlockDef def, Int3 anchor, int o) in _clip.PlacedAt(baseCell))
+        {
+            PlaceOne(def, anchor, o, changes, animate);
+            if (_mirror) PlaceOne(def, MirrorAnchor(def, anchor, o), Orientations.MirrorX(o), changes, animate);
+        }
+
+        Commit(changes);
+        Sfx.Play2D(this, SoundId.PlaceHeavy, -3f, 0.9f);
+        Toast($"Pasted {changes.Count:N0} block(s). Ctrl+Z takes it back.");
+    }
+
+    /// <summary>Keeps the clipboard as a part in the parts folder (it shows up under Load, Parts).</summary>
+    private void SavePart()
+    {
+        if (_clip == null) return;
+        DirAccess.MakeDirRecursiveAbsolute(PartsDir);
+        int n = 1;
+        while (FileAccess.FileExists($"{PartsDir}/part-{n}.json")) n++;
+        string name = $"Part {n}";
+        using FileAccess f = FileAccess.Open($"{PartsDir}/part-{n}.json", FileAccess.ModeFlags.Write);
+        f?.StoreString(_clip.ToBlueprint(name).ToJson());
+        Toast($"Saved \"{name}\" ({_clip.Count} blocks). Load, Parts brings it back to paste.");
+        Sfx.Play2D(this, SoundId.Reload, -6f);
+    }
+
     // ---------- Box tool ----------
 
     private void SetBoxMode(BoxMode mode)
@@ -969,6 +1145,7 @@ public partial class Builder : Node3D
             BoxMode.Fill => "Box fill: drag out a box to fill it with the selected block. Mouse wheel while dragging makes it taller.",
             BoxMode.Hollow => "Hollow box: drag out a box to build just its walls, floor and roof (a hull in one go).",
             BoxMode.Clear => "Box clear: drag out a box to remove everything in it.",
+            BoxMode.Copy => "Box copy: drag out a box round what you want to copy. Then click to paste it (R T G turn it, H flips it).",
             _ => "Box tool off.",
         });
         Sfx.Play2D(this, SoundId.Tick, -6f, 0.8f + 0.1f * (int)mode);
@@ -979,7 +1156,7 @@ public partial class Builder : Node3D
     {
         corner = default;
         if (OverUi() || !PickCell(out Int3 hit, out Int3 n, out bool onBlock)) return false;
-        corner = _boxMode == BoxMode.Clear && onBlock ? hit : hit + n;
+        corner = _boxMode is BoxMode.Clear or BoxMode.Copy && onBlock ? hit : hit + n;
         corner = new Int3(Math.Clamp(corner.X, -Reach, Reach), Math.Clamp(corner.Y, 0, MaxHeight), Math.Clamp(corner.Z, -Reach, Reach));
         return true;
     }
@@ -1002,7 +1179,7 @@ public partial class Builder : Node3D
         _boxPreview.Position = center;
         _boxPreview.Scale = dims.G() * Conv.CS + Vector3.One * 0.02f;
         _boxLabel.Position = center + Vector3.Up * (dims.Y * Conv.CS * 0.5f + 0.6f);
-        string what = _boxMode switch { BoxMode.Clear => "clear", BoxMode.Hollow => "hollow", _ => "fill" };
+        string what = _boxMode switch { BoxMode.Clear => "clear", BoxMode.Hollow => "hollow", BoxMode.Copy => "copy", _ => "fill" };
         _boxLabel.Text = $"{what}  {dims.X} × {dims.Y} × {dims.Z}  ({dims.X * Conv.CS:0.#} × {dims.Y * Conv.CS:0.#} × {dims.Z * Conv.CS:0.#} m)";
         _boxLabel.Modulate = _boxMode == BoxMode.Clear ? new Color(1f, 0.6f, 0.55f) : new Color(0.8f, 1f, 0.85f);
     }
@@ -1021,6 +1198,23 @@ public partial class Builder : Node3D
 
         var changes = new List<Change>();
         bool Inside(Int3 c, Int3 a, Int3 b) => c.X >= a.X && c.Y >= a.Y && c.Z >= a.Z && c.X <= b.X && c.Y <= b.Y && c.Z <= b.Z;
+        if (_boxMode == BoxMode.Copy)
+        {
+            var picked = new HashSet<Int3>();
+            foreach ((Int3 c, BlueprintBlock bb) in _cells)
+                if (Inside(c, lo, hi)) picked.Add(bb.Cell);
+            if (picked.Count == 0)
+            {
+                Toast("Nothing in that box to copy.");
+                return;
+            }
+
+            SetBoxMode(BoxMode.Off);
+            StartPaste(Clip.From(picked.Select(a => _blocks[a])));
+            Toast($"Copied {picked.Count:N0} block(s). Click to paste · R T G turn · H flip · Esc or right click stops · \"Save part\" keeps it.");
+            return;
+        }
+
         if (_boxMode == BoxMode.Clear)
         {
             var boxes = new List<(Int3, Int3)> { (lo, hi) };
@@ -1128,14 +1322,20 @@ public partial class Builder : Node3D
             Sfx.Play2D(this, SoundId.Tick, -8f);
         };
         bar.AddChild(_paintPicker);
+        _savePartButton = Ui.Button("Save part", SavePart, "Keep what you copied as a part, to paste into any design later (Load, Parts)");
+        _savePartButton.Disabled = true;
+        bar.AddChild(_savePartButton);
         bar.AddChild(Ui.Spacer());
         _mirrorButton = Ui.Button("MIRROR", () => SetMirror(!_mirror), "Build both sides at once (M)", "Pill");
         _mirrorButton.ToggleMode = true;
         bar.AddChild(_mirrorButton);
-        _boxButton = Ui.Button("BOX", () => SetBoxMode((BoxMode)(((int)_boxMode + 1) % 4)),
+        _boxButton = Ui.Button("BOX", () => SetBoxMode((BoxMode)(((int)_boxMode + 1) % 5)),
             "Box tool (B): drag out a box to fill it, build a hollow shell, or clear it", "Pill");
         _boxButton.ToggleMode = true;
         bar.AddChild(_boxButton);
+        _armorButton = Ui.Button("ARMOR", () => SetArmorView(!_batch.ArmorView), "Armor view (O): color every block by how thick its armor is", "Pill");
+        _armorButton.ToggleMode = true;
+        bar.AddChild(_armorButton);
         SetMirror(_mirror);
         bar.AddChild(Ui.Button("Help", () => _help.Visible = !_help.Visible, "Controls and how designs work (F1)", "GhostButton"));
         bar.AddChild(Ui.Button("TEST DRIVE", RequestTestDrive, "Drive this design on the test range (Tab)", "PrimaryButton"));
@@ -1191,7 +1391,7 @@ public partial class Builder : Node3D
         hints.AddChild(hintRow);
         foreach ((string key, string what) in new[]
                  {
-                     ("LMB", "place"), ("RMB", "remove"), ("MMB", "copy"), ("R T G", "rotate"), ("V", "shape"), ("WASD Q E", "move"),
+                     ("LMB", "place"), ("RMB", "remove"), ("MMB", "pick"), ("R T G", "rotate"), ("V", "shape"), ("Ctrl C / V", "copy / paste"), ("WASD Q E", "move"),
                      ("M", "mirror"), ("B", "box"), ("F1", "help"),
                  })
         {
@@ -1200,6 +1400,13 @@ public partial class Builder : Node3D
             pair.AddChild(Ui.Small(what));
             hintRow.AddChild(pair);
         }
+
+        _armorLegend = BuildArmorLegend();
+        root.AddChild(_armorLegend);
+        _armorLegend.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.CenterBottom);
+        _armorLegend.GrowHorizontal = Control.GrowDirection.Both;
+        _armorLegend.GrowVertical = Control.GrowDirection.Begin;
+        _armorLegend.OffsetBottom = -64;
 
         _toast = Ui.Card("Toast");
         _toast.Visible = false;
@@ -1233,6 +1440,8 @@ public partial class Builder : Node3D
         "[cell]Right click[/cell][cell]remove a block[/cell]" +
         "[cell]Middle click[/cell][cell]copy the block under the cursor[/cell]" +
         "[cell]R / T / G[/cell][cell]rotate around the up / side / front axis (Shift turns the other way)[/cell]" +
+        "[cell]O[/cell][cell]armor view: every block colored by its armor thickness, to find weak spots[/cell]" +
+        "[cell]Ctrl+C / Ctrl+V[/cell][cell]copy: drag out a box round part of the design; paste: click to place it. While pasting, R T G turn it, H flips it, Esc or right click stops. Save part keeps it for later.[/cell]" +
         "[cell]V[/cell][cell]next shape, for armor and glazing: slope, shallow slope (two blocks), outer and inner corners, rounded edge, half block, plate, octagon (Shift goes back)[/cell]" +
         "[cell]M[/cell][cell]mirror mode: build both sides at once[/cell]" +
         "[cell]B[/cell][cell]box tool: drag out a box to fill it, build a hollow shell (a hull in one go), or clear it. Mouse wheel while dragging makes it taller[/cell]" +
@@ -1780,6 +1989,29 @@ public partial class Builder : Node3D
             string path = $"{SaveDir}/{file}";
             menu.AddItem(file[..^5], _loadActions.Count);
             _loadActions.Add(() => LoadFile(path));
+        }
+
+        // Saved parts load onto the clipboard, to paste into the design.
+        DirAccess.MakeDirRecursiveAbsolute(PartsDir);
+        string[] parts = DirAccess.GetFilesAt(PartsDir).Where(f => f.EndsWith(".json")).OrderBy(f => f).ToArray();
+        if (parts.Length > 0) menu.AddSeparator("Parts (to paste)");
+        foreach (string file in parts)
+        {
+            string path = $"{PartsDir}/{file}";
+            menu.AddItem(file[..^5], _loadActions.Count);
+            _loadActions.Add(() =>
+            {
+                try
+                {
+                    Blueprint bp = Blueprint.FromJson(FileAccess.GetFileAsString(path));
+                    StartPaste(Clip.From(bp.Blocks));
+                    Toast($"\"{bp.Name}\" is ready to paste: click to place it, R T G turn it, H flips it.");
+                }
+                catch (FormatException e)
+                {
+                    Toast(e.Message);
+                }
+            });
         }
     }
 

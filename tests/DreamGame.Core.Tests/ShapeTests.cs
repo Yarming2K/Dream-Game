@@ -156,3 +156,64 @@ public class ShapeTests
         Assert.InRange(DamageModel.EffectiveArmor(80f, angle), 160f, 200f);
     }
 }
+
+public class ClipTests
+{
+    private static HashSet<(string, Int3)> Cells(Clip c)
+    {
+        var set = new HashSet<(string, Int3)>();
+        foreach (BlueprintBlock b in c.Blocks)
+            foreach (Int3 cell in Footprint.Cells(BlockCatalog.Get(b.Id), b.Cell, b.O)) Assert.True(set.Add((b.Id, cell)), "overlap");
+        return set;
+    }
+
+    private static Clip Sample() => Clip.From(ExampleDesigns.Warden().Blocks.Concat(new[]
+    {
+        // A big block too, off to one side.
+        new BlueprintBlock("belt_armor", new Int3(9, 0, 0), 0),
+    }));
+
+    [Fact]
+    public void ACopyStartsAtTheOrigin()
+    {
+        Clip c = Sample();
+        HashSet<(string, Int3)> cells = Cells(c);
+        Assert.Equal(0, cells.Min(x => x.Item2.X));
+        Assert.Equal(0, cells.Min(x => x.Item2.Y));
+        Assert.Equal(0, cells.Min(x => x.Item2.Z));
+        Assert.Equal(c.Size.X - 1, cells.Max(x => x.Item2.X));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public void FourQuarterTurnsComeBackToTheStart(int axis)
+    {
+        Clip c = Sample();
+        Clip t = c.Turned(axis, 1);
+        Assert.Equal(Cells(c).Count, Cells(t).Count);
+        Clip back = t.Turned(axis, 1).Turned(axis, 1).Turned(axis, 1);
+        Assert.True(Cells(c).SetEquals(Cells(back)));
+        Assert.True(Cells(c).SetEquals(Cells(c.Turned(axis, 4))));
+    }
+
+    [Fact]
+    public void FlippingTwiceComesBack()
+    {
+        Clip c = Sample();
+        Assert.True(Cells(c).SetEquals(Cells(c.Flipped().Flipped())));
+        Assert.Equal(Cells(c).Count, Cells(c.Flipped()).Count);
+    }
+
+    [Fact]
+    public void ATurnedTankIsStillTheSameTank()
+    {
+        Clip c = Clip.From(ExampleDesigns.Warden().Blocks).Turned(1, 1);
+        VehicleAnalysis a = VehicleAnalysis.Analyze(Blueprint.FromCellMap("turned", c.Blocks));
+        VehicleAnalysis b = VehicleAnalysis.Analyze(ExampleDesigns.Warden());
+        Assert.Equal(b.Guns.Count, a.Guns.Count);
+        Assert.Equal(b.MassKg, a.MassKg, 1);
+        Assert.Empty(a.Disconnected);
+    }
+}

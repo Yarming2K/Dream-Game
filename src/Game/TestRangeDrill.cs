@@ -23,10 +23,12 @@ public partial class TestRange
     private static readonly Color BlueTeam = new(0.35f, 0.62f, 1f);
     private static readonly Color RedTeam = new(1f, 0.36f, 0.3f);
 
-    private Blueprint DrillDesign(string name)
+    private Blueprint DrillDesign(string name, int faction)
     {
-        if (_drillDesigns.TryGetValue(name, out Blueprint bp)) return bp;
-        // One blueprint per design, so every copy shares its meshes.
+        string key = $"{name}:{faction}";
+        if (_drillDesigns.TryGetValue(key, out Blueprint bp)) return bp;
+        // One blueprint per design and side, so every copy shares its meshes. Red wears its own paint, so
+        // the two sides are easy to tell apart.
         bp = name switch
         {
             "Warden" => ExampleDesigns.Warden(),
@@ -38,7 +40,14 @@ public partial class TestRange
             "Hornet" => ExampleDesigns.Hornet(),
             _ => ExampleDesigns.Colossus(),
         };
-        return _drillDesigns[name] = bp;
+        if (faction == 1)
+            bp.Paint = name switch
+            {
+                "Corsair" or "Colossus" => "dazzle",
+                "Kestrel" or "Hornet" => "night",
+                _ => "desert",
+            };
+        return _drillDesigns[key] = bp;
     }
 
     private void SetupDrill(Control root)
@@ -125,7 +134,7 @@ public partial class TestRange
         for (int n = 0; n < 3 && _drillQueue.Count > 0; n++)
         {
             (string design, int faction, Vector3 pos, float yaw) = _drillQueue.Dequeue();
-            Blueprint bp = DrillDesign(design);
+            Blueprint bp = DrillDesign(design, faction);
             VehicleAnalysis a = VehicleAnalysis.Analyze(bp);
             Vector3 at = pos;
             if (a.IsNaval) at.Y = VehicleBody.FloatHeight(a);
