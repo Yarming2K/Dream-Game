@@ -23,6 +23,17 @@ public sealed class InteriorParts
     private readonly IGridHost _host;
     private readonly List<DoorRt> _doors = new();
     private readonly List<BlockInstance> _lamps = new();
+    private readonly List<BlockInstance> _services = new();
+
+    /// <summary>The working interior items aboard: bunks, first aid, lockers, workbenches, supply crates.</summary>
+    public IReadOnlyList<BlockInstance> Services
+    {
+        get
+        {
+            if (_stamp != _host.Model.Blocks.Count) Refresh();
+            return _services;
+        }
+    }
     private readonly Dictionary<BlockInstance, OmniLight3D> _lampLights = new();
     private int _stamp = -1;
     private float _doorClock, _lampClock;
@@ -43,10 +54,12 @@ public sealed class InteriorParts
             if (GodotObject.IsInstanceValid(d.Shut)) d.Shut.QueueFree();
         _doors.Clear();
         _lamps.Clear();
+        _services.Clear();
         foreach (BlockInstance b in _host.Model.Instances)
         {
             if (!b.Alive) continue;
             if (b.Def.Kind == BlockKind.Lamp) _lamps.Add(b);
+            if (b.Def.Kind is BlockKind.Bunk or BlockKind.FirstAid or BlockKind.Locker or BlockKind.Workbench or BlockKind.SupplyCrate) _services.Add(b);
             if (b.Def.Kind != BlockKind.Door) continue;
             var size = new Vector3(b.Def.Size.X, b.Def.Size.Y, b.Def.Size.Z) * Conv.CS;
             var shut = new CollisionShape3D { Shape = new BoxShape3D { Size = new Vector3(size.X - 0.2f, size.Y - 0.14f, 0.14f) } };
@@ -134,6 +147,9 @@ public partial class VehicleBody
 
     private void InteriorTick(float dt) => (_interior ??= new InteriorParts(this)).Tick(dt);
 
+    /// <summary>Bunks, first aid, lockers, workbenches and supply crates aboard.</summary>
+    public IReadOnlyList<BlockInstance> Services => (_interior ??= new InteriorParts(this)).Services;
+
     public override void _ExitTree()
     {
         _interior?.Clear();
@@ -146,4 +162,6 @@ public partial class StructureBody
     private InteriorParts _interior;
 
     public override void _PhysicsProcess(double delta) => (_interior ??= new InteriorParts(this)).Tick((float)delta);
+
+    public IReadOnlyList<BlockInstance> Services => (_interior ??= new InteriorParts(this)).Services;
 }

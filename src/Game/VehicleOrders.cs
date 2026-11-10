@@ -100,7 +100,8 @@ public partial class VehicleBody
     /// <summary>Turns the current order into a goal for the AI driver (and, for aircraft, a patrol circle).</summary>
     private void OrdersTick()
     {
-        if (Order == OrderKind.None || PlayerSeat != null) return;
+        // A building doesn't go anywhere: its orders only say what its gunners shoot at.
+        if (Order == OrderKind.None || PlayerSeat != null || Analysis.IsBuilding) return;
         bool targetOk = OrderTarget != null && IsInstanceValid(OrderTarget) && OrderTarget.IsInsideTree() && OrderTarget.Model.Blocks.Count > 0;
         Vector3 goal = OrderPoint;
         float stop = 0f, radius = IsNaval ? 40f : 15f;

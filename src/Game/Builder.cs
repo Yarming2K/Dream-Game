@@ -1970,7 +1970,7 @@ public partial class Builder : Node3D
         menu.Clear();
         _loadActions.Clear();
         menu.AddSeparator("Examples");
-        foreach (Blueprint ex in ExampleDesigns.All)
+        foreach (Blueprint ex in ExampleDesigns.All.Concat(ExampleDesigns.Buildings))
         {
             Blueprint copy = ex;
             menu.AddItem(ex.Name, _loadActions.Count);

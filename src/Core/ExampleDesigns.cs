@@ -1322,6 +1322,139 @@ public static class ExampleDesigns
     /// A command post: a heavy concrete-and-steel hut with a command console inside, slit windows, a search
     /// radar and an antenna on the roof. Stand next to it and press M to command your units.
     /// </summary>
+    /// <summary>Example buildings: stationary ground units with crews and guns.</summary>
+    public static IReadOnlyList<Blueprint> Buildings => new[] { Pillbox(), FlakNest(), Outpost() };
+
+    /// <summary>
+    /// Pillbox: a concrete blockhouse with a 37 mm on a turntable inside, firing out through a wide slit in
+    /// the front wall. A door at the back, a bunk and a weapon locker for the crew, first aid, lamps, and a
+    /// periscope on the roof.
+    /// </summary>
+    public static Blueprint Pillbox()
+    {
+        var d = new Draft();
+        d.Fill(-4, 4, 0, 0, -4, 4, "foundation");
+        d.Set(0, 1, -2, "turret_ring");
+        d.Set(0, 2, -2, "breech_37");
+        for (int z = -3; z >= -6; z--) d.Set(0, 2, z, "barrel");
+        d.Set(-1, 2, -2, "ammo_ap");
+        d.Set(1, 2, -2, "ammo_he");
+        d.Set(0, 2, -1, "gunner_seat");
+
+        d.Set(-1, 2, 4, "door");
+        d.Set(-3, 1, 1, "bunk");
+        d.Set(2, 2, 3, "weapon_locker");
+        d.Set(3, 3, 0, "first_aid", Orient(new Int3(0, -1, 0), new Int3(-1, 0, 0)));
+        foreach (int x in new[] { -2, 2 }) d.Set(x, 5, 1, "lamp");
+
+        d.Fill(-4, 4, 1, 5, -4, -4, "concrete");
+        d.Fill(-4, 4, 1, 5, 4, 4, "concrete");
+        d.Fill(-4, -4, 1, 5, -3, 3, "concrete");
+        d.Fill(4, 4, 1, 5, -3, 3, "concrete");
+        d.Fill(-4, 4, 6, 6, -4, 4, "concrete");
+        // The firing slit.
+        for (int x = -2; x <= 2; x++)
+        for (int y = 2; y <= 3; y++)
+            if (x != 0 || y != 2) d.Remove(x, y, -4);
+        d.Set(0, 7, 2, "periscope");
+        d.Set(3, 7, 3, "antenna");
+        return d.Build("Pillbox (bunker)", "olive");
+    }
+
+    /// <summary>
+    /// Flak nest: a 40 mm autocannon on a raised turntable inside a low concrete wall, with flak and HE at
+    /// hand, a search radar and a searchlight on posts, and a first aid station on the wall.
+    /// </summary>
+    public static Blueprint FlakNest()
+    {
+        var d = new Draft();
+        d.Fill(-4, 4, 0, 0, -4, 4, "foundation");
+        d.Set(0, 1, 0, "concrete");
+        d.Set(0, 2, 0, "turret_ring");
+        d.Set(0, 3, 0, "breech_40ac");
+        for (int z = -1; z >= -3; z--) d.Set(0, 3, z, "barrel");
+        d.Set(-1, 3, 0, "ammo_flak");
+        d.Set(1, 3, 0, "ammo_he");
+        d.Set(0, 3, 1, "gunner_seat");
+
+        foreach ((int x, int z) in new[] { (3, 3), (-3, -3) }) d.Fill(x, x, 1, 2, z, z, "concrete");
+        d.Set(3, 3, 3, "radar");
+        d.Set(-3, 3, -3, "searchlight");
+        d.Set(-3, 2, 0, "first_aid", Orient(new Int3(0, -1, 0), new Int3(1, 0, 0)));
+
+        d.Fill(-4, 4, 1, 2, -4, -4, "concrete");
+        d.Fill(-4, 4, 1, 2, 4, 4, "concrete");
+        d.Fill(-4, -4, 1, 2, -3, 3, "concrete");
+        d.Fill(4, 4, 1, 2, -3, 3, "concrete");
+        // The way in, at the back.
+        foreach (int x in new[] { -1, 0 })
+        foreach (int y in new[] { 1, 2 })
+            d.Remove(x, y, 4);
+        return d.Build("Flak nest (AA site)", "olive");
+    }
+
+    /// <summary>
+    /// Outpost: a forward base. Inside: bunks (rest there and you come back there), a weapon locker, first
+    /// aid, and a workbench that repairs your vehicles parked outside. Supply crates on the apron in front
+    /// rearm and refuel them. Stairs up the side to a 40 mm anti-aircraft gun on the roof, with a
+    /// searchlight and an antenna.
+    /// </summary>
+    public static Blueprint Outpost()
+    {
+        var d = new Draft();
+        const int roof = 6;
+        d.Fill(-6, 6, 0, 0, -5, 5, "foundation");
+        d.Fill(-6, 6, 0, 0, -11, -6, "foundation");
+
+        // Inside.
+        d.Set(-1, 2, -5, "door");
+        d.Set(-5, 1, 0, "bunk");
+        d.Set(4, 1, 0, "bunk");
+        d.Set(-2, 2, 4, "weapon_locker");
+        d.Set(1, 1, 3, "workbench");
+        d.Set(-5, 3, -3, "first_aid", Orient(new Int3(0, -1, 0), new Int3(1, 0, 0)));
+        foreach ((int x, int z) in new[] { (-3, 0), (2, 0), (0, -3) }) d.Set(x, roof - 1, z, "lamp");
+        foreach (int x in new[] { -4, -3, 2, 3 }) d.Fill(x, x, 3, 4, -5, -5, "glazing");
+
+        // Walls and roof.
+        d.Fill(-6, 6, 1, roof - 1, -5, -5, "concrete");
+        d.Fill(-6, 6, 1, roof - 1, 5, 5, "concrete");
+        d.Fill(-6, -6, 1, roof - 1, -4, 4, "concrete");
+        d.Fill(6, 6, 1, roof - 1, -4, 4, "concrete");
+        d.Fill(-6, 6, roof, roof, -5, 5, "concrete");
+
+        // Supply crates on the apron.
+        d.Set(3, 1, -8, "supply_crate");
+        d.Set(-4, 1, -8, "supply_crate");
+
+        // Stairs up the right-hand side to the roof.
+        for (int i = 0; i < roof; i++)
+            foreach (int x in new[] { 7, 8 })
+                d.Set(x, 1 + i, -4 + i, "stairs");
+
+        // The roof gun.
+        d.Set(0, roof + 1, 1, "turret_ring");
+        d.Set(0, roof + 2, 1, "breech_40ac");
+        for (int z = 0; z >= -2; z--) d.Set(0, roof + 2, z, "barrel");
+        d.Set(-1, roof + 2, 1, "ammo_flak");
+        d.Set(1, roof + 2, 1, "ammo_he");
+        d.Set(0, roof + 2, 2, "gunner_seat");
+        d.Set(-5, roof + 1, -4, "searchlight");
+        d.Set(5, roof + 1, 4, "antenna");
+        for (int i = -6; i <= 6; i++)
+        {
+            d.Set(i, roof + 1, -5, "railing", Orient(new Int3(0, -1, 0), new Int3(0, 0, 1)));
+            d.Set(i, roof + 1, 5, "railing", Orient(new Int3(0, -1, 0), new Int3(0, 0, -1)));
+            if (i > -5 && i < 5)
+            {
+                d.Set(-6, roof + 1, i, "railing", Orient(new Int3(0, -1, 0), new Int3(1, 0, 0)));
+                if (i < 1 || i > 2) d.Set(6, roof + 1, i, "railing", Orient(new Int3(0, -1, 0), new Int3(-1, 0, 0)));
+            }
+        }
+
+        return d.Build("Outpost (forward base)", "olive");
+    }
+
     /// <summary>
     /// The command post: a small blockhouse you can walk into. A sliding door, windows all round, lamps in
     /// the ceiling and the command console at the back; outside, stairs up one side and a ladder up the other

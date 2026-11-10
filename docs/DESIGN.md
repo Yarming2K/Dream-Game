@@ -170,6 +170,16 @@ Jets push on their own at any speed. Opening the throttle all the way lights the
   - **Hatches** are ways in and out: E at a hatch takes the seat nearest it, and you get out through it. **Grab handles** climb like ladders. **Railings** stop people walking off an edge.
 - **The Trident** is walkable inside: in at the bridge door (the wheel, console and commander's seat are at the front window), down the ladder through the bridge floor, and through a watertight door into the reactor room.
 
+### Buildings
+- **A design with a Foundation on its bottom row is a building.** It needs no driver, engine or wheels, stays exactly where it's put (anchored, nothing shoves it), and otherwise works like any vehicle: crew, guns, power, fire, fittings, interiors, the tactical map (it takes attack and rules-of-engagement orders, ignores move orders). Its guns need a Gunner Seat. Pieces shot loose from the ground fall away. **Concrete** (Structure, with all the shapes) is the heavy, cheap, blast-resistant wall material.
+- **Interior items that work** (on buildings and vehicles alike):
+  - **Bunk:** E to rest. You're healed, and when you fall you come back at your bunk instead of the depot, while it stands.
+  - **First Aid Station:** heals anyone standing near it (15 HP/s).
+  - **Weapon Locker:** restocks your rifle and rockets.
+  - **Workbench:** a repair bay. Your vehicles parked within 14 m are patched up and have shot-away blocks rebuilt, one every 3 s. On a truck, a repair truck.
+  - **Supply Crates:** a supply point. Your vehicles parked within 14 m are rearmed and refuelled, and people restock. On a truck, a supply truck. They burn and blow up if hit.
+- **Examples:** the **Pillbox** (a 37 mm on a turntable firing through a slit, bunk, locker, first aid), the **Flak Nest** (a 40 mm inside a low wall, radar and searchlight), and the **Outpost** (a forward base: bunks, locker, first aid, a workbench, supply crates on its apron, stairs to an AA gun on the roof). On the range, your outpost stands east of the depot; an enemy pillbox and flak nest wait down range.
+
 ### Mobility
 - Wheels and track segments both use raycast suspension. Wheels steer; tracks skid-steer.
 - Engine power and vehicle mass set acceleration and top speed.
@@ -276,6 +286,7 @@ Each milestone is playable on its own.
    - **Fleet command** *(built)*: the command console and search radar, the command post, the tactical map with fog of war, picking and groups, move / attack / escort / patrol / hold orders in formation, rules of engagement, command range, jumping into units, and deploying more.
    - **Looks and building** *(built)*: the shape kit, paint jobs with ship rules, glazing and the pilot seat, detail parts, joints, copy and paste with saved parts, the armor view, and the examples rebuilt with them.
    - **Big battles** *(built)*: shells as data, two-batch tracers, ground and vehicle checks in C#, parking, far models, shared meshes, effect budgets, the F3 performance readout and the F8 battle drill.
+   - **Buildings** *(built)*: foundations and concrete, stationary crewed units, bunks, first aid, weapon lockers, workbenches (repair bays), supply crates (forward supply points), the pillbox, flak nest and outpost.
    - **Interiors** *(built)*: walking on moving decks, taking the seat you walk up to, doors, stairs, ladders, lamps, see-through glass, fire that spreads and can be put out, visible flooding, hidden enclosed machinery, the walk-in command post.
    - **Modern and future** *(built)*: jets with afterburners and the Falcon; power (generators, the fusion reactor, capacitors); railguns, lasers, the CIWS and point defense; vertical launch cells with strike and air-defense missiles; rocket artillery; big blasts with shock waves; the Vanguard, Hailstorm and Trident examples.
    - Not yet: giant aircraft and land battleships. They can be built from the same blocks, but their wings and tracks are still worked out panel by panel, so a giant one costs more to fly than it needs to.

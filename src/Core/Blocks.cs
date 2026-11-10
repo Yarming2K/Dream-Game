@@ -73,6 +73,24 @@ public enum BlockKind
 
     /// <summary>A light fitting: lights up the space around it.</summary>
     Lamp,
+
+    /// <summary>Anchors a design to the ground: a design with one on its bottom row is a building.</summary>
+    Foundation,
+
+    /// <summary>Somewhere to rest: heals you, and you come back here if you fall.</summary>
+    Bunk,
+
+    /// <summary>Heals people standing near it.</summary>
+    FirstAid,
+
+    /// <summary>Restocks people's rifles and rockets.</summary>
+    Locker,
+
+    /// <summary>A repair bay: your vehicles parked near it are mended.</summary>
+    Workbench,
+
+    /// <summary>A supply point: your vehicles parked near it are rearmed and refuelled.</summary>
+    SupplyCrate,
 }
 
 /// <summary>What a vertical launch cell holds.</summary>
@@ -974,6 +992,59 @@ public static class BlockCatalog
             ColorR = 0.36f, ColorG = 0.38f, ColorB = 0.38f, Metallic = 0.6f, Roughness = 0.5f,
         },
 
+        // Buildings
+        new BlockDef
+        {
+            Id = "foundation", Name = "Foundation", Category = "Structure", Kind = BlockKind.Foundation,
+            Description = "A concrete footing set into the ground. A design with one anywhere on its bottom row is a building: it stays where it's put and needs no driver, engine or wheels, and its gunners still fight. Lay a floor of them.",
+            MassKg = 300, Hp = 500, ArmorMm = 60, HeVulnerability = 0.7f,
+            ColorR = 0.5f, ColorG = 0.49f, ColorB = 0.46f, Metallic = 0f, Roughness = 0.95f,
+        },
+        new BlockDef
+        {
+            Id = "concrete", Name = "Concrete", Category = "Structure", Kind = BlockKind.Armor,
+            Description = "Reinforced concrete: heavy and cheap, and it shrugs off blast better than steel. For bunkers, walls and buildings (press V for its shapes).",
+            MassKg = 260, Hp = 380, ArmorMm = 70, HeVulnerability = 0.7f,
+            ColorR = 0.62f, ColorG = 0.61f, ColorB = 0.57f, Metallic = 0f, Roughness = 0.95f,
+        },
+
+        // Interior
+        new BlockDef
+        {
+            Id = "bunk", Name = "Bunk (2×1×4)", Category = "Interior", Kind = BlockKind.Bunk, Size = new Int3(2, 1, 4),
+            Description = "A bed. Walk up and press E to rest: you're healed, and if you fall you come back here instead of at the depot (while it stands).",
+            MassKg = 60, Hp = 60, ArmorMm = 3, HasCollider = false, Watertight = false,
+            ColorR = 0.32f, ColorG = 0.36f, ColorB = 0.28f, Metallic = 0.3f, Roughness = 0.8f,
+        },
+        new BlockDef
+        {
+            Id = "first_aid", Name = "First Aid Station", Category = "Interior", Kind = BlockKind.FirstAid,
+            Description = "A medical cabinet on the wall (against the back face). Anyone standing near it is patched up.",
+            MassKg = 15, Hp = 30, ArmorMm = 2, HasCollider = false, Watertight = false, Displacement = 0f,
+            ColorR = 0.88f, ColorG = 0.88f, ColorB = 0.85f, Metallic = 0.2f, Roughness = 0.5f,
+        },
+        new BlockDef
+        {
+            Id = "weapon_locker", Name = "Weapon Locker (2×4×1)", Category = "Interior", Kind = BlockKind.Locker, Size = new Int3(2, 4, 1),
+            Description = "A rack of rifles and rockets behind a mesh door. Stand next to it to restock.",
+            MassKg = 120, Hp = 90, ArmorMm = 4, Watertight = false,
+            ColorR = 0.3f, ColorG = 0.34f, ColorB = 0.3f, Metallic = 0.6f, Roughness = 0.5f,
+        },
+        new BlockDef
+        {
+            Id = "workbench", Name = "Workbench (4×2×2)", Category = "Interior", Kind = BlockKind.Workbench, Size = new Int3(4, 2, 2),
+            Description = "Tools, a vise and spares: a repair bay. Your vehicles parked within 14 m are patched up and have shot-away blocks rebuilt, one at a time. On a vehicle it makes a repair truck.",
+            MassKg = 220, Hp = 120, ArmorMm = 5, Watertight = false,
+            ColorR = 0.45f, ColorG = 0.33f, ColorB = 0.2f, Metallic = 0.3f, Roughness = 0.7f,
+        },
+        new BlockDef
+        {
+            Id = "supply_crate", Name = "Supply Crates (2×2×2)", Category = "Interior", Kind = BlockKind.SupplyCrate, Size = new Int3(2, 2, 2),
+            Description = "Shells, fuel and spares: a supply point. Your vehicles parked within 14 m are rearmed and refuelled, and people restock. On a truck it makes a supply truck. Burns if hit.",
+            MassKg = 400, Hp = 120, ArmorMm = 5, Watertight = false, DeathExplosionDamage = 300, DeathExplosionRadiusM = 3f,
+            ColorR = 0.42f, ColorG = 0.4f, ColorB = 0.27f, Metallic = 0.1f, Roughness = 0.85f,
+        },
+
         // Interior
         new BlockDef
         {
@@ -1104,7 +1175,7 @@ public static class BlockCatalog
         (BlockShape.Half, "half"), (BlockShape.Plate, "plate"), (BlockShape.Octagon, "octagon"),
     };
 
-    private static readonly string[] ShapedBases = { "armor_light", "armor_heavy", "armor_composite", "glazing", "airframe" };
+    private static readonly string[] ShapedBases = { "armor_light", "armor_heavy", "armor_composite", "glazing", "airframe", "concrete" };
 
     // After the lists above: static fields are set up in the order they're written.
     private static readonly Dictionary<string, BlockDef> ById = BuildIndex();

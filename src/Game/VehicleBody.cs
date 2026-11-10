@@ -84,7 +84,7 @@ public partial class VehicleBody : RigidBody3D, IGridHost
     public GridModel Model { get; private set; }
     public GridView View { get; private set; }
     public PhysicsBody3D Body => this;
-    public KeepRule Keep => KeepRule.DriverSeat;
+    public KeepRule Keep => Analysis.IsBuilding ? KeepRule.Anchored : KeepRule.DriverSeat;
     public float Radius { get; private set; }
 
     public Blueprint Blueprint { get; private set; }
@@ -183,6 +183,13 @@ public partial class VehicleBody : RigidBody3D, IGridHost
         v._yawInertia = Mathf.Max(a.MassKg, 100f) * (len * len + wid * wid) / 12f;
 
         v.SetupWheels();
+        if (a.IsBuilding)
+        {
+            // A building is anchored where it stands: nothing moves it.
+            v.FreezeMode = FreezeModeEnum.Static;
+            v.Freeze = true;
+        }
+
         v.SetupGuns();
         v.SetupSeats();
         v.SetupNaval();
@@ -195,6 +202,8 @@ public partial class VehicleBody : RigidBody3D, IGridHost
     /// <summary>How high above the ground the body origin should spawn so the wheels just touch down.</summary>
     public static float SpawnHeight(VehicleAnalysis a)
     {
+        // A building's foundation sits in the ground with its top level with it, so you walk straight in.
+        if (a.IsBuilding) return -(a.Min.Y + 0.5f) * Conv.CS;
         float lowest = (a.Min.Y - 0.5f) * Conv.CS;
         foreach (WheelInfo w in a.Wheels)
             lowest = Mathf.Min(lowest, w.Cell.Y * Conv.CS - w.RadiusM - Mobility.RestLength(w.Kind));
@@ -467,6 +476,7 @@ public partial class VehicleBody : RigidBody3D, IGridHost
     /// <summary>Freezes an AI ground vehicle that has sat still with its brakes on for a while, and thaws it when it should move.</summary>
     private void UpdatePark(float dt, bool playerDrives)
     {
+        if (Analysis.IsBuilding) return;
         bool wantsToMove = playerDrives || Mathf.Abs(Throttle) > 0.01f || Mathf.Abs(Steer) > 0.01f || !Braking;
         bool canPark = !IsNaval && !IsAir && Wheels.Count > 0 && Analysis.Mode == MobilityMode.Ground;
         if (Parked)
@@ -493,6 +503,7 @@ public partial class VehicleBody : RigidBody3D, IGridHost
     /// <summary>Lets a parked vehicle move again (hit by a blast, damaged, given orders).</summary>
     public void Unpark()
     {
+        if (Analysis.IsBuilding) return;
         _stillTime = 0;
         if (!Parked) return;
         Parked = false;
@@ -846,6 +857,7 @@ public partial class VehicleBody : RigidBody3D, IGridHost
     /// <summary>Puts the vehicle back on its wheels where it is ("forgiving" recovery).</summary>
     public void Recover()
     {
+        if (Analysis.IsBuilding) return;
         if (IsAir && !OnGround && HeightAboveGroundM > 3f)
         {
             RecoverInAir();

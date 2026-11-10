@@ -741,7 +741,7 @@ public partial class TacticalMap : Control
     private void RefreshDeploy()
     {
         _designs.Clear();
-        foreach (Blueprint ex in ExampleDesigns.All)
+        foreach (Blueprint ex in ExampleDesigns.All.Concat(ExampleDesigns.Buildings))
         {
             Blueprint copy = ex;
             _designs.Add((ex.Name, () => copy));

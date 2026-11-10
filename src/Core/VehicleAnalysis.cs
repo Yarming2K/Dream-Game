@@ -86,6 +86,9 @@ public enum MobilityMode
     /// <summary>VTOL and drones: held up by lift fans or jets pointing down.</summary>
     Hover,
     Airship,
+
+    /// <summary>A building: set on a foundation, it stays where it's put.</summary>
+    Building,
 }
 
 public sealed class LauncherInfo
@@ -193,7 +196,10 @@ public sealed class VehicleAnalysis
     public bool IsAir => Mode is MobilityMode.Plane or MobilityMode.Helicopter or MobilityMode.Hover or MobilityMode.Airship;
     public int Jets => Thrusters.Count(t => t.Kind == BlockKind.JetEngine);
 
-    public bool CanDrive => HasDriver && FuelL > 0 && Mode switch
+    /// <summary>A building on a foundation.</summary>
+    public bool IsBuilding => Mode == MobilityMode.Building;
+
+    public bool CanDrive => IsBuilding || HasDriver && FuelL > 0 && Mode switch
     {
         MobilityMode.Ground => PowerKw > 0 && Wheels.Count > 0,
         MobilityMode.Ship or MobilityMode.Submarine => PowerKw > 0 && ShipPropellers.Count > 0 && Water.Floats,
@@ -208,6 +214,7 @@ public sealed class VehicleAnalysis
         MobilityMode.Plane => "Aircraft",
         MobilityMode.Helicopter => "Helicopter",
         MobilityMode.Hover => "VTOL / drone",
+        MobilityMode.Building => "Building",
         _ => "Airship",
     };
     public int ErrorCount => Warnings.Count(w => w.Severity == Severity.Error);
@@ -735,6 +742,13 @@ public sealed class VehicleAnalysis
             }
         }
 
+        // A foundation on the bottom row makes it a building, whatever else it has.
+        if (Anchors.Any(c => Defs[c].Kind == BlockKind.Foundation && c.Y == Min.Y && !Disconnected.Contains(c)))
+        {
+            Mode = MobilityMode.Building;
+            return;
+        }
+
         bool anyBallast = Defs.Values.Any(d => d.Kind == BlockKind.BallastValve);
         bool shipParts = ShipPropellers.Count > 0 || anyBallast;
         if (Wheels.Count > 0 && !shipParts)
@@ -1059,6 +1073,24 @@ public sealed class VehicleAnalysis
         }
     }
 
+    /// <summary>A building needs none of a vehicle's parts; its guns need someone to fire them.</summary>
+    private void BuildingWarnings()
+    {
+        Warnings.Add(new DesignWarning(Severity.Info, "A building: it stays where it's put, anchored by its foundation."));
+        if (Guns.Any(g => g.Valid) && !Seats.Any(s => s.Role is SeatRole.Gunner or SeatRole.Driver))
+            Warnings.Add(new DesignWarning(Severity.Warning, "Its guns have nobody to fire them. Add a Gunner Seat (Control)."));
+        if (GeneratorKw > 0 && FuelL <= 0)
+            Warnings.Add(new DesignWarning(Severity.Error, "The generators burn fuel: add a Fuel Tank."));
+        PowerWarnings();
+        foreach (MissileInfo m in Missiles.Where(m => m.Problem != null))
+            Warnings.Add(new DesignWarning(m.Valid ? Severity.Info : Severity.Warning, m.Problem));
+        int loose = Disconnected.Count;
+        if (loose > 0)
+            Warnings.Add(new DesignWarning(Severity.Warning, $"{loose} block(s) aren't attached to the vehicle (shown in red) and will fall off."));
+        foreach (GunInfo g in Guns.Where(g => g.Valid && !g.BreechDef.Breech.Beam && g.ApRounds + g.HeRounds + g.FlakRounds == 0))
+            Warnings.Add(new DesignWarning(Severity.Warning, $"The {g.Label} gun has no ammo. Put a rack touching the breech, or connect racks to it with Ammo Feeds."));
+    }
+
     /// <summary>Railguns and lasers need electricity made aboard, and room to store a shot.</summary>
     private void PowerWarnings()
     {
@@ -1100,6 +1132,12 @@ public sealed class VehicleAnalysis
 
     private void CollectWarnings()
     {
+        if (IsBuilding)
+        {
+            BuildingWarnings();
+            return;
+        }
+
         if (!HasDriver)
             Warnings.Add(new DesignWarning(Severity.Error, "No driver seat. Every vehicle needs one to be driven (or a Drone Core to fly it by remote)."));
         bool needsEngine = !(IsAir && Jets > 0 && Thrusters.All(t => t.Kind == BlockKind.JetEngine));

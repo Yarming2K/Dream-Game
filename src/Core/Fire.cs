@@ -26,6 +26,8 @@ public static class Fire
         BlockKind.CommandConsole or BlockKind.Radar => 0.15f,
         BlockKind.DriverSeat or BlockKind.GunnerSeat or BlockKind.CommanderSeat => 0.1f,
         BlockKind.GasCell => 0.5f,
+        BlockKind.SupplyCrate => 0.45f,
+        BlockKind.Bunk or BlockKind.Workbench => 0.1f,
         _ => 0f,
     };
 

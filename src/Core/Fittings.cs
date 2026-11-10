@@ -7,6 +7,7 @@ namespace DreamGame.Core;
 public struct FittingCounts
 {
     public int Periscopes, Antennas, Toolboxes, SpareTracks, Vents, SmokeLaunchers, Headlights, Searchlights, Exhausts, Hatches;
+    public int Bunks, FirstAid, Lockers, Workbenches, SupplyCrates;
 }
 
 /// <summary>
@@ -39,6 +40,18 @@ public static class Fittings
     /// <summary>How long a smoke screen hangs, how big each cloud is, and how far ahead it's thrown.</summary>
     public const float SmokeLifeS = 40f, SmokeRadiusM = 7f, SmokeThrowM = 22f;
 
+    /// <summary>First aid: health per second for anyone within reach.</summary>
+    public const float FirstAidHpPerS = 15f, FirstAidRangeM = 3.5f;
+
+    /// <summary>How close you stand to a weapon locker to restock.</summary>
+    public const float LockerRangeM = 3f;
+
+    /// <summary>Repair bays and supply points reach vehicles parked this close (m).</summary>
+    public const float BayRangeM = 14f;
+
+    /// <summary>A repair bay patches this much health per second, and rebuilds a lost block this often (s).</summary>
+    public const float BayHpPerS = 12f, BayRebuildS = 3f;
+
     public static FittingCounts Count(IEnumerable<BlockDef> defs)
     {
         var c = new FittingCounts();
@@ -56,6 +69,11 @@ public static class Fittings
                 case "searchlight": c.Searchlights++; break;
                 case "exhaust": c.Exhausts++; break;
                 case "hatch": c.Hatches++; break;
+                case "bunk": c.Bunks++; break;
+                case "first_aid": c.FirstAid++; break;
+                case "weapon_locker": c.Lockers++; break;
+                case "workbench": c.Workbenches++; break;
+                case "supply_crate": c.SupplyCrates++; break;
             }
 
         return c;

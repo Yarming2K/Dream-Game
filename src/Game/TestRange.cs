@@ -397,6 +397,7 @@ public partial class TestRange : Node3D
 
         // In the air: a target plane flying circuits round the island, a helicopter hovering over the
         // eastern hills, and an airship off the north-east coast.
+        AddBuildings();
         AddFlyer(ExampleDesigns.Kestrel(), new Vector3(380f, 150f, 0f), 0f, Vector3.Forward * 62f, patrol: true);
         AddFlyer(ExampleDesigns.Hornet(), new Vector3(95f, 50f, -40f), -90f, Vector3.Zero);
         AddFlyer(ExampleDesigns.Zephyr(), new Vector3(170f, 100f, -170f), 200f, Vector3.Zero);
@@ -426,7 +427,7 @@ public partial class TestRange : Node3D
         _targets.Add(s);
     }
 
-    private void AddDummy(Blueprint bp, Vector3 pos, float yawDeg)
+    private VehicleBody AddDummy(Blueprint bp, Vector3 pos, float yawDeg)
     {
         VehicleAnalysis a = VehicleAnalysis.Analyze(bp);
         Vector3 at = a.IsNaval ? new Vector3(pos.X, VehicleBody.FloatHeight(a), pos.Z) : pos + Vector3.Up * VehicleBody.SpawnHeight(a);
@@ -435,6 +436,7 @@ public partial class TestRange : Node3D
         v.AiCrewActive = _liveFire;
         AddChild(v);
         _targets.Add(v);
+        return v;
     }
 
     private void SpawnVehicle()
@@ -452,6 +454,7 @@ public partial class TestRange : Node3D
             MobilityMode.Plane => StripStart + Vector3.Up * VehicleBody.SpawnHeight(a),
             MobilityMode.Helicopter or MobilityMode.Hover => HelipadCenter + Vector3.Up * VehicleBody.SpawnHeight(a),
             MobilityMode.Airship => HelipadCenter + Vector3.Up * 30f,
+            MobilityMode.Building => BuildSite + Vector3.Up * VehicleBody.SpawnHeight(a),
             _ => SpawnPoint + Vector3.Up * VehicleBody.SpawnHeight(a),
         };
         var where = new Transform3D(Basis.Identity, at);
@@ -666,9 +669,10 @@ public partial class TestRange : Node3D
     private void RespawnOnFoot()
     {
         _deadTime = -1f;
-        _me.Respawn(DepotCenter + new Vector3(-5, 0.3f, 3), 0f);
+        Vector3? bunk = BunkRespawn();
+        _me.Respawn(bunk ?? DepotCenter + new Vector3(-5, 0.3f, 3), 0f);
         _me.SetActive(true);
-        Big("Back on your feet at the supply pad");
+        Big(bunk.HasValue ? "Back on your feet at your bunk" : "Back on your feet at the supply pad");
     }
 
     // ---------- Frame ----------
@@ -785,6 +789,7 @@ public partial class TestRange : Node3D
             if (v == _mount && changed) _resupplying = true;
         }
 
+        ServicesTick(dt);
         if (_me.Active && _me.Alive && AtDepot(_me.GlobalPosition))
         {
             bool healed = _me.Health < InfantryDamage.MaxHealth;
@@ -1055,6 +1060,9 @@ public partial class TestRange : Node3D
             ExitVehicle();
             return;
         }
+
+        // Next to a bunk: rest there.
+        if (TryRest()) return;
 
         // Aboard a ship (or beside a tank), the seat you're standing at is the one you take: walk to the
         // gun you want to man.
@@ -1448,10 +1456,11 @@ public partial class TestRange : Node3D
         VehicleBody v = _mount;
         var sb = new StringBuilder();
         sb.Append($"[b]{v.DisplayName}[/b]\n");
-        if (v.IsNaval) NavalStatus(v, sb);
+        if (v.IsBuilding) sb.Append($"[color={Ui.Hex(Ui.Dim)}]Building: it stays where it's put. Walk to a gun's seat and press E to man it.[/color]\n");
+        else if (v.IsNaval) NavalStatus(v, sb);
         else if (v.IsAir) AirStatus(v, sb);
         else sb.Append($"[font_size=22][b]{Mathf.Abs(v.SpeedKmh):0}[/b][/font_size] km/h   ");
-        sb.Append($"Fuel {v.FuelL:0}/{v.FuelCapacityL:0} L   Engines {v.UsablePowerKw:0} kW\n");
+        if (!v.IsBuilding) sb.Append($"Fuel {v.FuelL:0}/{v.FuelCapacityL:0} L   Engines {v.UsablePowerKw:0} kW\n");
         if (v.HasElectric)
         {
             PowerBank e = v.Electric;
@@ -1466,11 +1475,11 @@ public partial class TestRange : Node3D
             if (_lock != null) sb.Append($"   [color={Ui.Hex(Ui.Bad)}]LOCK {_lock.DisplayName}[/color]");
             sb.Append('\n');
         }
-        if (!v.DriverAlive) sb.Append($"[color={Ui.Hex(Ui.Bad)}]Driver knocked out. Get out (E) and weld the seat back, or Backspace.[/color]\n");
-        else if (v.PowerKw <= 0) sb.Append($"[color={Ui.Hex(Ui.Bad)}]Engines destroyed.[/color]\n");
+        if (!v.DriverAlive && !v.IsBuilding) sb.Append($"[color={Ui.Hex(Ui.Bad)}]Driver knocked out. Get out (E) and weld the seat back, or Backspace.[/color]\n");
+        else if (v.PowerKw <= 0 && !v.IsBuilding) sb.Append($"[color={Ui.Hex(Ui.Bad)}]Engines destroyed.[/color]\n");
         else if (v.EngineDrowned) sb.Append($"[color={Ui.Hex(Ui.Bad)}]{(v.IsNaval ? "Engine room flooded: pump it out or weld the holes." : "Engine flooded: it won't run under water. Backspace to respawn.")}[/color]\n");
-        else if (v.FuelL <= 0) sb.Append($"[color={Ui.Hex(Ui.Bad)}]Out of fuel: {(v.IsNaval ? "stop inside the buoy ring." : "drive onto the supply pad.")}[/color]\n");
-        else if (!v.IsNaval && !v.IsAir && v.Wheels.Count == 0) sb.Append($"[color={Ui.Hex(Ui.Bad)}]No wheels left.[/color]\n");
+        else if (v.FuelL <= 0 && !v.IsBuilding) sb.Append($"[color={Ui.Hex(Ui.Bad)}]Out of fuel: {(v.IsNaval ? "stop inside the buoy ring." : "drive onto the supply pad.")}[/color]\n");
+        else if (!v.IsNaval && !v.IsAir && !v.IsBuilding && v.Wheels.Count == 0) sb.Append($"[color={Ui.Hex(Ui.Bad)}]No wheels left.[/color]\n");
         else if (v.IsNaval && v.PropsAlive == 0) sb.Append($"[color={Ui.Hex(Ui.Bad)}]Propellers destroyed.[/color]\n");
         if (!v.IsNaval && v.Submerged > 0.25f) sb.Append($"[color={Ui.Hex(Ui.Warn)}]Deep water: land vehicles sink. Back out while the engine still runs.[/color]\n");
         if (v.IsUpsideDownOrStuck && (!v.IsAir || v.OnGround)) sb.Append($"[color={Ui.Hex(Ui.Warn)}]Tipped over: press R to get back up.[/color]\n");
@@ -1707,6 +1716,7 @@ public partial class TestRange : Node3D
             : looked.Seats.All(s => s.Info.Remote) ? $"E  fly {looked.DisplayName} by remote" : $"E  get into {looked.DisplayName}";
         if (_me.Swimming && _prompt.Text.Length == 0) _prompt.Text = "Swimming  ·  Space up  ·  C down";
         if (_resupplying) _prompt.Text = (_prompt.Text.Length > 0 ? _prompt.Text + "\n" : "") + "Resupplying...";
+        if (_serviceNote.Length > 0) _prompt.Text = (_prompt.Text.Length > 0 ? _prompt.Text + "\n" : "") + _serviceNote;
     }
 
     private void OnFired(VehicleBody.GunRt g)

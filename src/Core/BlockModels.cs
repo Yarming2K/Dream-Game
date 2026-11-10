@@ -633,6 +633,20 @@ public static class BlockModels
                 break;
             }
 
+            case BlockKind.Foundation:
+                // A concrete footing: a block with a lip round its top and the ends of its reinforcing bars.
+                k.Bevel(new Vector3(Full), Paint.Self, Vector3.Zero, 0.012f);
+                k.Box(new Vector3(Full * 1.01f, 0.03f, Full * 1.01f), Paint.SelfDark, new Vector3(0, H - 0.04f, 0));
+                break;
+
+            case BlockKind.FirstAid:
+                // A white cabinet with a red cross, on the back face.
+                k.Bevel(new Vector3(0.34f, 0.3f, 0.12f), Paint.Self, new Vector3(0, 0.02f, H - 0.06f), 0.012f);
+                k.Box(new Vector3(0.14f, 0.04f, 0.006f), Paint.Red, new Vector3(0, 0.04f, H - 0.123f));
+                k.Box(new Vector3(0.04f, 0.14f, 0.006f), Paint.Red, new Vector3(0, 0.04f, H - 0.123f));
+                k.Box(new Vector3(0.04f, 0.02f, 0.02f), Paint.Steel, new Vector3(0.12f, -0.06f, H - 0.13f));
+                break;
+
             case BlockKind.Stairs:
                 // Four treads up the slope (rising toward the back), with stringers down both sides.
                 for (int i = 0; i < 4; i++)
@@ -1057,6 +1071,68 @@ public static class BlockModels
             case BlockKind.LeadBallast:
                 Ingots(k, ext, Paint.Self);
                 break;
+
+            case BlockKind.Bunk:
+            {
+                // A steel bed frame with a mattress, a folded blanket and a pillow.
+                float w = ext.X, l = ext.Z, y0 = -ext.Y * 0.5f;
+                foreach (float x in new[] { -w * 0.45f, w * 0.45f })
+                foreach (float z in new[] { -l * 0.47f, l * 0.47f })
+                    k.Box(new Vector3(0.04f, ext.Y * 0.8f, 0.04f), Paint.Steel, new Vector3(x, y0 + ext.Y * 0.4f, z));
+                k.Box(new Vector3(w * 0.94f, 0.04f, l * 0.98f), Paint.Steel, new Vector3(0, y0 + ext.Y * 0.62f, 0));
+                k.Bevel(new Vector3(w * 0.9f, 0.1f, l * 0.94f), Paint.Self, new Vector3(0, y0 + ext.Y * 0.74f, 0), 0.03f);
+                k.Bevel(new Vector3(w * 0.92f, 0.05f, l * 0.45f), Paint.SelfDark, new Vector3(0, y0 + ext.Y * 0.82f, l * 0.2f), 0.02f);
+                k.Bevel(new Vector3(w * 0.6f, 0.07f, 0.22f), Paint.Steel, new Vector3(0, y0 + ext.Y * 0.84f, -l * 0.38f), 0.03f);
+                break;
+            }
+
+            case BlockKind.Locker:
+            {
+                // A tall steel cabinet; behind its mesh door, rifles stand in a rack and rockets lie on a shelf.
+                k.Bevel(new Vector3(ext.X, ext.Y, ext.Z * 0.9f), Paint.Self, new Vector3(0, 0, ext.Z * 0.05f), 0.02f);
+                k.Box(new Vector3(ext.X * 0.86f, ext.Y * 0.9f, 0.01f), Paint.Dark, new Vector3(0, 0, -ext.Z * 0.4f));
+                for (int i = 0; i < 4; i++)
+                {
+                    float x = -ext.X * 0.3f + i * ext.X * 0.2f;
+                    k.Box(new Vector3(0.04f, ext.Y * 0.5f, 0.05f), Paint.SelfDark, new Vector3(x, -ext.Y * 0.12f, -ext.Z * 0.36f));
+                }
+
+                k.Cyl(0.05f, ext.X * 0.7f, Paint.Steel, new Vector3(0, ext.Y * 0.3f, -ext.Z * 0.36f), AlongX, sides: 10);
+                k.Box(new Vector3(ext.X * 0.9f, 0.02f, 0.02f), Paint.Steel, new Vector3(0, ext.Y * 0.2f, -ext.Z * 0.43f));
+                k.Box(new Vector3(0.03f, 0.12f, 0.03f), Paint.Steel, new Vector3(ext.X * 0.38f, 0, -ext.Z * 0.45f));
+                break;
+            }
+
+            case BlockKind.Workbench:
+            {
+                // A heavy bench on legs, a vise at one end, tools hung on a board behind and a lamp over it.
+                float top = ext.Y * 0.0f;
+                k.Bevel(new Vector3(ext.X, 0.08f, ext.Z * 0.9f), Paint.Self, new Vector3(0, top, 0), 0.015f);
+                foreach (float x in new[] { -ext.X * 0.45f, ext.X * 0.45f })
+                foreach (float z in new[] { -ext.Z * 0.38f, ext.Z * 0.38f })
+                    k.Box(new Vector3(0.07f, ext.Y * 0.5f - 0.04f, 0.07f), Paint.Dark, new Vector3(x, top - ext.Y * 0.25f, z));
+                k.Box(new Vector3(ext.X * 0.9f, 0.04f, ext.Z * 0.8f), Paint.SelfDark, new Vector3(0, -ext.Y * 0.38f, 0));
+                k.Box(new Vector3(0.16f, 0.14f, 0.14f), Paint.Steel, new Vector3(-ext.X * 0.38f, top + 0.11f, -ext.Z * 0.2f));
+                k.Box(new Vector3(ext.X * 0.9f, ext.Y * 0.42f, 0.03f), Paint.SelfDark, new Vector3(0, top + ext.Y * 0.23f, ext.Z * 0.44f));
+                for (int i = 0; i < 6; i++)
+                    k.Box(new Vector3(0.03f, 0.18f, 0.02f), Paint.Steel, new Vector3(-ext.X * 0.3f + i * ext.X * 0.12f, top + ext.Y * 0.24f, ext.Z * 0.42f));
+                k.Cyl(0.06f, 0.05f, Paint.Dark, new Vector3(ext.X * 0.25f, top + ext.Y * 0.45f, ext.Z * 0.3f), sides: 12);
+                k.Glow(new Vector3(0.08f, 0.01f, 0.08f), new Vector3(1f, 0.9f, 0.7f), 2f, new Vector3(ext.X * 0.25f, top + ext.Y * 0.42f, ext.Z * 0.3f));
+                break;
+            }
+
+            case BlockKind.SupplyCrate:
+            {
+                // Stacked ammunition boxes and a fuel drum on a pallet.
+                k.Box(new Vector3(ext.X, 0.06f, ext.Z), Paint.SelfDark, new Vector3(0, -ext.Y * 0.47f, 0));
+                k.Bevel(new Vector3(ext.X * 0.55f, ext.Y * 0.4f, ext.Z * 0.45f), Paint.Self, new Vector3(-ext.X * 0.2f, -ext.Y * 0.24f, -ext.Z * 0.24f), 0.02f);
+                k.Bevel(new Vector3(ext.X * 0.55f, ext.Y * 0.4f, ext.Z * 0.45f), Paint.Self, new Vector3(-ext.X * 0.2f, -ext.Y * 0.24f, ext.Z * 0.24f), 0.02f);
+                k.Bevel(new Vector3(ext.X * 0.5f, ext.Y * 0.35f, ext.Z * 0.42f), Paint.Self, new Vector3(-ext.X * 0.2f, ext.Y * 0.14f, 0), 0.02f);
+                k.Box(new Vector3(ext.X * 0.3f, 0.06f, 0.006f), Paint.Brass, new Vector3(-ext.X * 0.2f, -ext.Y * 0.2f, -ext.Z * 0.467f));
+                k.Cyl(ext.X * 0.2f, ext.Y * 0.8f, Paint.Red, new Vector3(ext.X * 0.27f, -ext.Y * 0.06f, 0), sides: 18);
+                foreach (float y in new[] { -0.3f, 0.2f }) k.Cyl(ext.X * 0.205f, 0.03f, Paint.Dark, new Vector3(ext.X * 0.27f, ext.Y * y, 0), sides: 18);
+                break;
+            }
 
             case BlockKind.Door:
             {
