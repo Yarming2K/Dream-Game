@@ -289,10 +289,10 @@ public sealed partial class GridView
                 Aabb box = xf * mesh.GetAabb();
                 if (Mathf.Max(box.Size.X, Mathf.Max(box.Size.Y, box.Size.Z)) < 0.09f) continue;
                 Color own = shapedPlate ? new Color(b.Def.ColorR * FarShade, b.Def.ColorG * FarShade, b.Def.ColorB * FarShade) : ColorOf(mat);
-                Color c = (_livery != null && Liveries.Paints(b.Def, finish)) || b.Def.Glass
-                    ? Paintwork.FarColor(b.Def, _livery, _waterline, xf.Origin.N(), (xf.Basis * Vector3.Up).N(), shapedPlate, own)
-                    : own;
-                Append(verts, norms, cols, idx, Simplified(mesh), xf, c);
+                bool painted = (_livery != null && Liveries.Paints(b.Def, finish)) || b.Def.Glass;
+                BlockDef def = b.Def;
+                Append(verts, norms, cols, idx, Simplified(mesh), xf, own,
+                    painted ? (p, nrm) => Paintwork.FarColor(def, _livery, _waterline, p.N(), nrm.N(), shapedPlate, own) : null);
             }
         }
 
@@ -392,7 +392,8 @@ public sealed partial class GridView
     }
 
     /// <summary>Copies a mesh's triangles in, placed by <paramref name="xf"/>, in one color.</summary>
-    private static void Append(List<Vector3> v, List<Vector3> n, List<Color> c, List<int> idx, Mesh mesh, in Transform3D xf, Color color)
+    private static void Append(List<Vector3> v, List<Vector3> n, List<Color> c, List<int> idx, Mesh mesh, in Transform3D xf, Color color,
+        Func<Vector3, Vector3, Color> colorAt = null)
     {
         if (!MeshData.TryGetValue(mesh, out (Vector3[] v, Vector3[] n, int[] i) data))
         {
@@ -421,11 +422,13 @@ public sealed partial class GridView
 
         int first = v.Count;
         Basis nb = xf.Basis.Inverse().Transposed();
-        foreach (Vector3 p in data.v) v.Add(xf * p);
-        foreach (Vector3 q in data.n)
+        for (int k = 0; k < data.v.Length; k++)
         {
-            n.Add((nb * q).Normalized());
-            c.Add(color);
+            Vector3 p = xf * data.v[k];
+            Vector3 q = (nb * data.n[k]).Normalized();
+            v.Add(p);
+            n.Add(q);
+            c.Add(colorAt != null ? colorAt(p, q) : color);
         }
 
         // A mirrored placement flips the winding; flip it back.

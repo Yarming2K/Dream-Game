@@ -94,10 +94,16 @@ vec3 pattern_color(vec3 p) {
 	return c;
 }
 
+// The 24 ways a block can be turned, so a painted part can work out where each of its points is.
+mat3 orient_basis(int i) {
+	const mat3 T[24] = mat3[24](ORIENT_TABLE);
+	return T[clamp(i, 0, 23)];
+}
+
 void vertex() {
 	lpos = VERTEX;
 	lnrm = NORMAL;
-	ppos = per_part ? INSTANCE_CUSTOM.xyz : VERTEX;
+	ppos = per_part ? INSTANCE_CUSTOM.xyz + orient_basis(int(INSTANCE_CUSTOM.w + 0.5)) * VERTEX : VERTEX;
 }
 
 void fragment() {
@@ -114,8 +120,8 @@ void fragment() {
 		vec2 e = min(f, 1.0 - f) * 0.5;
 		float bar = 1.0 - smoothstep(0.022, 0.03, min(e.x, e.y));
 		col = mix(glass_color, frame_color, bar);
-		m = mix(0.9, 0.5, bar);
-		r = mix(0.05, 0.55, bar);
+		m = mix(0.55, 0.5, bar);
+		r = mix(0.12, 0.55, bar);
 		g = mix(1.0, g, bar);
 	} else {
 		vec3 p = per_part ? ppos : lpos;
@@ -155,9 +161,26 @@ void fragment() {
 
     private static Shader ShaderFor(bool twoSided)
     {
-        if (twoSided) return _twoSided ??= new Shader { Code = Code.Replace("CULL", "cull_disabled") };
-        return _oneSided ??= new Shader { Code = Code.Replace("CULL", "cull_back") };
+        if (twoSided) return _twoSided ??= new Shader { Code = Source("cull_disabled") };
+        return _oneSided ??= new Shader { Code = Source("cull_back") };
     }
+
+    /// <summary>The shader with its cull mode and the table of block turns filled in (columns of each turn's matrix).</summary>
+    private static string Source(string cull)
+    {
+        var mats = new List<string>();
+        for (int o = 0; o < Orientations.Count; o++)
+        {
+            int[] m = Orientations.Matrix(o);
+            string Col(int j) => $"vec3({m[j]}.0, {m[3 + j]}.0, {m[6 + j]}.0)";
+            mats.Add($"mat3({Col(0)}, {Col(1)}, {Col(2)})");
+        }
+
+        return Code.Replace("CULL", cull).Replace("ORIENT_TABLE", string.Join(", ", mats));
+    }
+
+    /// <summary>What a painted part's batch carries per instance: where it is and how its block is turned.</summary>
+    public static Color PartData(in Transform3D xf, int orientation) => new(xf.Origin.X, xf.Origin.Y, xf.Origin.Z, orientation);
 
     private static Color C(NVec v) => new(v.X, v.Y, v.Z);
 

@@ -226,7 +226,7 @@ public partial class BatchedBlocks : Node3D
         }
 
         if (!_chunks.TryGetValue(key, out HashSet<Int3> anchors) || anchors.Count == 0) return;
-        var groups = new Dictionary<(Mesh, Material, bool), List<Transform3D>>();
+        var groups = new Dictionary<(Mesh, Material, bool), List<(Transform3D xf, int o)>>();
         var surface = new List<Int3>();
         foreach (Int3 a in anchors)
         {
@@ -243,8 +243,8 @@ public partial class BatchedBlocks : Node3D
                 Material mat = _armorView ? ArmorMaterial(e.Def, false)
                     : _livery != null && Liveries.Paints(e.Def, finish) ? Paintwork.Part(e.Def, _livery, finish == Paint.SelfDark, _waterline) : own;
                 var gk = (mesh, mat, e.Tinted);
-                if (!groups.TryGetValue(gk, out List<Transform3D> list)) groups[gk] = list = new List<Transform3D>();
-                list.Add(at * local);
+                if (!groups.TryGetValue(gk, out List<(Transform3D, int)> list)) groups[gk] = list = new List<(Transform3D, int)>();
+                list.Add((at * local, e.Orientation));
             }
 
             foreach ((Mesh mesh, Material own, Transform3D local, Paint finish) in BlockVisuals.PartsOf(e.Def, e.Caliber, Hints))
@@ -256,14 +256,14 @@ public partial class BatchedBlocks : Node3D
             }
         }
 
-        foreach (((Mesh mesh, Material mat, bool tinted), List<Transform3D> xfs) in groups)
+        foreach (((Mesh mesh, Material mat, bool tinted), List<(Transform3D xf, int o)> xfs) in groups)
         {
             bool painted = mat is ShaderMaterial;
             var mm = new MultiMesh { TransformFormat = MultiMesh.TransformFormatEnum.Transform3D, UseCustomData = painted, Mesh = mesh, InstanceCount = xfs.Count };
             for (int i = 0; i < xfs.Count; i++)
             {
-                mm.SetInstanceTransform(i, xfs[i]);
-                if (painted) mm.SetInstanceCustomData(i, new Color(xfs[i].Origin.X, xfs[i].Origin.Y, xfs[i].Origin.Z, 0f));
+                mm.SetInstanceTransform(i, xfs[i].xf);
+                if (painted) mm.SetInstanceCustomData(i, Paintwork.PartData(xfs[i].xf, xfs[i].o));
             }
 
             var mmi = new MultiMeshInstance3D { Multimesh = mm, MaterialOverride = mat };

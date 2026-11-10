@@ -288,7 +288,7 @@ public static class BlockCatalog
         {
             Id = "glazing", Name = "Glazing", Category = "Structure", Kind = BlockKind.Armor, Glass = true,
             Description = "Armored glass in a frame: cockpits, bridges and windows. Comes in every armor shape (press V), so a canopy can be built pane by pane. Stops splinters, not shells.",
-            MassKg = 16, Hp = 40, ArmorMm = 8, ColorR = 0.14f, ColorG = 0.19f, ColorB = 0.22f, Metallic = 0.85f, Roughness = 0.08f,
+            MassKg = 16, Hp = 40, ArmorMm = 8, ColorR = 0.08f, ColorG = 0.11f, ColorB = 0.13f, Metallic = 0.55f, Roughness = 0.12f,
         },
         new BlockDef
         {

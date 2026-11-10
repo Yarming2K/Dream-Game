@@ -60,7 +60,7 @@ public static class Liveries
         new()
         {
             Id = "woodland", Name = "Woodland", Pattern = LiveryPattern.Blotches, Base = C(0.33f, 0.37f, 0.22f), Second = C(0.24f, 0.19f, 0.13f),
-            Third = C(0.11f, 0.11f, 0.1f), Scale = 2.2f, Description = "Green, brown and black patches for forests and fields.",
+            Third = C(0.11f, 0.11f, 0.1f), Scale = 1.5f, Description = "Green, brown and black patches for forests and fields.",
         },
         new()
         {
@@ -99,7 +99,7 @@ public static class Liveries
         },
         new()
         {
-            Id = "sky", Name = "Sky", Pattern = LiveryPattern.Plain, Base = C(0.62f, 0.68f, 0.74f), Description = "Pale blue-grey, for aircraft seen from below.",
+            Id = "sky", Name = "Sky", Pattern = LiveryPattern.Plain, Base = C(0.5f, 0.56f, 0.62f), Description = "Pale blue-grey, for aircraft seen from below.",
         },
     };
 

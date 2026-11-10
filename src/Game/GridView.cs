@@ -302,7 +302,7 @@ public sealed partial class GridView
         long started = Perf.Now;
         FarChanged(c.Section);
         List<Piece> made = _building && _shared != null ? new List<Piece>() : null;
-        var groups = new Dictionary<(Mesh, Material), List<Transform3D>>();
+        var groups = new Dictionary<(Mesh, Material), List<(Transform3D xf, int o)>>();
         var surface = new List<Int3>();
         foreach (BlockInstance b in c.Blocks)
         {
@@ -317,8 +317,8 @@ public sealed partial class GridView
             void AddPart(Mesh mesh, Material own, Transform3D local, Paint finish)
             {
                 Material mat = _livery != null && Liveries.Paints(b.Def, finish) ? Paintwork.Part(b.Def, _livery, finish == Paint.SelfDark, _waterline) : own;
-                if (!groups.TryGetValue((mesh, mat), out List<Transform3D> list)) groups[(mesh, mat)] = list = new List<Transform3D>();
-                list.Add(at * local);
+                if (!groups.TryGetValue((mesh, mat), out List<(Transform3D, int)> list)) groups[(mesh, mat)] = list = new List<(Transform3D, int)>();
+                list.Add((at * local, b.Orientation));
             }
 
             foreach ((Mesh mesh, Material own, Transform3D local, Paint finish) in BlockVisuals.PartsOf(b.Def, CaliberOf(b)))
@@ -330,15 +330,15 @@ public sealed partial class GridView
             }
         }
 
-        foreach (((Mesh mesh, Material mat), List<Transform3D> xfs) in groups)
+        foreach (((Mesh mesh, Material mat), List<(Transform3D xf, int o)> xfs) in groups)
         {
             // Painted parts carry their own position, so each takes the pattern's color where it is.
             bool painted = mat is ShaderMaterial;
             var mm = new MultiMesh { TransformFormat = MultiMesh.TransformFormatEnum.Transform3D, UseCustomData = painted, Mesh = mesh, InstanceCount = xfs.Count };
             for (int i = 0; i < xfs.Count; i++)
             {
-                mm.SetInstanceTransform(i, xfs[i]);
-                if (painted) mm.SetInstanceCustomData(i, new Color(xfs[i].Origin.X, xfs[i].Origin.Y, xfs[i].Origin.Z, 0f));
+                mm.SetInstanceTransform(i, xfs[i].xf);
+                if (painted) mm.SetInstanceCustomData(i, Paintwork.PartData(xfs[i].xf, xfs[i].o));
             }
 
             var piece = new Piece
