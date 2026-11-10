@@ -41,6 +41,11 @@ public sealed class Blueprint
     [JsonPropertyName("name")] public string Name { get; set; } = "Untitled";
     [JsonPropertyName("blocks")] public List<BlueprintBlock> Blocks { get; set; } = new();
 
+    /// <summary>The paint job's id (see <see cref="Liveries"/>), or null for the default (factory colors; naval grey on ships).</summary>
+    [JsonPropertyName("paint")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string Paint { get; set; }
+
     private static readonly JsonSerializerOptions Options = new() { WriteIndented = false };
 
     public string ToJson() => JsonSerializer.Serialize(this, Options);
@@ -137,5 +142,10 @@ public sealed class Blueprint
         return bp;
     }
 
-    public Blueprint Clone() => FromCellMap(Name, Blocks);
+    public Blueprint Clone()
+    {
+        Blueprint c = FromCellMap(Name, Blocks);
+        c.Paint = Paint;
+        return c;
+    }
 }

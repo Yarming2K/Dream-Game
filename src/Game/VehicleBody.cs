@@ -151,7 +151,9 @@ public partial class VehicleBody : RigidBody3D, IGridHost
             if (g.Brake.HasValue) calibers[g.Brake.Value] = g.Stats.CaliberMm;
         }
 
-        v.View = new GridView(v, v.Model, c => calibers.TryGetValue(c, out float cal) ? cal : 76f, shareKey: bp, lod: true);
+        Livery livery = Liveries.For(bp, a.IsNaval);
+        v.View = new GridView(v, v.Model, c => calibers.TryGetValue(c, out float cal) ? cal : 76f, shareKey: bp, lod: true,
+            livery: livery, waterline: a.IsNaval ? a.Water.WaterlineY : null);
         v.Radius = v.View.BoundingRadius();
         v.CollisionLayer = GridRegistry.Layers.Vehicles;
         v.CollisionMask = GridRegistry.Layers.All;

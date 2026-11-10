@@ -28,6 +28,9 @@ public enum Prim
     /// taper across X and Detail2 the taper through Z. Blades, fins and flaps.
     /// </summary>
     Slab,
+
+    /// <summary>One of the block shapes from <see cref="Shapes"/> filling the cell: Detail is the <see cref="BlockShape"/> (as a number).</summary>
+    Shape,
 }
 
 /// <summary>What a part is painted with: the block's own color, or one of a few shared finishes.</summary>
@@ -73,6 +76,7 @@ public struct ModelPart
         Prim.Torus => $"torus:{Size.X:0.###}:{Size.Y:0.####}",
         Prim.Sphere => $"sphere:{Size.X:0.###}",
         Prim.Slab => $"slab:{Size.X:0.###}:{Size.Y:0.###}:{Size.Z:0.###}:{Detail:0.##}:{Detail2:0.##}",
+        Prim.Shape => $"shape:{(int)Detail}",
         _ => "wedge",
     };
 }
@@ -100,9 +104,15 @@ public static class BlockModels
 
     public static float BarrelRadius(float caliberMm) => Math.Clamp(caliberMm / 1000f * 0.85f, 0.03f, 0.4f);
 
-    /// <summary>Blocks whose plain faces merge with their neighbors into one continuous hull surface.</summary>
+    /// <summary>
+    /// Blocks whose faces merge with their neighbors into one continuous hull surface: armor, glazing, frames
+    /// and gas cells, in any of their one-cell shapes.
+    /// </summary>
     public static bool IsSurface(BlockDef def) =>
-        def.Shape == BlockShape.Cube && def.Kind is BlockKind.Armor or BlockKind.Frame or BlockKind.GasCell;
+        !def.IsMultiCell && def.Kind is BlockKind.Armor or BlockKind.Frame or BlockKind.GasCell;
+
+    /// <summary>The block whose surface material a shaped block uses (its plain version), so a slope and the plates beside it are one surface.</summary>
+    public static BlockDef SurfaceDefOf(BlockDef def) => def.BaseId != null && def.BaseId != def.Id && BlockCatalog.TryGet(def.BaseId, out BlockDef b) ? b : def;
 
     /// <summary>How wide the chamfer is on a surface block's outer edges.</summary>
     public static float SurfaceBevel(BlockDef def) => def.Kind == BlockKind.GasCell ? 0.11f : 0.022f;
@@ -175,6 +185,8 @@ public static class BlockModels
 
         public void Wedge(Paint p) => Add(Prim.Wedge, Vector3.One, 0, p, Matrix4x4.Identity);
 
+        public void Shape(BlockShape s, Paint p) => Add(Prim.Shape, Vector3.One, (int)s, p, Matrix4x4.Identity);
+
         public void Glow(Vector3 size, Vector3 color, float energy, Vector3 pos) =>
             Add(Prim.Box, size, 0, Paint.Glow, At(pos), color, energy);
 
@@ -208,8 +220,11 @@ public static class BlockModels
         float br = BarrelRadius(caliberMm);
         switch (def.Kind)
         {
-            case BlockKind.Armor when def.Shape == BlockShape.Wedge:
-                k.Wedge(Paint.Self);
+            case BlockKind.Armor when def.Shape != BlockShape.Cube:
+                k.Shape(def.Shape, def.Glass ? Paint.Glass : Paint.Self);
+                break;
+            case BlockKind.Armor when def.Glass:
+                k.Shape(BlockShape.Cube, Paint.Glass);
                 break;
             case BlockKind.Armor:
             case BlockKind.Frame:
@@ -267,6 +282,14 @@ public static class BlockModels
 
             case BlockKind.Track:
                 TrackRun(k, def.WheelRadiusM, 0.44f, Full);
+                break;
+
+            case BlockKind.DriverSeat when def.Id == "pilot_seat":
+                PilotSeat(k);
+                break;
+
+            case BlockKind.Detail:
+                Detail(k, def);
                 break;
 
             case BlockKind.DriverSeat:
@@ -581,6 +604,149 @@ public static class BlockModels
     }
 
     /// <summary>A stretch of track: a road wheel on an axle along X, and links top and bottom with grousers.</summary>
+    private static readonly Vector3 Lamp = new(1f, 0.92f, 0.75f);
+
+    /// <summary>An open cockpit: a tub, a seat, a stick and an instrument panel, made to sit under glazing.</summary>
+    private static void PilotSeat(Maker k)
+    {
+        k.Bevel(new Vector3(0.46f, 0.08f, 0.46f), Paint.SelfDark, new Vector3(0, -0.21f, 0), 0.015f);
+        foreach (float x in new[] { -0.2f, 0.2f }) k.Box(new Vector3(0.05f, 0.08f, 0.3f), Paint.SelfDark, new Vector3(x, -0.13f, 0.02f));
+        k.Bevel(new Vector3(0.22f, 0.05f, 0.2f), Paint.Dark, new Vector3(0, -0.12f, 0.06f), 0.012f);
+        k.Bevel(new Vector3(0.22f, 0.26f, 0.05f), Paint.Dark, new Vector3(0, 0f, 0.17f), 0.012f, Rot(Vector3.UnitX, -0.2f));
+        k.Bevel(new Vector3(0.14f, 0.07f, 0.05f), Paint.Dark, new Vector3(0, 0.16f, 0.2f), 0.01f);
+        k.Cyl(0.012f, 0.16f, Paint.Steel, new Vector3(0, -0.1f, -0.06f), sides: 8);
+        k.Cyl(0.02f, 0.05f, Paint.Dark, new Vector3(0, -0.005f, -0.06f), sides: 10);
+        k.Cyl(0.008f, 0.08f, Paint.Steel, new Vector3(-0.2f, -0.06f, 0.02f), sides: 6);
+        // The instrument panel, angled toward the pilot, with lit dials and a screen.
+        Quaternion tilt = Rot(Vector3.UnitX, 0.35f);
+        k.Bevel(new Vector3(0.36f, 0.13f, 0.04f), Paint.Dark, new Vector3(0, -0.04f, -0.2f), 0.01f, tilt);
+        k.Glow(new Vector3(0.1f, 0.05f, 0.006f), Amber, 1.2f, new Vector3(0, -0.035f, -0.226f));
+        foreach (float x in new[] { -0.12f, 0.12f }) k.GlowCyl(0.022f, 0.006f, Cyan, 1.2f, new Vector3(x, -0.04f, -0.224f), AlongZ);
+        k.Box(new Vector3(0.38f, 0.02f, 0.06f), Paint.SelfDark, new Vector3(0, 0.03f, -0.21f));
+    }
+
+    /// <summary>Cosmetic parts. Each sits on the bottom of its cell (or against the back), so it can go on any face.</summary>
+    private static void Detail(Maker k, BlockDef def)
+    {
+        const float b = -H;
+        switch (def.Id)
+        {
+            case "hatch":
+                k.Cyl(0.19f, 0.03f, Paint.SelfDark, new Vector3(0, b + 0.015f, 0), sides: 24);
+                k.Cyl(0.17f, 0.04f, Paint.Self, new Vector3(0, b + 0.05f, 0), sides: 24);
+                k.Cyl(0.05f, 0.02f, Paint.SelfDark, new Vector3(0, b + 0.075f, 0), sides: 12);
+                k.Cyl(0.025f, 0.14f, Paint.Steel, new Vector3(0, b + 0.05f, 0.18f), AlongX, sides: 10);
+                k.Box(new Vector3(0.08f, 0.02f, 0.015f), Paint.Steel, new Vector3(0, b + 0.078f, -0.1f));
+                k.Bolts(8, 0.18f, b + 0.032f, 0.01f, 0.02f, Paint.Steel);
+                break;
+            case "periscope":
+                k.Bevel(new Vector3(0.2f, 0.06f, 0.16f), Paint.SelfDark, new Vector3(0, b + 0.03f, 0), 0.01f);
+                k.Bevel(new Vector3(0.15f, 0.1f, 0.12f), Paint.Self, new Vector3(0, b + 0.11f, 0), 0.01f);
+                k.Box(new Vector3(0.11f, 0.045f, 0.01f), Paint.Glass, new Vector3(0, b + 0.115f, -0.062f));
+                k.Box(new Vector3(0.16f, 0.012f, 0.05f), Paint.SelfDark, new Vector3(0, b + 0.165f, -0.07f));
+                break;
+            case "headlight":
+                k.Box(new Vector3(0.04f, 0.12f, 0.04f), Paint.Dark, new Vector3(0, b + 0.06f, 0.04f));
+                k.Cyl(0.075f, 0.12f, Paint.Self, new Vector3(0, b + 0.15f, 0), AlongZ, sides: 16);
+                k.GlowCyl(0.06f, 0.01f, Lamp, 1.2f, new Vector3(0, b + 0.15f, -0.062f), AlongZ);
+                k.Torus(0.08f, 0.008f, Paint.Dark, new Vector3(0, b + 0.15f, -0.075f), AlongZ);
+                k.Box(new Vector3(0.012f, 0.16f, 0.012f), Paint.Dark, new Vector3(0, b + 0.15f, -0.078f));
+                k.Box(new Vector3(0.16f, 0.012f, 0.012f), Paint.Dark, new Vector3(0, b + 0.15f, -0.078f));
+                break;
+            case "toolbox":
+                k.Bevel(new Vector3(0.42f, 0.16f, 0.22f), Paint.Self, new Vector3(0, b + 0.08f, 0), 0.012f);
+                k.Box(new Vector3(0.43f, 0.012f, 0.225f), Paint.SelfDark, new Vector3(0, b + 0.125f, 0));
+                foreach (float x in new[] { -0.12f, 0.12f }) k.Box(new Vector3(0.03f, 0.05f, 0.012f), Paint.Steel, new Vector3(x, b + 0.11f, -0.113f));
+                foreach (float x in new[] { -0.17f, 0.17f }) k.Box(new Vector3(0.02f, 0.165f, 0.226f), Paint.SelfDark, new Vector3(x, b + 0.08f, 0));
+                break;
+            case "spare_tracks":
+                k.Box(new Vector3(0.46f, 0.02f, 0.03f), Paint.Dark, new Vector3(0, b + 0.045f, 0));
+                for (int i = -1; i <= 1; i++)
+                {
+                    k.Box(new Vector3(0.42f, 0.035f, 0.12f), Paint.Self, new Vector3(0, b + 0.018f, i * 0.14f));
+                    k.Box(new Vector3(0.06f, 0.05f, 0.06f), Paint.Steel, new Vector3(0, b + 0.045f, i * 0.14f));
+                    k.Cyl(0.012f, 0.44f, Paint.Steel, new Vector3(0, b + 0.018f, i * 0.14f + 0.06f), AlongX, sides: 6);
+                }
+
+                break;
+            case "antenna":
+                k.Cyl(0.04f, 0.06f, Paint.Dark, new Vector3(0, b + 0.03f, 0), sides: 12);
+                k.Cyl(0.018f, 0.08f, Paint.Steel, new Vector3(0, b + 0.1f, 0), sides: 8);
+                k.Cyl(0.006f, 1.5f, Paint.Dark, new Vector3(0, b + 0.89f, 0), top: 0.003f, sides: 6);
+                k.Sphere(0.012f, Paint.Dark, new Vector3(0, b + 1.64f, 0));
+                break;
+            case "railing":
+                foreach (float x in new[] { -0.22f, 0.22f }) k.Cyl(0.014f, Full, Paint.Self, new Vector3(x, 0, 0.22f), sides: 8);
+                k.Cyl(0.012f, Full, Paint.Self, new Vector3(0, 0.23f, 0.22f), AlongX, sides: 8);
+                k.Cyl(0.01f, Full, Paint.Self, new Vector3(0, 0f, 0.22f), AlongX, sides: 8);
+                k.Box(new Vector3(Full, 0.012f, 0.04f), Paint.SelfDark, new Vector3(0, b + 0.006f, 0.22f));
+                break;
+            case "ladder":
+                foreach (float x in new[] { -0.15f, 0.15f })
+                {
+                    k.Box(new Vector3(0.02f, Full, 0.02f), Paint.Self, new Vector3(x, 0, 0.215f));
+                    foreach (float y in new[] { -0.18f, 0.18f }) k.Box(new Vector3(0.02f, 0.02f, 0.03f), Paint.Dark, new Vector3(x, y, 0.235f));
+                }
+
+                for (int i = 0; i < 4; i++) k.Cyl(0.01f, 0.3f, Paint.Steel, new Vector3(0, -0.19f + i * 0.125f, 0.215f), AlongX, sides: 6);
+                break;
+            case "smoke_launcher":
+            {
+                k.Bevel(new Vector3(0.36f, 0.06f, 0.2f), Paint.SelfDark, new Vector3(0, b + 0.03f, 0.02f), 0.01f);
+                Quaternion up = Rot(Vector3.UnitX, -0.6f);
+                foreach (float x in new[] { -0.11f, 0f, 0.11f })
+                {
+                    var at = new Vector3(x, b + 0.13f, -0.02f);
+                    k.Cyl(0.04f, 0.2f, Paint.Self, at, up, sides: 12);
+                    k.Cyl(0.043f, 0.015f, Paint.Dark, at + Vector3.Transform(new Vector3(0, 0.1f, 0), up), up, sides: 12);
+                }
+
+                break;
+            }
+
+            case "exhaust":
+                k.Cyl(0.08f, 0.36f, Paint.Dark, new Vector3(0, b + 0.1f, 0), AlongX, sides: 16);
+                k.Box(new Vector3(0.38f, 0.012f, 0.18f), Paint.Self, new Vector3(0, b + 0.19f, 0));
+                foreach (float x in new[] { -0.12f, 0.12f }) k.Box(new Vector3(0.02f, 0.18f, 0.18f), Paint.SelfDark, new Vector3(x, b + 0.1f, 0));
+                k.Cyl(0.03f, 0.12f, Paint.Dark, new Vector3(0.2f, b + 0.1f, 0.06f), AlongX, sides: 10);
+                break;
+            case "searchlight":
+                k.Cyl(0.12f, 0.04f, Paint.SelfDark, new Vector3(0, b + 0.02f, 0), sides: 20);
+                foreach (float x in new[] { -0.15f, 0.15f }) k.Box(new Vector3(0.03f, 0.2f, 0.05f), Paint.Self, new Vector3(x, b + 0.13f, 0));
+                k.Cyl(0.13f, 0.22f, Paint.Self, new Vector3(0, b + 0.2f, 0), AlongZ, sides: 20);
+                k.GlowCyl(0.115f, 0.01f, Lamp, 1.4f, new Vector3(0, b + 0.2f, -0.112f), AlongZ);
+                k.Torus(0.125f, 0.012f, Paint.Steel, new Vector3(0, b + 0.2f, -0.11f), AlongZ);
+                k.Cyl(0.03f, 0.34f, Paint.Steel, new Vector3(0, b + 0.2f, 0), AlongX, sides: 10);
+                break;
+            case "vent":
+                k.Bevel(new Vector3(0.44f, 0.04f, 0.44f), Paint.SelfDark, new Vector3(0, b + 0.02f, 0), 0.01f);
+                for (int i = 0; i < 6; i++)
+                    k.Box(new Vector3(0.38f, 0.03f, 0.025f), Paint.Self, new Vector3(0, b + 0.05f, -0.16f + i * 0.064f), Rot(Vector3.UnitX, 0.5f));
+                break;
+            case "grab_handles":
+                foreach (float z in new[] { -0.12f, 0.12f })
+                {
+                    foreach (float x in new[] { -0.08f, 0.08f }) k.Cyl(0.01f, 0.07f, Paint.Self, new Vector3(x, b + 0.035f, z), sides: 6);
+                    k.Cyl(0.01f, 0.17f, Paint.Self, new Vector3(0, b + 0.07f, z), AlongX, sides: 6);
+                }
+
+                break;
+            default:
+                // Stowage rack: a frame with a bedroll, a kit bag and a jerry can.
+                foreach (float z in new[] { -0.15f, 0.15f })
+                {
+                    k.Box(new Vector3(0.46f, 0.015f, 0.015f), Paint.Dark, new Vector3(0, b + 0.008f, z));
+                    k.Box(new Vector3(0.46f, 0.015f, 0.015f), Paint.Dark, new Vector3(0, b + 0.14f, z));
+                    foreach (float x in new[] { -0.22f, 0.22f }) k.Box(new Vector3(0.015f, 0.14f, 0.015f), Paint.Dark, new Vector3(x, b + 0.07f, z));
+                }
+
+                k.Cyl(0.07f, 0.4f, Paint.Self, new Vector3(0, b + 0.08f, 0.07f), AlongX, sides: 14);
+                k.Bevel(new Vector3(0.18f, 0.12f, 0.12f), Paint.SelfDark, new Vector3(-0.1f, b + 0.07f, -0.07f), 0.03f);
+                k.Bevel(new Vector3(0.1f, 0.16f, 0.13f), Paint.SelfDark, new Vector3(0.13f, b + 0.08f, -0.07f), 0.012f);
+                break;
+        }
+    }
+
     private static void TrackRun(Maker k, float r, float width, float length)
     {
         k.Cyl(r * 0.8f, width * 0.6f, Paint.Dark, Vector3.Zero, AlongX, sides: 24);

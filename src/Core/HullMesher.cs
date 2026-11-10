@@ -21,6 +21,13 @@ public interface IHullGrid
 
     /// <summary>The chamfer on a material's outer edges, in meters.</summary>
     float BevelOf(int material);
+
+    /// <summary>The shape of the surface block in a cell, and how it's turned (plain cubes unless a grid says otherwise).</summary>
+    BlockShape ShapeAt(Int3 cell, out int orientation)
+    {
+        orientation = 0;
+        return BlockShape.Cube;
+    }
 }
 
 /// <summary>
@@ -125,6 +132,13 @@ public static class HullMesher
             int mat = grid.SurfaceAt(c);
             if (mat < 0) continue;
             if (!result.TryGetValue(mat, out Surface surf)) result[mat] = surf = new Surface();
+            BlockShape shape = grid.ShapeAt(c, out int orientation);
+            if (shape != BlockShape.Cube)
+            {
+                Shaped(surf, c, shape, orientation, cellSize, PanelTint(grid.PanelAt(c)), weathering, Exposed);
+                continue;
+            }
+
             float b = MathF.Min(grid.BevelOf(mat), h * 0.45f);
             float tint = PanelTint(grid.PanelAt(c));
             Vector3 center = V(c) * cellSize;
@@ -197,6 +211,33 @@ public static class HullMesher
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// A shaped block (slope, corner, round...): its faces, turned to fit, with the flat ones against a
+    /// neighbor that covers them left out. Slanted faces are a little lighter (they catch the sky).
+    /// </summary>
+    private static void Shaped(Surface surf, Int3 c, BlockShape shape, int orientation, float cellSize, float tint, bool weathering,
+        Func<Int3, Int3, bool> exposed)
+    {
+        Vector3 center = V(c) * cellSize;
+        foreach (Shapes.Face f in Shapes.FacesOf(shape))
+        {
+            bool flat = f.Side != default;
+            if (flat && !exposed(c, Orientations.Apply(orientation, f.Side))) continue;
+            Vector3 n = Vector3.Normalize(Orientations.Apply(orientation, f.Normal));
+            float k = tint * (flat ? 0.92f : 1f);
+            int i0 = surf.Positions.Count;
+            foreach (Vector3 p in f.Points)
+            {
+                Vector3 w = center + Orientations.Apply(orientation, p) * cellSize;
+                surf.Positions.Add(w);
+                surf.Normals.Add(n);
+                surf.Shade.Add(Clamp1(k * (weathering ? Weathering(w) : 1f)));
+            }
+
+            for (int i = 1; i + 1 < f.Points.Count; i++) AddTri(surf, i0, i0 + i, i0 + i + 1, n);
+        }
     }
 
     /// <summary>Two axes across a face, ordered so that u × v points along the face's normal.</summary>

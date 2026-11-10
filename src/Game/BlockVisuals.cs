@@ -14,7 +14,6 @@ public static class BlockVisuals
     private static readonly Dictionary<string, Mesh> Meshes = new();
     private static NoiseTexture2D _grit, _bumps;
     private static BoxShape3D _box;
-    private static ConvexPolygonShape3D _wedge;
     private static ArrayMesh _wedgeMesh;
 
     public static readonly Material GhostOk = Shaders.Hologram(new Color(0.35f, 1f, 0.5f));
@@ -46,6 +45,9 @@ public static class BlockVisuals
         };
         return _grit;
     }
+
+    /// <summary>The soft grime texture the block materials use (shared with the paint shader).</summary>
+    public static Texture2D GritTexture => Grit();
 
     /// <summary>Fine dents and hammer marks so plates catch the light unevenly.</summary>
     private static NoiseTexture2D Bumps()
@@ -86,7 +88,7 @@ public static class BlockVisuals
 
     public static StandardMaterial3D MaterialOf(BlockDef def) =>
         Material("def:" + def.Id, new Color(def.ColorR, def.ColorG, def.ColorB), def.Metallic, def.Roughness,
-            def.Shape == BlockShape.Wedge);
+            def.Shape != BlockShape.Cube);
 
     private static StandardMaterial3D Dark => Material("dark", new Color(0.13f, 0.13f, 0.13f), 0.8f, 0.4f);
     private static StandardMaterial3D Rubber => Material("rubber", new Color(0.06f, 0.06f, 0.06f), 0f, 0.95f);
@@ -110,23 +112,48 @@ public static class BlockVisuals
         return m;
     }
 
+    private static readonly Dictionary<BlockShape, Shape3D> ShapeColliders = new();
+
+    /// <summary>The collision shape of a one-cell block: a box, or for shaped armor the outline of its pieces.</summary>
     public static Shape3D ShapeOf(BlockDef def)
     {
-        if (def.Shape == BlockShape.Wedge)
+        if (def.Shape != BlockShape.Cube)
         {
-            _wedge ??= new ConvexPolygonShape3D { Points = WedgePoints() };
-            return _wedge;
+            if (ShapeColliders.TryGetValue(def.Shape, out Shape3D s)) return s;
+            var pts = new List<Vector3>();
+            foreach (Shapes.Plane[] piece in Shapes.PiecesOf(def.Shape))
+                foreach (System.Numerics.Vector3 p in Shapes.Corners(piece))
+                    pts.Add(p.G() * Conv.CS);
+            return ShapeColliders[def.Shape] = new ConvexPolygonShape3D { Points = pts.ToArray() };
         }
 
         _box ??= new BoxShape3D { Size = new Vector3(Conv.CS, Conv.CS, Conv.CS) };
         return _box;
     }
 
-    private static Vector3[] WedgePoints() => new[]
+    /// <summary>A block shape as a mesh, one cell big, with flat faces (wound the way Godot draws front faces).</summary>
+    private static Mesh ShapeMesh(BlockShape shape)
     {
-        new Vector3(-H, -H, -H), new Vector3(H, -H, -H), new Vector3(H, -H, H), new Vector3(-H, -H, H),
-        new Vector3(-H, H, H), new Vector3(H, H, H),
-    };
+        string key = "shape:" + (int)shape;
+        if (Meshes.TryGetValue(key, out Mesh m)) return m;
+        var st = new SurfaceTool();
+        st.Begin(Mesh.PrimitiveType.Triangles);
+        foreach (Shapes.Face f in Shapes.FacesOf(shape))
+        {
+            Vector3 n = f.Normal.G();
+            for (int i = 1; i + 1 < f.Points.Count; i++)
+            {
+                // The core winds counter-clockwise from outside; Godot's front faces are clockwise.
+                foreach (int k in new[] { 0, i + 1, i })
+                {
+                    st.SetNormal(n);
+                    st.AddVertex(f.Points[k].G() * Conv.CS);
+                }
+            }
+        }
+
+        return Meshes[key] = st.Commit();
+    }
 
     /// <summary>Half a cube: the solid part is where local y &lt;= z, matching the core rules.</summary>
     private static ArrayMesh WedgeMesh()
@@ -324,6 +351,7 @@ public static class BlockVisuals
             Prim.Torus => new TorusMesh { InnerRadius = p.Size.X - p.Size.Y, OuterRadius = p.Size.X + p.Size.Y, Rings = 32, RingSegments = 10 },
             Prim.Sphere => new SphereMesh { Radius = p.Size.X, Height = p.Size.X * 2f, RadialSegments = 20, Rings = 10 },
             Prim.Slab => Slab(p.Size.G(), p.Detail, p.Detail2),
+            Prim.Shape => ShapeMesh((BlockShape)(int)p.Detail),
             _ => WedgeMesh(),
         };
         Meshes[key] = m;
@@ -352,8 +380,9 @@ public static class BlockVisuals
     /// <paramref name="caliberMm"/> sizes barrels; <paramref name="hints"/> adds builder-only markers like the gun's facing arrow.
     /// Moving parts sit on child nodes named "Spinner", "Flap" or "Payload".
     /// </summary>
-    public static Node3D Create(BlockDef def, float caliberMm = 76f, bool hints = false)
+    public static Node3D Create(BlockDef def, float caliberMm = 76f, bool hints = false, Livery livery = null)
     {
+        bool painted = livery != null && !livery.IsFactory;
         var root = new Node3D { Name = def.Id };
         BlockModel model = BlockModels.For(def, caliberMm, hints);
         var nodes = new Node3D[model.Nodes.Count];
@@ -365,7 +394,7 @@ public static class BlockVisuals
 
         foreach (ModelPart p in model.Parts)
         {
-            Material mat = PaintOf(def, p);
+            Material mat = painted && Liveries.Paints(def, p.Paint) ? Repainted(def, livery, p.Paint == Paint.SelfDark) : PaintOf(def, p);
             var mi = new MeshInstance3D { Mesh = MeshOf(p), MaterialOverride = mat, Transform = ToTransform(p.Transform) };
             if (p.Paint == Paint.Glow) mi.CastShadow = GeometryInstance3D.ShadowCastingSetting.Off;
             (p.Node < 0 ? root : nodes[p.Node]).AddChild(mi);
@@ -428,18 +457,39 @@ public static class BlockVisuals
     /// Whether a block fills its whole face on side <paramref name="dir"/>, so a hull surface touching it
     /// there can be left out: plain blocks on every side, slopes on their base and back.
     /// </summary>
-    public static bool CoversFace(BlockDef def, int orientation, Int3 dir)
-    {
-        if (BlockModels.IsSurface(def)) return true;
-        if (def.Shape != BlockShape.Wedge || def.IsMultiCell) return false;
-        return Orientations.Apply(orientation, new Int3(0, -1, 0)) == dir || Orientations.Apply(orientation, new Int3(0, 0, 1)) == dir;
-    }
+    public static bool CoversFace(BlockDef def, int orientation, Int3 dir) =>
+        BlockModels.IsSurface(def) && Shapes.CoversFace(def.Shape, orientation, dir);
 
     /// <summary>Blocks that move on their own (spinning, swinging, rolling, dropping their load): drawn one by one.</summary>
     public static bool IsAnimated(BlockDef def) =>
         def.IsWheelLike || def.Kind is BlockKind.AirPropeller or BlockKind.Rotor or BlockKind.LiftFan or BlockKind.ControlSurface or BlockKind.BombRack;
 
     private static readonly Dictionary<string, List<(Mesh, Material, Transform3D)>> PartsCache = new();
+    private static readonly Dictionary<string, List<(Mesh, Material, Transform3D, Paint)>> PaintedPartsCache = new();
+
+    /// <summary>Like <see cref="Parts"/>, with each part's finish, so paint jobs know which parts to paint.</summary>
+    public static List<(Mesh, Material, Transform3D, Paint)> PartsOf(BlockDef def, float caliberMm, bool hints = false)
+    {
+        string key = $"{def.Id}:{Mathf.RoundToInt(caliberMm)}:{hints}";
+        if (PaintedPartsCache.TryGetValue(key, out List<(Mesh, Material, Transform3D, Paint)> parts)) return parts;
+        parts = new List<(Mesh, Material, Transform3D, Paint)>();
+        BlockModel model = BlockModels.For(def, caliberMm, hints);
+        foreach (ModelPart p in model.Parts) parts.Add((MeshOf(p), PaintOf(def, p), ToTransform(model.PlacementOf(p)), p.Paint));
+        PaintedPartsCache[key] = parts;
+        return parts;
+    }
+
+    /// <summary>One model part (from <see cref="Joints"/>, say) as a mesh, material and placement.</summary>
+    public static (Mesh mesh, Material mat, Transform3D xf, Paint paint) PartOf(BlockDef def, in ModelPart p) =>
+        (MeshOf(p), PaintOf(def, p), ToTransform(p.Transform), p.Paint);
+
+    /// <summary>A block's own color swapped for a paint job's main color (for blocks drawn one by one: wheels, propellers).</summary>
+    public static Material Repainted(BlockDef def, Livery l, bool dark)
+    {
+        float k = dark ? 0.6f : 1f;
+        return Material($"livery:{l.Id}:{def.Id}:{dark}", new Color(l.Base.X * k, l.Base.Y * k, l.Base.Z * k), Mathf.Min(def.Metallic, 0.45f),
+            Mathf.Max(def.Roughness, 0.55f));
+    }
 
     /// <summary>A block's look as a flat list of meshes, materials and placements (for drawing many at once).</summary>
     public static List<(Mesh, Material, Transform3D)> Parts(BlockDef def, float caliberMm, bool hints = false)

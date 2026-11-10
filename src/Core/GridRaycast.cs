@@ -22,7 +22,6 @@ public struct RayCellHit
 /// </summary>
 public static class GridRaycast
 {
-    private static readonly float InvSqrt2 = 1f / MathF.Sqrt(2f);
 
     /// <summary>
     /// Collects every block the ray passes through, nearest first.
@@ -131,12 +130,14 @@ public static class GridRaycast
             return false;
         }
 
-        // Wedge: also inside when y - z <= 0.
-        if (shape == BlockShape.Wedge &&
-            !Clip(new Vector3(0, InvSqrt2, -InvSqrt2), 0f, o, d, ref tEnter, ref tExit, ref nEnter))
+        // Other shapes: cut further by their own planes (see Shapes).
+        if (shape != BlockShape.Cube)
         {
-            normal = Vector3.Zero;
-            return false;
+            if (!Shapes.Intersect(shape, o, d, out tEnter, out tExit, out nEnter))
+            {
+                normal = Vector3.Zero;
+                return false;
+            }
         }
 
         if (tExit < 0)

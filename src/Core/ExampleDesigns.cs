@@ -92,7 +92,32 @@ public static class ExampleDesigns
             if (_filled.TryGetValue(new Int3(x, y, z), out BlueprintBlock b)) Remove(b);
         }
 
-        public Blueprint Build(string name) => Blueprint.FromCellMap(name, _cells.Values);
+        public Blueprint Build(string name, string paint = null)
+        {
+            Blueprint bp = Blueprint.FromCellMap(name, _cells.Values);
+            bp.Paint = paint;
+            return bp;
+        }
+    }
+
+    /// <summary>The orientation that sets a detail's base (its local down) against <paramref name="down"/>, its front toward <paramref name="forward"/>.</summary>
+    public static int Orient(Int3 down, Int3 forward)
+    {
+        for (int o = 0; o < Orientations.Count; o++)
+            if (Orientations.Apply(o, new Int3(0, -1, 0)) == down && Orientations.Apply(o, new Int3(0, 0, -1)) == forward) return o;
+        throw new System.ArgumentException($"No orientation puts down at {down} and forward at {forward}.");
+    }
+
+    /// <summary>The orientation that turns an outer corner's two slopes to face <paramref name="a"/> and <paramref name="b"/>.</summary>
+    public static int CornerFacing(Int3 a, Int3 b)
+    {
+        for (int o = 0; o < Orientations.Count; o++)
+        {
+            Int3 s1 = Orientations.Apply(o, new Int3(0, 1, -1)), s2 = Orientations.Apply(o, new Int3(-1, 1, 0));
+            if ((s1 == a && s2 == b) || (s1 == b && s2 == a)) return o;
+        }
+
+        throw new System.ArgumentException($"No corner faces {a} and {b}.");
     }
 
     /// <summary>The orientation that turns a wedge's sloped face (local (0,1,-1)) to point along <paramref name="facing"/>.</summary>
@@ -144,10 +169,12 @@ public static class ExampleDesigns
         d.Set(2, 1, 3, "fuel_tank");
         d.Set(0, 1, 4, "fuel_tank");
 
-        // Front: a two-step 45° glacis of heavy plate.
+        // Front: a steep lower plate, then one long shallow upper glacis (two blocks deep), which counts as
+        // nearly twice as thick as the plate itself to a shell coming straight on.
         d.Fill(-2, 2, 0, 0, -6, -6, "armor_heavy");
         d.Fill(-3, 3, 1, 1, -6, -6, "armor_heavy_slope");
-        d.Fill(-3, 3, 2, 2, -5, -5, "armor_heavy_slope");
+        d.Fill(-3, 3, 2, 2, -5, -5, "armor_heavy_shallow");
+        d.Fill(-3, 3, 2, 2, -4, -4, "armor_heavy_shallow_high");
 
         // Hull shell.
         d.Fill(-2, 2, 0, 0, 5, 5, "armor_light");
@@ -174,7 +201,33 @@ public static class ExampleDesigns
         d.Fill(-1, 1, 3, 3, 0, 0, "frame");
         d.Fill(-2, 2, 4, 4, -3, -3, "armor_heavy_slope");
         d.Fill(-2, 2, 4, 4, -2, 1, "armor_light");
-        return d.Build("Warden (medium tank)");
+
+        // Rounded turret: rounded front cheeks and back corners, and the front top corners bevelled both ways.
+        foreach (int s in new[] { -1, 1 })
+        {
+            d.Set(2 * s, 3, -3, "armor_heavy_round", Facing(new Int3(s, 0, -1)));
+            d.Set(2 * s, 3, 1, "armor_heavy_round", Facing(new Int3(s, 0, 1)));
+            d.Set(2 * s, 4, 1, "armor_light_round", Facing(new Int3(s, 0, 1)));
+            d.Set(2 * s, 4, -3, "armor_heavy_corner", CornerFacing(new Int3(0, 1, -1), new Int3(s, 1, 0)));
+        }
+
+        // Kit: hatches over the gunner and commander, smoke dischargers on the turret cheeks, an antenna,
+        // spare track links hung on the turret sides, stowage boxes over the tracks, louvers over the
+        // engines and exhausts on the back plate.
+        d.Set(-1, 5, 0, "hatch");
+        d.Set(1, 5, 0, "hatch");
+        d.Set(1, 5, -2, "periscope");
+        foreach (int s in new[] { -1, 1 })
+        {
+            d.Set(2 * s, 5, -2, "smoke_launcher");
+            d.Set(3 * s, 3, 0, "spare_tracks", Orient(new Int3(-s, 0, 0), new Int3(0, 0, -1)));
+            foreach (int z in new[] { -1, 2 }) d.Set(4 * s, 1, z, "toolbox", Orient(new Int3(-s, 0, 0), new Int3(0, 0, -1)));
+            d.Set(s, 1, 6, "exhaust", Orient(new Int3(0, 0, -1), new Int3(0, 1, 0)));
+            d.Set(s, 3, 3, "vent");
+        }
+
+        d.Set(-2, 5, 1, "antenna");
+        return d.Build("Warden (medium tank)", "woodland");
     }
 
     /// <summary>Fast wheeled scout with a small 37 mm turret. No gunner seat: the driver aims.</summary>
@@ -215,7 +268,14 @@ public static class ExampleDesigns
         d.Fill(-1, 1, 3, 3, -2, -2, "armor_light");
         d.Fill(-1, 1, 3, 3, 0, 0, "armor_light");
         d.Fill(-1, 1, 4, 4, -2, 0, "armor_light");
-        return d.Build("Jackal (scout car)");
+
+        // Headlights on the nose, a stowage rack and an antenna at the back.
+        d.Set(-2, 2, -4, "headlight");
+        d.Set(2, 2, -4, "headlight");
+        d.Set(0, 3, 3, "stowage_rack");
+        d.Set(-2, 3, 3, "antenna");
+        d.Set(-1, 5, -1, "hatch");
+        return d.Build("Jackal (scout car)", "desert");
     }
 
     /// <summary>Tank destroyer: a long 120 mm gun fixed in a heavily armored casemate. Aim by turning the hull.</summary>
@@ -265,7 +325,20 @@ public static class ExampleDesigns
         d.Fill(-2, 2, 2, 2, 2, 6, "armor_light");
         d.Fill(-2, 2, 3, 3, -3, 1, "armor_light");
         d.Fill(-2, 2, 0, 2, -5, 5, "frame");
-        return d.Build("Bulwark (tank destroyer)");
+
+        // Kit.
+        foreach (int s in new[] { -1, 1 })
+        {
+            d.Set(2 * s, 4, -3, "smoke_launcher");
+            foreach (int z in new[] { 0, 3 }) d.Set(4 * s, 1, z, "toolbox", Orient(new Int3(-s, 0, 0), new Int3(0, 0, -1)));
+            d.Set(s, 1, 7, "exhaust", Orient(new Int3(0, 0, -1), new Int3(0, 1, 0)));
+        }
+
+        d.Set(-1, 4, -2, "hatch");
+        d.Set(1, 4, 0, "periscope");
+        d.Set(2, 4, 1, "antenna");
+        d.Set(0, 3, 4, "vent");
+        return d.Build("Bulwark (tank destroyer)", "olive");
     }
 
     /// <summary>
@@ -336,9 +409,12 @@ public static class ExampleDesigns
         d.Fill(-1, 1, deck + 2, deck + 2, 10, 12, "armor_light");
         d.Fill(-1, 1, deck + 1, deck + 1, 10, 10, "armor_light");
 
-        // Bridge amidships.
+        // Bridge amidships, with windows all round.
         d.Set(0, deck + 1, -1, "driver_seat");
         d.Set(0, deck + 2, -1, "commander_seat");
+        d.Fill(-1, 1, deck + 2, deck + 2, -2, -2, "glazing");
+        d.Fill(-2, -2, deck + 2, deck + 2, -1, 2, "glazing");
+        d.Fill(2, 2, deck + 2, deck + 2, -1, 2, "glazing");
         d.Fill(-2, 2, deck + 1, deck + 2, -2, 3, "armor_light");
         d.Fill(-2, 2, deck + 3, deck + 3, -2, 3, "armor_light");
         d.FillSlope(-2, 2, deck + 3, deck + 3, -3, -3, "armor_light_slope", new Int3(0, 1, -1));
@@ -361,6 +437,14 @@ public static class ExampleDesigns
             d.Set(x, 0, stern + 2, "rudder");
         }
 
+        // Guard rails down both sides of the deck, a searchlight and an antenna on the bridge, and a ladder up its back.
+        foreach (int s in new[] { -1, 1 })
+            for (int z = bow + 3; z <= stern - 1; z++)
+                d.Set(4 * s, deck + 1, z, "railing", Orient(new Int3(0, -1, 0), new Int3(-s, 0, 0)));
+        d.Set(0, deck + 4, 1, "searchlight");
+        d.Set(-2, deck + 4, 3, "antenna");
+        d.Set(1, deck + 1, 4, "ladder", Orient(new Int3(0, -1, 0), new Int3(0, 0, 1)));
+        d.Set(1, deck + 2, 4, "ladder", Orient(new Int3(0, -1, 0), new Int3(0, 0, 1)));
         return d.Build("Corsair (patrol boat)");
     }
 
@@ -423,7 +507,7 @@ public static class ExampleDesigns
         d.Set(-1, 2, stern + 2, "rudder", plane);
         d.Set(1, 2, stern + 2, "rudder", plane);
 
-        return d.Build("Barracuda (submarine)");
+        return d.Build("Barracuda (submarine)", "night");
     }
 
     /// <summary>Anti-aircraft truck: the scout car's chassis with a twin 40 mm autocannon turret fed with flak.</summary>
@@ -464,7 +548,10 @@ public static class ExampleDesigns
             d.Set(x, 3, 0, "ammo_he");
         }
 
-        return d.Build("Skyguard (flak truck)");
+        d.Set(-2, 2, -4, "headlight");
+        d.Set(2, 2, -4, "headlight");
+        d.Set(0, 3, 3, "stowage_rack");
+        return d.Build("Skyguard (flak truck)", "woodland");
     }
 
     /// <summary>
@@ -479,7 +566,13 @@ public static class ExampleDesigns
         d.Set(0, 1, -7, "aero_engine");
         d.Set(-1, 1, 1, "fuel_tank");
         d.Set(1, 1, 1, "fuel_tank");
-        d.Set(0, 2, -2, "driver_seat");
+        // An open pilot's seat under a glazed canopy: windscreen, roof, side panes and a faired-in back.
+        d.Set(0, 2, -2, "pilot_seat");
+        d.Set(0, 3, -2, "glazing");
+        d.Set(0, 3, -3, "glazing_slope");
+        d.Set(0, 3, -1, "airframe_slope", Facing(new Int3(0, 1, 1)));
+        d.Set(1, 2, -2, "glazing_plate", Orient(new Int3(0, -1, 0), new Int3(1, 0, 0)));
+        d.Set(-1, 2, -2, "glazing_plate", Orient(new Int3(0, -1, 0), new Int3(-1, 0, 0)));
 
         // Wing guns at the leading edge, each with a rack of AP behind it, and the bombs hung under the wings.
         foreach (int x in new[] { -3, 3 })
@@ -518,7 +611,8 @@ public static class ExampleDesigns
         d.Set(0, 0, -6, "wheel_steer");
         d.Set(-2, 0, -3, "wheel");
         d.Set(2, 0, -3, "wheel");
-        return d.Build("Kestrel (fighter-bomber)");
+        d.Set(0, 3, 0, "antenna");
+        return d.Build("Kestrel (fighter-bomber)", "sky");
     }
 
     /// <summary>Attack helicopter: one big rotor over the cabin, a chin autocannon for the gunner, and an optically guided missile on each stub wing.</summary>
@@ -550,7 +644,10 @@ public static class ExampleDesigns
             d.Set(side, 1, -4, "seeker_optical");
         }
 
-        // Cabin, tail boom, and fins at the tail.
+        // A glazed nose for the gunner and pilot, then the cabin, tail boom, and fins at the tail.
+        d.Fill(-1, 1, 3, 3, -3, -2, "glazing");
+        d.Fill(-1, -1, 2, 2, -3, -3, "glazing");
+        d.Fill(1, 1, 2, 2, -3, -3, "glazing");
         d.Fill(-1, 1, 1, 3, -3, 2, "airframe");
         d.Fill(0, 0, 2, 2, 3, 8, "airframe");
         int upright = Orientations.RotateAroundZ(0, 1);
@@ -561,7 +658,7 @@ public static class ExampleDesigns
         // Skids.
         d.Fill(-1, -1, 0, 0, -2, 2, "frame");
         d.Fill(1, 1, 0, 0, -2, 2, "frame");
-        return d.Build("Hornet (helicopter)");
+        return d.Build("Hornet (helicopter)", "olive");
     }
 
     /// <summary>Quadcopter drone, flown by remote: four lift fans on arms, an autocannon underneath.</summary>
@@ -586,7 +683,7 @@ public static class ExampleDesigns
         d.Set(0, 0, -1, "breech_40ac");
         d.Set(0, 0, -2, "barrel");
         d.Set(0, 0, 0, "ammo_flak");
-        return d.Build("Wasp (drone)");
+        return d.Build("Wasp (drone)", "urban");
     }
 
     /// <summary>
@@ -894,7 +991,7 @@ public static class ExampleDesigns
             else d.Fill(-w, w, 1, deck - 1, z, z, "armor_light");
         }
 
-        return d.Build("Colossus (battleship)");
+        return d.Build("Colossus (battleship)", "dazzle");
     }
 
     /// <summary>A flat wall of one armor type, standing on the ground (y = 0).</summary>

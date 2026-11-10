@@ -33,6 +33,20 @@ public partial class BatchedBlocks : Node3D
     /// <summary>Draw builder markers (facing arrows) on the blocks.</summary>
     public bool Hints = true;
 
+    private Livery _livery;
+    private float? _waterline;
+
+    /// <summary>Shows the design in a paint job (null or factory for the blocks' own colors); for ships, with the ship rules at <paramref name="waterline"/>.</summary>
+    public void SetPaint(Livery livery, float? waterline)
+    {
+        Livery l = livery != null && !livery.IsFactory ? livery : null;
+        float? w = l != null ? waterline : null;
+        if (l == _livery && System.Nullable.Equals(w, _waterline)) return;
+        _livery = l;
+        _waterline = w;
+        foreach (Int3 key in _chunks.Keys) _dirty.Add(key);
+    }
+
     public Material TintOverlay;
 
     public int Count => _entries.Count;
@@ -62,14 +76,25 @@ public partial class BatchedBlocks : Node3D
         public bool CoversFace(Int3 c, Int3 dir) => At(c, out _, out Entry e) && BlockVisuals.CoversFace(e.Def, e.Orientation, dir);
         public bool Occupied(Int3 c) => _b._owner.ContainsKey(c);
         public float BevelOf(int material) => BlockModels.SurfaceBevel(_b._surfaceDefs[material]);
+
+        public BlockShape ShapeAt(Int3 c, out int orientation)
+        {
+            bool ok = At(c, out _, out Entry e);
+            orientation = ok ? e.Orientation : 0;
+            return ok ? e.Def.Shape : BlockShape.Cube;
+        }
     }
 
     private int SurfaceIndex(BlockDef def)
     {
+        def = BlockModels.SurfaceDefOf(def);
         if (_surfaceIndex.TryGetValue(def, out int i)) return i;
         _surfaceDefs.Add(def);
         return _surfaceIndex[def] = _surfaceDefs.Count - 1;
     }
+
+    /// <summary>What's in a cell, or null (for working out joints).</summary>
+    private BlockDef DefAt(Int3 c) => _owner.TryGetValue(c, out Int3 a) && _entries.TryGetValue(a, out Entry e) ? e.Def : null;
 
     public void Set(Int3 anchor, BlockDef def, int orientation, float caliber = 76f, bool tinted = false)
     {
@@ -168,18 +193,33 @@ public partial class BatchedBlocks : Node3D
             }
 
             Transform3D at = Conv.BlockTransform(a, e.Orientation);
-            foreach ((Mesh mesh, Material mat, Transform3D local) in BlockVisuals.Parts(e.Def, e.Caliber, Hints))
+            void AddPart(Mesh mesh, Material own, Transform3D local, Paint finish)
             {
+                Material mat = _livery != null && Liveries.Paints(e.Def, finish) ? Paintwork.Part(e.Def, _livery, finish == Paint.SelfDark, _waterline) : own;
                 var gk = (mesh, mat, e.Tinted);
                 if (!groups.TryGetValue(gk, out List<Transform3D> list)) groups[gk] = list = new List<Transform3D>();
                 list.Add(at * local);
+            }
+
+            foreach ((Mesh mesh, Material own, Transform3D local, Paint finish) in BlockVisuals.PartsOf(e.Def, e.Caliber, Hints))
+                AddPart(mesh, own, local, finish);
+            foreach (ModelPart jp in Joints.For(e.Def, a, e.Orientation, e.Caliber, DefAt))
+            {
+                (Mesh jm, Material jmat, Transform3D jx, Paint jf) = BlockVisuals.PartOf(e.Def, jp);
+                AddPart(jm, jmat, jx, jf);
             }
         }
 
         foreach (((Mesh mesh, Material mat, bool tinted), List<Transform3D> xfs) in groups)
         {
-            var mm = new MultiMesh { TransformFormat = MultiMesh.TransformFormatEnum.Transform3D, Mesh = mesh, InstanceCount = xfs.Count };
-            for (int i = 0; i < xfs.Count; i++) mm.SetInstanceTransform(i, xfs[i]);
+            bool painted = mat is ShaderMaterial;
+            var mm = new MultiMesh { TransformFormat = MultiMesh.TransformFormatEnum.Transform3D, UseCustomData = painted, Mesh = mesh, InstanceCount = xfs.Count };
+            for (int i = 0; i < xfs.Count; i++)
+            {
+                mm.SetInstanceTransform(i, xfs[i]);
+                if (painted) mm.SetInstanceCustomData(i, new Color(xfs[i].Origin.X, xfs[i].Origin.Y, xfs[i].Origin.Z, 0f));
+            }
+
             var mmi = new MultiMeshInstance3D { Multimesh = mm, MaterialOverride = mat };
             if (tinted && TintOverlay != null) mmi.MaterialOverlay = TintOverlay;
             if (mat is StandardMaterial3D sm && sm.ShadingMode == BaseMaterial3D.ShadingModeEnum.Unshaded)
@@ -191,7 +231,11 @@ public partial class BatchedBlocks : Node3D
         foreach ((int mat, HullMesher.Surface s) in HullMesher.Build(surface, new Grid(this), Conv.CS))
         {
             if (s.Indices.Count == 0) continue;
-            node.AddChild(new MeshInstance3D { Mesh = BlockVisuals.HullMesh(s), MaterialOverride = BlockVisuals.SurfaceMaterial(_surfaceDefs[mat]) });
+            BlockDef def = _surfaceDefs[mat];
+            Material m = def.Glass ? Paintwork.Glass(def, _livery, plating: true)
+                : _livery != null ? Paintwork.Plating(def, _livery, _waterline) : BlockVisuals.SurfaceMaterial(def);
+            var hull = new MeshInstance3D { Mesh = BlockVisuals.HullMesh(s), MaterialOverride = m };
+            node.AddChild(hull);
         }
     }
 }

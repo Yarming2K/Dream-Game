@@ -51,6 +51,8 @@ public sealed partial class GridView
     private readonly List<BlockDef> _surfaceDefs = new();
     private readonly Dictionary<BlockDef, int> _surfaceIndex = new();
     private bool _flushQueued;
+    private readonly Livery _livery;
+    private readonly float? _waterline;
     private readonly Transform3D[] _toBody;
     private bool _toBodyDirty = true;
     private ulong _bodyFrame = ulong.MaxValue;
@@ -74,6 +76,13 @@ public sealed partial class GridView
         public bool CoversFace(Int3 c, Int3 dir) => At(c) is { } b && BlockVisuals.CoversFace(b.Def, b.Orientation, dir);
         public bool Occupied(Int3 c) => At(c) != null;
         public float BevelOf(int material) => BlockModels.SurfaceBevel(_v._surfaceDefs[material]);
+
+        public BlockShape ShapeAt(Int3 c, out int orientation)
+        {
+            BlockInstance b = At(c);
+            orientation = b?.Orientation ?? 0;
+            return b?.Def.Shape ?? BlockShape.Cube;
+        }
     }
 
     /// <summary>A stable number per block, so each panel gets its own slight tint.</summary>
@@ -81,6 +90,7 @@ public sealed partial class GridView
 
     private int SurfaceIndex(BlockDef def)
     {
+        def = BlockModels.SurfaceDefOf(def);
         if (_surfaceIndex.TryGetValue(def, out int i)) return i;
         _surfaceDefs.Add(def);
         return _surfaceIndex[def] = _surfaceDefs.Count - 1;
@@ -88,11 +98,16 @@ public sealed partial class GridView
 
     /// <param name="shareKey">Grids made from the same design pass the same key (the blueprint) and share their meshes.</param>
     /// <param name="lod">Draw a simpler far model at a distance (vehicles and structures; not short-lived wreckage).</param>
-    public GridView(PhysicsBody3D body, GridModel model, Func<Int3, float> caliberOf = null, object shareKey = null, bool lod = false)
+    /// <param name="livery">The paint job (null or factory for the blocks' own colors).</param>
+    /// <param name="waterline">For ships: the waterline's height in the vehicle's frame, for the ship paint rules.</param>
+    public GridView(PhysicsBody3D body, GridModel model, Func<Int3, float> caliberOf = null, object shareKey = null, bool lod = false,
+        Livery livery = null, float? waterline = null)
     {
         Body = body;
         Model = model;
         _caliberOf = caliberOf;
+        _livery = livery != null && !livery.IsFactory ? livery : null;
+        _waterline = _livery != null ? waterline : null;
         _sections = new Node3D[model.Sections.Count];
         _syncedAngle = new float[model.Sections.Count];
         _toBody = new Transform3D[model.Sections.Count];
@@ -159,8 +174,16 @@ public sealed partial class GridView
         var nodes = new BlockNodes();
         if (BlockVisuals.IsAnimated(b.Def))
         {
-            nodes.Visual = BlockVisuals.Create(b.Def, CaliberOf(b));
+            nodes.Visual = BlockVisuals.Create(b.Def, CaliberOf(b), livery: _livery);
             nodes.Visual.Transform = Conv.BlockTransform(b.Cell, b.Orientation);
+            // Axles out to whatever the wheel hangs from (they move with the wheel). Wheels turn with the body's
+            // axes whatever way they were placed, so their neighbors are looked for unturned.
+            foreach (ModelPart jp in Joints.For(b.Def, b.Cell, b.Def.IsWheelLike ? 0 : b.Orientation, CaliberOf(b), DefAt(b.Section)))
+            {
+                (Mesh jm, Material jmat, Transform3D jx, _) = BlockVisuals.PartOf(b.Def, jp);
+                nodes.Visual.AddChild(new MeshInstance3D { Mesh = jm, MaterialOverride = jmat, Transform = jx });
+            }
+
             ApplyNear(nodes.Visual);
             _sections[b.Section].AddChild(nodes.Visual);
             FarChanged(b.Section);
@@ -170,7 +193,7 @@ public sealed partial class GridView
             chunk.VisualDirty = true;
         }
 
-        if (b.Def.HasCollider && b.Def.Shape == BlockShape.Wedge)
+        if (b.Def.HasCollider && b.Def.Shape != BlockShape.Cube)
         {
             nodes.Collider = new CollisionShape3D { Shape = BlockVisuals.ShapeOf(b.Def) };
             nodes.Collider.Transform = SectionToBody(b.Section) * Conv.BlockTransform(b.Cell, b.Orientation);
@@ -202,7 +225,7 @@ public sealed partial class GridView
         if (!BlockVisuals.IsAnimated(b.Def)) chunk.VisualDirty = true;
         else FarChanged(b.Section);
         TouchNeighbors(b);
-        if (b.Def.HasCollider && b.Def.Shape != BlockShape.Wedge) chunk.ColliderDirty = true;
+        if (b.Def.HasCollider && b.Def.Shape == BlockShape.Cube) chunk.ColliderDirty = true;
         _dirty.Add(chunk);
         QueueFlush();
     }
@@ -291,17 +314,33 @@ public sealed partial class GridView
             }
 
             Transform3D at = Conv.BlockTransform(b.Cell, b.Orientation);
-            foreach ((Mesh mesh, Material mat, Transform3D local) in BlockVisuals.Parts(b.Def, CaliberOf(b)))
+            void AddPart(Mesh mesh, Material own, Transform3D local, Paint finish)
             {
+                Material mat = _livery != null && Liveries.Paints(b.Def, finish) ? Paintwork.Part(b.Def, _livery, finish == Paint.SelfDark, _waterline) : own;
                 if (!groups.TryGetValue((mesh, mat), out List<Transform3D> list)) groups[(mesh, mat)] = list = new List<Transform3D>();
                 list.Add(at * local);
+            }
+
+            foreach ((Mesh mesh, Material own, Transform3D local, Paint finish) in BlockVisuals.PartsOf(b.Def, CaliberOf(b)))
+                AddPart(mesh, own, local, finish);
+            foreach (ModelPart jp in Joints.For(b.Def, b.Cell, b.Orientation, CaliberOf(b), DefAt(c.Section)))
+            {
+                (Mesh jm, Material jmat, Transform3D jx, Paint jf) = BlockVisuals.PartOf(b.Def, jp);
+                AddPart(jm, jmat, jx, jf);
             }
         }
 
         foreach (((Mesh mesh, Material mat), List<Transform3D> xfs) in groups)
         {
-            var mm = new MultiMesh { TransformFormat = MultiMesh.TransformFormatEnum.Transform3D, Mesh = mesh, InstanceCount = xfs.Count };
-            for (int i = 0; i < xfs.Count; i++) mm.SetInstanceTransform(i, xfs[i]);
+            // Painted parts carry their own position, so each takes the pattern's color where it is.
+            bool painted = mat is ShaderMaterial;
+            var mm = new MultiMesh { TransformFormat = MultiMesh.TransformFormatEnum.Transform3D, UseCustomData = painted, Mesh = mesh, InstanceCount = xfs.Count };
+            for (int i = 0; i < xfs.Count; i++)
+            {
+                mm.SetInstanceTransform(i, xfs[i]);
+                if (painted) mm.SetInstanceCustomData(i, new Color(xfs[i].Origin.X, xfs[i].Origin.Y, xfs[i].Origin.Z, 0f));
+            }
+
             var piece = new Piece
             {
                 Res = mm, Mat = mat, ShadowOff = mat is StandardMaterial3D sm && sm.ShadingMode == BaseMaterial3D.ShadingModeEnum.Unshaded,
@@ -316,7 +355,7 @@ public sealed partial class GridView
             foreach ((int mat, HullMesher.Surface s) in HullMesher.Build(surface, new SectionGrid(this, c.Section), Conv.CS))
             {
                 if (s.Indices.Count == 0) continue;
-                var piece = new Piece { Res = BlockVisuals.HullMesh(s), Mat = BlockVisuals.SurfaceMaterial(_surfaceDefs[mat]) };
+                var piece = new Piece { Res = BlockVisuals.HullMesh(s), Mat = PlatingMaterial(_surfaceDefs[mat]) };
                 made?.Add(piece);
                 GeometryInstance3D g = piece.Instance();
                 ApplyNear(g);
@@ -325,6 +364,20 @@ public sealed partial class GridView
 
         if (made != null) _shared.Chunks[c.Key] = made;
         Perf.Add(Perf.Visuals, started);
+    }
+
+    /// <summary>What's in a cell of a section (for working out joints), or null.</summary>
+    private Func<Int3, BlockDef> DefAt(int section)
+    {
+        Dictionary<Int3, BlockInstance> cells = Model.Sections[section].Cells;
+        return c => cells.TryGetValue(c, out BlockInstance x) && x.Alive ? x.Def : null;
+    }
+
+    /// <summary>The material for a merged surface: glass as framed panes, plating in the paint job, or the block's own.</summary>
+    private Material PlatingMaterial(BlockDef def)
+    {
+        if (def.Glass) return Paintwork.Glass(def, _livery, plating: true);
+        return _livery != null ? Paintwork.Plating(def, _livery, _waterline) : BlockVisuals.SurfaceMaterial(def);
     }
 
     /// <summary>Merges the chunk's solid cells into boxes: runs along X, then rows along Z, then layers along Y.</summary>
@@ -340,7 +393,7 @@ public sealed partial class GridView
         c.Colliders.Clear();
         var solid = new HashSet<Int3>();
         foreach (BlockInstance b in c.Blocks)
-            if (b.Alive && b.Def.HasCollider && b.Def.Shape != BlockShape.Wedge)
+            if (b.Alive && b.Def.HasCollider && b.Def.Shape == BlockShape.Cube)
                 foreach (Int3 cell in b.Cells) solid.Add(cell);
         if (solid.Count == 0) return;
 

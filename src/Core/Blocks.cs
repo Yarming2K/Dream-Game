@@ -43,6 +43,9 @@ public enum BlockKind
     MissileMotor,
     MissileFins,
     DroneCore,
+
+    /// <summary>Cosmetic parts (hatches, lights, stowage, railings): a little mass, no other effect.</summary>
+    Detail,
 }
 
 public enum BlockShape
@@ -54,6 +57,30 @@ public enum BlockShape
     /// face points forward and up: the shape of a tank's front plate.
     /// </summary>
     Wedge,
+
+    /// <summary>The lower half of a slope half as steep as <see cref="Wedge"/> (it takes two blocks, this and <see cref="ShallowHigh"/>).</summary>
+    ShallowLow,
+
+    /// <summary>The upper half of a shallow slope.</summary>
+    ShallowHigh,
+
+    /// <summary>Where a front slope and a side slope meet round the outside of a corner.</summary>
+    Corner,
+
+    /// <summary>Where two slopes meet round the inside of a corner.</summary>
+    InnerCorner,
+
+    /// <summary>A quarter round: the front top edge rounded off.</summary>
+    Round,
+
+    /// <summary>The bottom half of a cube.</summary>
+    Half,
+
+    /// <summary>A quarter-cell plate against the back face.</summary>
+    Plate,
+
+    /// <summary>An eight-sided section running front to back.</summary>
+    Octagon,
 }
 
 public enum AmmoType
@@ -156,6 +183,15 @@ public sealed class BlockDef
     public float Roughness = 0.6f;
 
     public bool IsArmorLike => Kind == BlockKind.Armor || Kind == BlockKind.Frame;
+
+    /// <summary>
+    /// For a block that comes in several shapes (armor, glazing): the id of its plain cube version. The
+    /// builder shows only that one in its list, and cycles through the shapes with a key.
+    /// </summary>
+    public string BaseId;
+
+    /// <summary>Glass: drawn as framed panes (cockpits, bridges, windows).</summary>
+    public bool Glass;
     public bool ConductsAmmo => Kind == BlockKind.AmmoRack || Kind == BlockKind.AmmoFeed || Kind == BlockKind.TurretRing;
     public bool IsWheelLike => Kind == BlockKind.Wheel || Kind == BlockKind.SteerWheel || Kind == BlockKind.Track;
     public bool IsSeat => Kind == BlockKind.DriverSeat || Kind == BlockKind.GunnerSeat || Kind == BlockKind.CommanderSeat ||
@@ -166,7 +202,7 @@ public sealed class BlockDef
 
 public static class BlockCatalog
 {
-    public static readonly string[] Categories = { "Structure", "Mobility", "Sea", "Air", "Control", "Weapons", "Ammo" };
+    public static readonly string[] Categories = { "Structure", "Mobility", "Sea", "Air", "Control", "Weapons", "Ammo", "Details" };
 
     public static readonly BreechSpec Light37 = new()
     {
@@ -250,6 +286,12 @@ public static class BlockCatalog
         },
         new BlockDef
         {
+            Id = "glazing", Name = "Glazing", Category = "Structure", Kind = BlockKind.Armor, Glass = true,
+            Description = "Armored glass in a frame: cockpits, bridges and windows. Comes in every armor shape (press V), so a canopy can be built pane by pane. Stops splinters, not shells.",
+            MassKg = 16, Hp = 40, ArmorMm = 8, ColorR = 0.14f, ColorG = 0.19f, ColorB = 0.22f, Metallic = 0.85f, Roughness = 0.08f,
+        },
+        new BlockDef
+        {
             Id = "frame", Name = "Frame", Category = "Structure", Kind = BlockKind.Frame,
             Description = "Light internal structure for filling space and holding parts together. Offers almost no protection.",
             MassKg = 20, Hp = 60, ArmorMm = 5, ColorR = 0.25f, ColorG = 0.25f, ColorB = 0.27f,
@@ -315,6 +357,13 @@ public static class BlockCatalog
             Description = "Where you drive from. Every vehicle needs one. If it's destroyed, the vehicle is knocked out.",
             MassKg = 90, Hp = 80, ArmorMm = 5, ColorR = 0.2f, ColorG = 0.32f, ColorB = 0.5f,
             Metallic = 0.3f, Roughness = 0.6f,
+            Watertight = false,
+        },
+        new BlockDef
+        {
+            Id = "pilot_seat", Name = "Pilot Seat", Category = "Control", Kind = BlockKind.DriverSeat,
+            Description = "An open seat with a control stick and instruments, made to sit under a canopy: build the canopy round it from glazing (press V for slopes and corners). Works like a driver seat.",
+            MassKg = 70, Hp = 70, ArmorMm = 3, ColorR = 0.22f, ColorG = 0.24f, ColorB = 0.25f, Metallic = 0.4f, Roughness = 0.6f,
             Watertight = false,
         },
         new BlockDef
@@ -709,15 +758,181 @@ public static class BlockCatalog
             Description = "Air-burst shells for any gun: they go off when they pass close to an aircraft, or at the range you're aiming at, filling the sky with shrapnel. Explodes if destroyed while loaded.",
             MassKg = 120, Hp = 70, ArmorMm = 5, Watertight = false, ColorR = 0.35f, ColorG = 0.38f, ColorB = 0.42f, Metallic = 0.5f, Roughness = 0.5f,
         },
+
+        // Details
+        new BlockDef
+        {
+            Id = "hatch", Name = "Hatch", Category = "Details", Kind = BlockKind.Detail,
+            Description = "A crew hatch with a hinged lid. Purely for looks: put them where the crew would climb in.",
+            MassKg = 25, Hp = 25, ArmorMm = 3, HasCollider = false, Watertight = false, Displacement = 0f,
+            ColorR = 0.3f, ColorG = 0.32f, ColorB = 0.27f, Metallic = 0.5f, Roughness = 0.6f,
+        },
+        new BlockDef
+        {
+            Id = "periscope", Name = "Periscope", Category = "Details", Kind = BlockKind.Detail,
+            Description = "A vision block for the crew to see out of. For looks.",
+            MassKg = 12, Hp = 25, ArmorMm = 3, HasCollider = false, Watertight = false, Displacement = 0f,
+            ColorR = 0.25f, ColorG = 0.27f, ColorB = 0.24f, Metallic = 0.5f, Roughness = 0.6f,
+        },
+        new BlockDef
+        {
+            Id = "headlight", Name = "Headlight", Category = "Details", Kind = BlockKind.Detail,
+            Description = "A lamp in a wire guard, facing forward. For looks.",
+            MassKg = 6, Hp = 25, ArmorMm = 3, HasCollider = false, Watertight = false, Displacement = 0f,
+            ColorR = 0.3f, ColorG = 0.3f, ColorB = 0.3f, Metallic = 0.5f, Roughness = 0.6f,
+        },
+        new BlockDef
+        {
+            Id = "toolbox", Name = "Stowage Box", Category = "Details", Kind = BlockKind.Detail,
+            Description = "A box for tools and kit, bolted to the outside. For looks.",
+            MassKg = 30, Hp = 25, ArmorMm = 3, HasCollider = false, Watertight = false, Displacement = 0f,
+            ColorR = 0.33f, ColorG = 0.36f, ColorB = 0.27f, Metallic = 0.5f, Roughness = 0.6f,
+        },
+        new BlockDef
+        {
+            Id = "spare_tracks", Name = "Spare Track Links", Category = "Details", Kind = BlockKind.Detail,
+            Description = "Spare links hung on the armor. For looks (real crews hoped they'd stop a shell).",
+            MassKg = 40, Hp = 25, ArmorMm = 3, HasCollider = false, Watertight = false, Displacement = 0f,
+            ColorR = 0.2f, ColorG = 0.2f, ColorB = 0.2f, Metallic = 0.5f, Roughness = 0.6f,
+        },
+        new BlockDef
+        {
+            Id = "antenna", Name = "Antenna", Category = "Details", Kind = BlockKind.Detail,
+            Description = "A whip antenna on an insulated base. For looks.",
+            MassKg = 4, Hp = 25, ArmorMm = 3, HasCollider = false, Watertight = false, Displacement = 0f,
+            ColorR = 0.2f, ColorG = 0.2f, ColorB = 0.2f, Metallic = 0.5f, Roughness = 0.6f,
+        },
+        new BlockDef
+        {
+            Id = "railing", Name = "Railing", Category = "Details", Kind = BlockKind.Detail,
+            Description = "A guard rail along the back edge of the cell: decks, walkways, bridges. For looks.",
+            MassKg = 8, Hp = 25, ArmorMm = 3, HasCollider = false, Watertight = false, Displacement = 0f,
+            ColorR = 0.55f, ColorG = 0.57f, ColorB = 0.58f, Metallic = 0.5f, Roughness = 0.6f,
+        },
+        new BlockDef
+        {
+            Id = "ladder", Name = "Ladder", Category = "Details", Kind = BlockKind.Detail,
+            Description = "Rungs against the back face: for climbing hulls, towers and superstructure. For looks.",
+            MassKg = 10, Hp = 25, ArmorMm = 3, HasCollider = false, Watertight = false, Displacement = 0f,
+            ColorR = 0.5f, ColorG = 0.52f, ColorB = 0.53f, Metallic = 0.5f, Roughness = 0.6f,
+        },
+        new BlockDef
+        {
+            Id = "smoke_launcher", Name = "Smoke Launchers", Category = "Details", Kind = BlockKind.Detail,
+            Description = "A rack of three smoke dischargers. For looks.",
+            MassKg = 18, Hp = 25, ArmorMm = 3, HasCollider = false, Watertight = false, Displacement = 0f,
+            ColorR = 0.3f, ColorG = 0.32f, ColorB = 0.27f, Metallic = 0.5f, Roughness = 0.6f,
+        },
+        new BlockDef
+        {
+            Id = "exhaust", Name = "Exhaust", Category = "Details", Kind = BlockKind.Detail,
+            Description = "A muffler with a heat shield and a pipe. For looks.",
+            MassKg = 15, Hp = 25, ArmorMm = 3, HasCollider = false, Watertight = false, Displacement = 0f,
+            ColorR = 0.25f, ColorG = 0.24f, ColorB = 0.22f, Metallic = 0.5f, Roughness = 0.6f,
+        },
+        new BlockDef
+        {
+            Id = "searchlight", Name = "Searchlight", Category = "Details", Kind = BlockKind.Detail,
+            Description = "A big lamp on a turning yoke: ships, towers, airfields. For looks.",
+            MassKg = 30, Hp = 25, ArmorMm = 3, HasCollider = false, Watertight = false, Displacement = 0f,
+            ColorR = 0.45f, ColorG = 0.47f, ColorB = 0.48f, Metallic = 0.5f, Roughness = 0.6f,
+        },
+        new BlockDef
+        {
+            Id = "vent", Name = "Vent Grille", Category = "Details", Kind = BlockKind.Detail,
+            Description = "Louvers over an engine or a compartment. For looks.",
+            MassKg = 8, Hp = 25, ArmorMm = 3, HasCollider = false, Watertight = false, Displacement = 0f,
+            ColorR = 0.22f, ColorG = 0.22f, ColorB = 0.22f, Metallic = 0.5f, Roughness = 0.6f,
+        },
+        new BlockDef
+        {
+            Id = "grab_handles", Name = "Grab Handles", Category = "Details", Kind = BlockKind.Detail,
+            Description = "Handles for the crew to hang on to. For looks.",
+            MassKg = 3, Hp = 25, ArmorMm = 3, HasCollider = false, Watertight = false, Displacement = 0f,
+            ColorR = 0.5f, ColorG = 0.5f, ColorB = 0.5f, Metallic = 0.5f, Roughness = 0.6f,
+        },
+        new BlockDef
+        {
+            Id = "stowage_rack", Name = "Stowage Rack", Category = "Details", Kind = BlockKind.Detail,
+            Description = "A rack with bedrolls and kit bags. For looks.",
+            MassKg = 25, Hp = 25, ArmorMm = 3, HasCollider = false, Watertight = false, Displacement = 0f,
+            ColorR = 0.28f, ColorG = 0.3f, ColorB = 0.22f, Metallic = 0.5f, Roughness = 0.6f,
+        },
     };
 
+    /// <summary>The shapes armor and glazing come in, in the order the builder cycles through them, and their id suffixes.</summary>
+    public static readonly (BlockShape Shape, string Suffix)[] ShapeVariants =
+    {
+        (BlockShape.Wedge, "slope"), (BlockShape.ShallowLow, "shallow"), (BlockShape.ShallowHigh, "shallow_high"),
+        (BlockShape.Corner, "corner"), (BlockShape.InnerCorner, "inner_corner"), (BlockShape.Round, "round"),
+        (BlockShape.Half, "half"), (BlockShape.Plate, "plate"), (BlockShape.Octagon, "octagon"),
+    };
+
+    private static readonly string[] ShapedBases = { "armor_light", "armor_heavy", "armor_composite", "glazing", "airframe" };
+
+    // After the lists above: static fields are set up in the order they're written.
     private static readonly Dictionary<string, BlockDef> ById = BuildIndex();
+
+    private static string ShapeHint(BlockShape s) => s switch
+    {
+        BlockShape.Wedge => "Angled armor counts as thicker, and steep hits can bounce off.",
+        BlockShape.ShallowLow => "The low half of a long, shallow slope: put the high half behind it. Half as steep as a plain slope, so it counts as even thicker.",
+        BlockShape.ShallowHigh => "The high half of a long, shallow slope: put the low half in front of it.",
+        BlockShape.Corner => "Joins a front slope to a side slope round the outside of a corner.",
+        BlockShape.InnerCorner => "Joins two slopes round the inside of a corner.",
+        BlockShape.Round => "A rounded edge, for hulls and turrets that curve.",
+        BlockShape.Half => "Half height: steps, decks and low walls.",
+        BlockShape.Plate => "A quarter-cell plate: skirts, gun shields, fins and bulkheads. Same thickness of armor, a quarter of the weight.",
+        BlockShape.Octagon => "An eight-sided section: pipes, funnels and round hulls.",
+        _ => "",
+    };
+
+    private static void AddShapeVariants()
+    {
+        foreach (string id in ShapedBases)
+        {
+            BlockDef b = Defs.Find(d => d.Id == id);
+            if (b == null) continue;
+            b.BaseId = id;
+            foreach ((BlockShape shape, string suffix) in ShapeVariants)
+            {
+                string vid = $"{id}_{suffix}";
+                BlockDef existing = Defs.Find(d => d.Id == vid);
+                if (existing != null)
+                {
+                    existing.BaseId = id;
+                    continue;
+                }
+
+                float vol = Shapes.Volume(shape);
+                Defs.Add(new BlockDef
+                {
+                    Id = vid, Name = $"{b.Name}: {Shapes.NameOf(shape).ToLowerInvariant()}", Category = b.Category, Kind = b.Kind, Shape = shape,
+                    BaseId = id, Glass = b.Glass, Description = $"{b.Description.Split('.')[0]}, shaped. {ShapeHint(shape)}",
+                    MassKg = MathF.Round(b.MassKg * vol * 1.05f), Hp = MathF.Round(b.Hp * MathF.Max(vol, 0.35f)), ArmorMm = b.ArmorMm,
+                    HeVulnerability = b.HeVulnerability, Watertight = b.Watertight,
+                    ColorR = b.ColorR, ColorG = b.ColorG, ColorB = b.ColorB, Metallic = b.Metallic, Roughness = b.Roughness,
+                });
+            }
+        }
+    }
 
     private static Dictionary<string, BlockDef> BuildIndex()
     {
+        AddShapeVariants();
         var map = new Dictionary<string, BlockDef>(StringComparer.Ordinal);
         foreach (BlockDef d in Defs) map.Add(d.Id, d);
         return map;
+    }
+
+    /// <summary>Every shape a block comes in, plain cube first (just the block itself if it has no shapes).</summary>
+    public static List<BlockDef> VariantsOf(BlockDef def)
+    {
+        if (def.BaseId == null) return new List<BlockDef> { def };
+        var list = new List<BlockDef> { Get(def.BaseId) };
+        foreach ((_, string suffix) in ShapeVariants)
+            if (TryGet($"{def.BaseId}_{suffix}", out BlockDef v)) list.Add(v);
+        return list;
     }
 
     public static IReadOnlyList<BlockDef> All => Defs;
@@ -727,11 +942,12 @@ public static class BlockCatalog
 
     public static bool TryGet(string id, out BlockDef def) => ById.TryGetValue(id ?? "", out def);
 
+    /// <summary>The blocks the builder lists under a category (shape variants appear only as their plain version).</summary>
     public static List<BlockDef> InCategory(string category)
     {
         var list = new List<BlockDef>();
         foreach (BlockDef d in Defs)
-            if (d.Category == category) list.Add(d);
+            if (d.Category == category && (d.BaseId == null || d.BaseId == d.Id)) list.Add(d);
         return list;
     }
 }

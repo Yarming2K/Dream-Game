@@ -55,6 +55,10 @@ public partial class Builder : Node3D
     private Label3D _boxLabel;
     private Button _boxButton;
     private string _name = "Untitled";
+
+    /// <summary>The design's paint job id, or null for the default (factory colors; naval grey on ships).</summary>
+    private string _paint;
+    private OptionButton _paintPicker;
     private VehicleAnalysis _analysis;
     private bool _dirty = true;
     private bool _paletteDirty;
@@ -166,7 +170,8 @@ public partial class Builder : Node3D
         AddChild(icons);
         PartIcons.Init(icons);
         PartIcons.Updated += () => _paletteDirty = true;
-        foreach (BlockDef d in BlockCatalog.All) PartIcons.Get(d);
+        foreach (BlockDef d in BlockCatalog.All)
+            if (d.BaseId == null || d.BaseId == d.Id) PartIcons.Get(d);
 
         BuildUi();
         _selected = BlockCatalog.All[0];
@@ -398,10 +403,36 @@ public partial class Builder : Node3D
         if (recordUndo) Commit(changes);
         _name = bp.Name;
         if (_nameEdit != null) _nameEdit.Text = _name;
+        SetPaint(bp.Paint);
         FocusCamera();
     }
 
-    public Blueprint CurrentBlueprint() => Blueprint.FromCellMap(_name, _blocks.Values);
+    public Blueprint CurrentBlueprint()
+    {
+        Blueprint bp = Blueprint.FromCellMap(_name, _blocks.Values);
+        bp.Paint = _paint;
+        return bp;
+    }
+
+    /// <summary>Picks the design's paint job and shows it on the design.</summary>
+    private void SetPaint(string id)
+    {
+        _paint = string.IsNullOrEmpty(id) ? null : id;
+        if (_paintPicker != null)
+        {
+            int index = _paint == null ? 0 : Liveries.All.FindIndex(l => l.Id == _paint) + 1;
+            _paintPicker.Select(Math.Max(index, 0));
+        }
+
+        ApplyPaint();
+    }
+
+    private void ApplyPaint()
+    {
+        bool naval = _analysis?.IsNaval ?? false;
+        Livery l = Liveries.For(new Blueprint { Paint = _paint }, naval);
+        _batch?.SetPaint(l, naval ? _analysis.Water.WaterlineY : null);
+    }
 
     /// <summary>The box around every filled cell (kept up to date as blocks are added; recounted after removals).</summary>
     private (Int3 min, Int3 max) Bounds()
@@ -642,6 +673,9 @@ public partial class Builder : Node3D
             case Key.G:
                 Rotate(Orientations.RotateAroundZ(_orientation, dir));
                 break;
+            case Key.V:
+                CycleShape(dir);
+                break;
             case Key.M:
                 SetMirror(!_mirror);
                 Sfx.Play2D(this, SoundId.Tick, -6f);
@@ -676,6 +710,28 @@ public partial class Builder : Node3D
                 }
 
                 break;
+        }
+    }
+
+    /// <summary>Armor and glazing come in several shapes (slope, shallow slope, corners, round...): V steps through them.</summary>
+    private void CycleShape(int dir)
+    {
+        List<BlockDef> shapes = BlockCatalog.VariantsOf(_selected);
+        if (shapes.Count < 2)
+        {
+            Toast($"{_selected.Name} only comes in one shape.");
+            return;
+        }
+
+        int i = shapes.IndexOf(_selected);
+        BlockDef next = shapes[(i + dir + shapes.Count) % shapes.Count];
+        Select(next);
+        Toast($"Shape: {Shapes.NameOf(next.Shape)}  ({shapes.IndexOf(next) + 1} of {shapes.Count})");
+        if (_ghost != null)
+        {
+            _ghost.Scale = Vector3.One * 0.85f;
+            _ghost.CreateTween().TweenProperty(_ghost, "scale", Vector3.One, 0.12).SetTrans(Tween.TransitionType.Back)
+                .SetEase(Tween.EaseType.Out);
         }
     }
 
@@ -877,6 +933,7 @@ public partial class Builder : Node3D
 
         _comMarker.Visible = _cells.Count > 0;
         _comMarker.Position = _analysis.CenterOfMass.G();
+        ApplyPaint();
         UpdateWaterline(_analysis);
         RebuildDashboard(_analysis);
     }
@@ -1060,6 +1117,17 @@ public partial class Builder : Node3D
         };
         bar.AddChild(_loadButton);
         bar.AddChild(Ui.Button("Folder", OpenFolder, "Open the folder with your blueprint files, to share them with friends"));
+        _paintPicker = new OptionButton { FocusMode = Control.FocusModeEnum.None, TooltipText = "Paint job. Ships always get red below the waterline and grey decks." };
+        _paintPicker.AddItem("Paint: default");
+        foreach (Livery l in Liveries.All) _paintPicker.AddItem("Paint: " + l.Name);
+        for (int i = 0; i < Liveries.All.Count; i++) _paintPicker.SetItemTooltip(i + 1, Liveries.All[i].Description);
+        _paintPicker.SetItemTooltip(0, "Factory colors, or naval grey for ships.");
+        _paintPicker.ItemSelected += i =>
+        {
+            SetPaint(i == 0 ? null : Liveries.All[(int)i - 1].Id);
+            Sfx.Play2D(this, SoundId.Tick, -8f);
+        };
+        bar.AddChild(_paintPicker);
         bar.AddChild(Ui.Spacer());
         _mirrorButton = Ui.Button("MIRROR", () => SetMirror(!_mirror), "Build both sides at once (M)", "Pill");
         _mirrorButton.ToggleMode = true;
@@ -1123,7 +1191,7 @@ public partial class Builder : Node3D
         hints.AddChild(hintRow);
         foreach ((string key, string what) in new[]
                  {
-                     ("LMB", "place"), ("RMB", "remove"), ("MMB", "copy"), ("R T G", "rotate"), ("WASD Q E", "move"),
+                     ("LMB", "place"), ("RMB", "remove"), ("MMB", "copy"), ("R T G", "rotate"), ("V", "shape"), ("WASD Q E", "move"),
                      ("M", "mirror"), ("B", "box"), ("F1", "help"),
                  })
         {
@@ -1165,6 +1233,7 @@ public partial class Builder : Node3D
         "[cell]Right click[/cell][cell]remove a block[/cell]" +
         "[cell]Middle click[/cell][cell]copy the block under the cursor[/cell]" +
         "[cell]R / T / G[/cell][cell]rotate around the up / side / front axis (Shift turns the other way)[/cell]" +
+        "[cell]V[/cell][cell]next shape, for armor and glazing: slope, shallow slope (two blocks), outer and inner corners, rounded edge, half block, plate, octagon (Shift goes back)[/cell]" +
         "[cell]M[/cell][cell]mirror mode: build both sides at once[/cell]" +
         "[cell]B[/cell][cell]box tool: drag out a box to fill it, build a hollow shell (a hull in one go), or clear it. Mouse wheel while dragging makes it taller[/cell]" +
         "[cell]1-9,  [ ][/cell][cell]pick a block / switch category[/cell]" +
@@ -1237,7 +1306,8 @@ public partial class Builder : Node3D
                 ToggleMode = true, ButtonGroup = group, ThemeTypeVariation = "Tile", FocusMode = Control.FocusModeEnum.None,
                 CustomMinimumSize = new Vector2(86, 106), TooltipText = d.Description,
             };
-            tile.SetPressedNoSignal(d == _selected);
+            bool chosen = d == _selected || (d.BaseId != null && d.BaseId == _selected.BaseId);
+            tile.SetPressedNoSignal(chosen);
             tile.Pressed += () => Select(d);
 
             var icon = new TextureRect
@@ -1252,7 +1322,7 @@ public partial class Builder : Node3D
             icon.OffsetTop = 4;
             icon.OffsetBottom = -32;
 
-            Label name = Ui.Label(d.Name, 12, d == _selected ? Ui.AccentBright : Ui.Text);
+            Label name = Ui.Label(d.Name, 12, chosen ? Ui.AccentBright : Ui.Text);
             name.HorizontalAlignment = HorizontalAlignment.Center;
             name.VerticalAlignment = VerticalAlignment.Center;
             name.AutowrapMode = TextServer.AutowrapMode.WordSmart;
@@ -1285,6 +1355,37 @@ public partial class Builder : Node3D
         head.AddChild(Ui.Caption(d.Category));
         _partCard.AddChild(head);
         _partCard.AddChild(Ui.Wrapped(d.Description, 14, Ui.Dim));
+
+        // The shapes this block comes in, to pick from directly (V steps through them).
+        List<BlockDef> shapes = BlockCatalog.VariantsOf(d);
+        if (shapes.Count > 1)
+        {
+            var shapeRow = new HFlowContainer();
+            shapeRow.AddThemeConstantOverride("h_separation", 4);
+            shapeRow.AddThemeConstantOverride("v_separation", 4);
+            foreach (BlockDef v in shapes)
+            {
+                BlockDef pick = v;
+                var b = new Button
+                {
+                    ToggleMode = true, ThemeTypeVariation = "Tile", FocusMode = Control.FocusModeEnum.None, CustomMinimumSize = new Vector2(44, 44),
+                    TooltipText = Shapes.NameOf(v.Shape) + "  (V)",
+                };
+                b.SetPressedNoSignal(v == d);
+                b.Pressed += () => Select(pick);
+                var ic = new TextureRect
+                {
+                    Texture = PartIcons.Get(v), ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
+                    StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered, MouseFilter = Control.MouseFilterEnum.Ignore,
+                };
+                b.AddChild(ic);
+                ic.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
+                shapeRow.AddChild(b);
+            }
+
+            _partCard.AddChild(Ui.Caption("Shape: " + Shapes.NameOf(d.Shape)));
+            _partCard.AddChild(shapeRow);
+        }
 
         var chips = new HFlowContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
         chips.AddThemeConstantOverride("h_separation", 5);

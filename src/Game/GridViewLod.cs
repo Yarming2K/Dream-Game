@@ -205,9 +205,12 @@ public sealed partial class GridView
         var idx = new List<int>();
         const float inset = 0.03f;
 
-        // Plating: every exposed face, merged into the biggest rectangles of one color.
+        // Plating: every exposed face, merged into the biggest rectangles of one color. A painted pattern can't
+        // be one flat color over a big panel, so then panels stay small and each corner takes the pattern's color.
         var palette = new List<Color>();
+        var paletteDefs = new List<BlockDef>();
         var paletteIndex = new Dictionary<BlockDef, int>();
+        int maxRun = _livery != null && _livery.Pattern != LiveryPattern.Plain || _waterline.HasValue ? 2 : int.MaxValue;
         foreach (Int3 d in Dirs)
         {
             int axis = Axis(d), uAxis = (axis + 1) % 3, vAxis = (axis + 2) % 3;
@@ -216,12 +219,14 @@ public sealed partial class GridView
             foreach ((Int3 c, BlockInstance b) in s.Cells)
             {
                 if (!b.Alive || !BlockModels.IsSurface(b.Def) || grid.CoversFace(c + d, new Int3(-d.X, -d.Y, -d.Z))) continue;
-                if (!paletteIndex.TryGetValue(b.Def, out int color))
+                BlockDef sd = BlockModels.SurfaceDefOf(b.Def);
+                if (!paletteIndex.TryGetValue(sd, out int color))
                 {
                     color = palette.Count;
                     // A touch darker than the block's color: the real plating is shaded into its corners.
-                    palette.Add(new Color(b.Def.ColorR * FarShade, b.Def.ColorG * FarShade, b.Def.ColorB * FarShade));
-                    paletteIndex[b.Def] = color;
+                    palette.Add(new Color(sd.ColorR * FarShade, sd.ColorG * FarShade, sd.ColorB * FarShade));
+                    paletteDefs.Add(sd);
+                    paletteIndex[sd] = color;
                 }
 
                 int layer = Get(c, axis);
@@ -240,9 +245,9 @@ public sealed partial class GridView
                     if (used.Contains((u0, v0))) continue;
                     int color = mask[(u0, v0)];
                     int w = 1;
-                    while (mask.TryGetValue((u0 + w, v0), out int c2) && c2 == color && !used.Contains((u0 + w, v0))) w++;
+                    while (w < maxRun && mask.TryGetValue((u0 + w, v0), out int c2) && c2 == color && !used.Contains((u0 + w, v0))) w++;
                     int h = 1;
-                    while (true)
+                    while (h < maxRun)
                     {
                         bool row = true;
                         for (int k = 0; k < w && row; k++)
@@ -260,24 +265,34 @@ public sealed partial class GridView
                     // corners the panels cross, so there are no gaps.
                     float ua = (u0 - 0.5f) * CS, ub = (u0 + w - 0.5f) * CS;
                     float va = (v0 - 0.5f) * CS, vb = (v0 + h - 0.5f) * CS;
+                    int first = verts.Count;
                     Quad(verts, norms, cols, idx, n, palette[color],
                         Make(axis, plane, uAxis, ua, vAxis, va), Make(axis, plane, uAxis, ub, vAxis, va),
                         Make(axis, plane, uAxis, ub, vAxis, vb), Make(axis, plane, uAxis, ua, vAxis, vb));
+                    if (_livery != null || paletteDefs[color].Glass)
+                        for (int q = first; q < verts.Count; q++)
+                            cols[q] = Paintwork.FarColor(paletteDefs[color], _livery, _waterline, verts[q].N(), n.N(), true, palette[color]) * FarShade;
                 }
             }
         }
 
-        // Everything else that can be seen from outside, in its own shapes, leaving out the tiny bits.
+        // Shaped plating (slopes, corners...) and everything else that can be seen from outside, in their own
+        // shapes, leaving out the tiny bits.
         foreach (BlockInstance b in Model.Instances)
         {
-            if (b.Section != sectionId || !b.Alive || BlockModels.IsSurface(b.Def) || Enclosed(b, grid)) continue;
+            if (b.Section != sectionId || !b.Alive || (BlockModels.IsSurface(b.Def) && b.Def.Shape == BlockShape.Cube) || Enclosed(b, grid)) continue;
             Transform3D at = Conv.BlockTransform(b.Cell, b.Orientation);
-            foreach ((Mesh mesh, Material mat, Transform3D local) in BlockVisuals.Parts(b.Def, CaliberOf(b)))
+            bool shapedPlate = BlockModels.IsSurface(b.Def);
+            foreach ((Mesh mesh, Material mat, Transform3D local, Paint finish) in BlockVisuals.PartsOf(b.Def, CaliberOf(b)))
             {
                 Transform3D xf = at * local;
                 Aabb box = xf * mesh.GetAabb();
                 if (Mathf.Max(box.Size.X, Mathf.Max(box.Size.Y, box.Size.Z)) < 0.09f) continue;
-                Append(verts, norms, cols, idx, Simplified(mesh), xf, ColorOf(mat));
+                Color own = shapedPlate ? new Color(b.Def.ColorR * FarShade, b.Def.ColorG * FarShade, b.Def.ColorB * FarShade) : ColorOf(mat);
+                Color c = (_livery != null && Liveries.Paints(b.Def, finish)) || b.Def.Glass
+                    ? Paintwork.FarColor(b.Def, _livery, _waterline, xf.Origin.N(), (xf.Basis * Vector3.Up).N(), shapedPlate, own)
+                    : own;
+                Append(verts, norms, cols, idx, Simplified(mesh), xf, c);
             }
         }
 
