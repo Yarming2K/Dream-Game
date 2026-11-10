@@ -633,6 +633,33 @@ public static class BlockModels
                 break;
             }
 
+            case BlockKind.Stairs:
+                // Four treads up the slope (rising toward the back), with stringers down both sides.
+                for (int i = 0; i < 4; i++)
+                {
+                    float z0 = -H + i * 0.125f, top = -H + (i + 0.5f) * 0.125f + 0.0625f;
+                    k.Box(new Vector3(Full * 0.9f, top + H, 0.125f), Paint.Self, new Vector3(0, (top - H) * 0.5f, z0 + 0.0625f));
+                    k.Box(new Vector3(Full * 0.9f, 0.012f, 0.02f), Paint.Steel, new Vector3(0, top, z0 + 0.012f));
+                }
+
+                foreach (float x in new[] { -H + 0.012f, H - 0.012f })
+                    k.Box(new Vector3(0.024f, 0.08f, Full * 1.4f), Paint.SelfDark, new Vector3(x, -0.02f, 0), Rot(Vector3.UnitX, MathF.PI / 4));
+                break;
+
+            case BlockKind.Lamp:
+                // A cage round a glowing bulb, hanging off the back face (down, unrotated: a ceiling light).
+                k.Cyl(0.07f, 0.02f, Paint.Self, new Vector3(0, H - 0.01f, 0), sides: 14);
+                k.Cyl(0.015f, 0.05f, Paint.Dark, new Vector3(0, H - 0.045f, 0), sides: 8);
+                k.Sphere(0.045f, Paint.Glow, new Vector3(0, H - 0.1f, 0));
+                k.M.Parts[^1] = k.M.Parts[^1] with { GlowColor = new Vector3(1f, 0.86f, 0.62f), GlowEnergy = 3f };
+                for (int i = 0; i < 4; i++)
+                {
+                    float a = i * MathF.PI / 4;
+                    k.Box(new Vector3(0.11f, 0.11f, 0.006f), Paint.Self, new Vector3(0, H - 0.1f, 0), Rot(Vector3.UnitY, a));
+                }
+
+                break;
+
             case BlockKind.Generator:
                 // An alternator on a skid with cooling ribs, a terminal box with its lamp, and an exhaust stub.
                 k.Bevel(new Vector3(Full, 0.07f, Full), Paint.Dark, new Vector3(0, -0.215f, 0), 0.015f);
@@ -1030,6 +1057,25 @@ public static class BlockModels
             case BlockKind.LeadBallast:
                 Ingots(k, ext, Paint.Self);
                 break;
+
+            case BlockKind.Door:
+            {
+                // A steel frame with a sliding door in it: a porthole, a handle, and warning stripes on the sill.
+                float w = ext.X, h = ext.Y;
+                foreach (float x in new[] { -w * 0.5f + 0.05f, w * 0.5f - 0.05f })
+                    k.Bevel(new Vector3(0.1f, h, ext.Z), Paint.SelfDark, new Vector3(x, 0, 0), 0.015f);
+                k.Bevel(new Vector3(w, 0.12f, ext.Z), Paint.SelfDark, new Vector3(0, h * 0.5f - 0.06f, 0), 0.015f);
+                k.Box(new Vector3(w - 0.2f, 0.03f, ext.Z * 0.9f), Paint.Brass, new Vector3(0, -h * 0.5f + 0.015f, 0));
+                k.Node = k.AddNode("Panel", Vector3.Zero);
+                k.Bevel(new Vector3(w - 0.2f, h - 0.14f, 0.07f), Paint.Self, new Vector3(0, -0.06f, 0), 0.012f);
+                k.Cyl(0.12f, 0.02f, Paint.Dark, new Vector3(0, h * 0.18f, -0.045f), AlongZ, sides: 18);
+                k.Cyl(0.1f, 0.012f, Paint.Glass, new Vector3(0, h * 0.18f, -0.05f), AlongZ, sides: 18);
+                k.Cyl(0.12f, 0.02f, Paint.Dark, new Vector3(0, h * 0.18f, 0.045f), AlongZ, sides: 18);
+                foreach (float z in new[] { -0.05f, 0.05f })
+                    k.Box(new Vector3(0.03f, 0.16f, 0.03f), Paint.Steel, new Vector3(w * 0.32f, -0.05f, z));
+                k.Node = -1;
+                break;
+            }
 
             case BlockKind.Reactor:
             {

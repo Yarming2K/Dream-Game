@@ -153,6 +153,15 @@ Jets push on their own at any speed. Opening the throttle all the way lights the
 - **Welding torch:** repairs damaged blocks and rebuilds destroyed ones exactly as designed (shown as blue outlines while the torch is out). A block can only be rebuilt where it attaches to something, so you rebuild from the inside out. Rebuilt ammo racks start empty.
 - **Supply points** rearm and refuel parked vehicles, and heal and restock people. This is the seed of the logistics network.
 
+### Interiors
+- **Walking on moving vehicles.** Standing on a vehicle, the player moves in its frame: the deck carries them as it moves, rolls and turns (and turns them with it), and their walking is relative to the deck. Stepping or jumping off, they keep its speed.
+- **Crew stations.** On foot, E next to a seat takes that exact seat (walk to the gun you want to man). Getting up inside a big vehicle puts you on the floor beside the seat, if there's room.
+- **Interior parts** (Interior tab): **Doors** (2×4, slide open for anyone walking up, shut behind them, watertight when shut), **Stairs** (a walkable flight up one cell), **Ladders** (push toward one to climb, back to go down, Space to let go), **Lamps** (the 18 nearest the camera light up). **Glazing** panes are now see-through.
+- Rooms need about 4 cells (2 m) of headroom and doorways 2 cells wide to walk through. The **command post** by the depot is now a walk-in building with all of these.
+- **Fire.** Fuel, engines, generators, ammunition, propellant, missile motors and electronics can catch fire when hit and not destroyed. A fire burns its block down, spreads to flammable neighbors, and burns out after about 30 s (18 s with crew aboard fighting it). Water inside the hull puts it out, and so does the welding torch played on it. A block that burns away goes up as if it were shot: fuel bursts and ammunition cooks off. The HUD warns while anything's burning.
+- **Flooding you can see.** Each flooding compartment shows its water surface, rising as it fills.
+- **Hidden machinery.** Blocks walled in on every side by solid plate aren't drawn (they reappear as soon as a neighbor is shot away).
+
 ### Mobility
 - Wheels and track segments both use raycast suspension. Wheels steer; tracks skid-steer.
 - Engine power and vehicle mass set acceleration and top speed.
@@ -259,6 +268,7 @@ Each milestone is playable on its own.
    - **Fleet command** *(built)*: the command console and search radar, the command post, the tactical map with fog of war, picking and groups, move / attack / escort / patrol / hold orders in formation, rules of engagement, command range, jumping into units, and deploying more.
    - **Looks and building** *(built)*: the shape kit, paint jobs with ship rules, glazing and the pilot seat, detail parts, joints, copy and paste with saved parts, the armor view, and the examples rebuilt with them.
    - **Big battles** *(built)*: shells as data, two-batch tracers, ground and vehicle checks in C#, parking, far models, shared meshes, effect budgets, the F3 performance readout and the F8 battle drill.
+   - **Interiors** *(built)*: walking on moving decks, taking the seat you walk up to, doors, stairs, ladders, lamps, see-through glass, fire that spreads and can be put out, visible flooding, hidden enclosed machinery, the walk-in command post.
    - **Modern and future** *(built)*: jets with afterburners and the Falcon; power (generators, the fusion reactor, capacitors); railguns, lasers, the CIWS and point defense; vertical launch cells with strike and air-defense missiles; rocket artillery; big blasts with shock waves; the Vanguard, Hailstorm and Trident examples.
    - Not yet: giant aircraft and land battleships. They can be built from the same blocks, but their wings and tracks are still worked out panel by panel, so a giant one costs more to fly than it needs to.
 4. **Terrain + industry:** deformable terrain, mining, machines you design, conveyors, power, assembly bays that print blueprints.

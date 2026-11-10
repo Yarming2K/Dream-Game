@@ -64,6 +64,15 @@ public enum BlockKind
 
     /// <summary>A vertical launch cell: one missile inside, fired straight up out of the deck.</summary>
     VlsCell,
+
+    /// <summary>A sliding door, two cells wide and four high: it opens for people and shuts behind them.</summary>
+    Door,
+
+    /// <summary>A flight of steps up one cell: walkable.</summary>
+    Stairs,
+
+    /// <summary>A light fitting: lights up the space around it.</summary>
+    Lamp,
 }
 
 /// <summary>What a vertical launch cell holds.</summary>
@@ -271,7 +280,7 @@ public sealed class BlockDef
 
 public static class BlockCatalog
 {
-    public static readonly string[] Categories = { "Structure", "Mobility", "Sea", "Air", "Control", "Weapons", "Ammo", "Power", "Details" };
+    public static readonly string[] Categories = { "Structure", "Mobility", "Sea", "Air", "Control", "Weapons", "Ammo", "Power", "Interior", "Details" };
 
     public static readonly BreechSpec Light37 = new()
     {
@@ -965,6 +974,27 @@ public static class BlockCatalog
             ColorR = 0.36f, ColorG = 0.38f, ColorB = 0.38f, Metallic = 0.6f, Roughness = 0.5f,
         },
 
+        // Interior
+        new BlockDef
+        {
+            Id = "door", Name = "Door (2×4)", Category = "Interior", Kind = BlockKind.Door, Size = new Int3(2, 4, 1),
+            Description = "A sliding door 1 m wide and 2 m tall, for getting about inside ships, bunkers and big machines. It opens by itself when someone walks up to it and shuts behind them. Watertight when shut, so it can sit in a bulkhead.",
+            MassKg = 180, Hp = 180, ArmorMm = 12, HasCollider = false, ColorR = 0.4f, ColorG = 0.42f, ColorB = 0.44f, Metallic = 0.7f, Roughness = 0.45f,
+        },
+        new BlockDef
+        {
+            Id = "stairs", Name = "Stairs", Category = "Interior", Kind = BlockKind.Stairs, Shape = BlockShape.Wedge,
+            Description = "A flight of four steps rising one cell, toward the back. Put them in a line, each one up and back from the last, for a staircase between decks.",
+            MassKg = 30, Hp = 60, ArmorMm = 5, Watertight = false, ColorR = 0.36f, ColorG = 0.37f, ColorB = 0.38f, Metallic = 0.7f, Roughness = 0.5f,
+        },
+        new BlockDef
+        {
+            Id = "lamp", Name = "Lamp", Category = "Interior", Kind = BlockKind.Lamp,
+            Description = "A caged light fitting. Unturned it hangs from the ceiling; turn it to fix it to a wall. It lights the space around it when you're near.",
+            MassKg = 4, Hp = 15, ArmorMm = 2, HasCollider = false, Watertight = false, Displacement = 0f,
+            ColorR = 0.3f, ColorG = 0.31f, ColorB = 0.3f, Metallic = 0.6f, Roughness = 0.5f,
+        },
+
         // Details
         new BlockDef
         {
@@ -1017,8 +1047,8 @@ public static class BlockCatalog
         },
         new BlockDef
         {
-            Id = "ladder", Name = "Ladder", Category = "Details", Kind = BlockKind.Detail,
-            Description = "Rungs against the back face: for climbing hulls, towers and superstructure. For looks.",
+            Id = "ladder", Name = "Ladder", Category = "Interior", Kind = BlockKind.Detail,
+            Description = "Rungs against the back face: walk up to it and push forward to climb, back to climb down, Space to let go. Stack them for a tall climb, inside or out.",
             MassKg = 10, Hp = 25, ArmorMm = 3, HasCollider = false, Watertight = false, Displacement = 0f,
             ColorR = 0.5f, ColorG = 0.52f, ColorB = 0.53f, Metallic = 0.5f, Roughness = 0.6f,
         },

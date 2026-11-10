@@ -27,7 +27,11 @@ public partial class StructureBody : StaticBody3D, IGridHost
     }
 
     public override void _EnterTree() => GridRegistry.Add(this);
-    public override void _ExitTree() => GridRegistry.Remove(this);
+    public override void _ExitTree()
+    {
+        _interior?.Clear();
+        GridRegistry.Remove(this);
+    }
 
     public Vector3 VelocityAt(Vector3 worldPoint) => Vector3.Zero;
 

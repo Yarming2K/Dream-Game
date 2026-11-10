@@ -1303,29 +1303,55 @@ public static class ExampleDesigns
     /// A command post: a heavy concrete-and-steel hut with a command console inside, slit windows, a search
     /// radar and an antenna on the roof. Stand next to it and press M to command your units.
     /// </summary>
+    /// <summary>
+    /// The command post: a small blockhouse you can walk into. A sliding door, windows all round, lamps in
+    /// the ceiling and the command console at the back; outside, stairs up one side and a ladder up the other
+    /// to the roof, where the radar turns.
+    /// </summary>
     public static Blueprint CommandPost()
     {
         var d = new Draft();
-        d.Set(0, 1, 0, "command_console");
-        d.Set(-1, 1, 0, "frame");
-        d.Set(1, 1, 0, "frame");
-        d.Fill(-2, 2, 0, 0, -2, 2, "armor_heavy");
-        foreach ((int x, int z) in new[] { (-2, 0), (2, 0), (0, -2), (0, 2) }) d.Set(x, 2, z, "glazing");
-        d.Fill(-2, 2, 1, 2, -2, 2, "armor_heavy");
-        for (int x = -1; x <= 1; x++)
-        for (int z = -1; z <= 1; z++)
+        const int roof = 6;
+        // The door, the console, the lamps and the windows go in first, so the walls fill in round them.
+        d.Set(-1, 2, -4, "door");
+        d.Set(0, 1, 3, "command_console", Pointing(Int3.Back));
+        foreach ((int x, int z) in new[] { (-2, 0), (2, 0), (0, -2) }) d.Set(x, roof - 1, z, "lamp");
+        for (int i = -3; i <= 3; i += 2)
         {
-            if (x == 0 && z == 0) continue;
-            if (Math.Abs(x) == 1 && z == 0) continue;
-            d.Remove(x, 1, z);
-            d.Remove(x, 2, z);
+            d.Fill(i, i + 1, 3, 4, 4, 4, "glazing");
+            d.Fill(-4, -4, 3, 4, i, i + 1, "glazing");
+            d.Fill(4, 4, 3, 4, i, i + 1, "glazing");
         }
 
-        d.Remove(0, 2, 0);
-        d.Fill(-2, 2, 3, 3, -2, 2, "armor_heavy");
-        d.Set(0, 4, 0, "radar");
-        d.Set(2, 4, 2, "antenna");
-        d.Set(-2, 4, -2, "searchlight");
+        d.Fill(2, 3, 3, 4, -4, -4, "glazing");
+        d.Fill(-4, -3, 3, 4, -4, -4, "glazing");
+
+        // Floor, walls and roof.
+        d.Fill(-4, 4, 0, 0, -4, 4, "armor_heavy");
+        d.Fill(-4, 4, 1, roof - 1, -4, -4, "armor_heavy");
+        d.Fill(-4, 4, 1, roof - 1, 4, 4, "armor_heavy");
+        d.Fill(-4, -4, 1, roof - 1, -3, 3, "armor_heavy");
+        d.Fill(4, 4, 1, roof - 1, -3, 3, "armor_heavy");
+        d.Fill(-4, 4, roof, roof, -4, 4, "armor_heavy");
+
+        // Stairs up the left side to the roof, a ladder up the right.
+        for (int i = 0; i < roof; i++)
+            foreach (int x in new[] { -6, -5 })
+                d.Set(x, 1 + i, -3 + i, "stairs");
+        for (int y = 1; y <= roof + 1; y++) d.Set(5, y, 0, "ladder", Orient(new Int3(0, -1, 0), new Int3(1, 0, 0)));
+
+        // On the roof: the radar, an antenna, a searchlight and a rail round the edge.
+        d.Set(0, roof + 1, 0, "radar");
+        d.Set(3, roof + 1, 3, "antenna");
+        d.Set(-3, roof + 1, -3, "searchlight");
+        for (int i = -4; i <= 4; i++)
+        {
+            d.Set(i, roof + 1, -4, "railing", Orient(new Int3(0, -1, 0), new Int3(0, 0, 1)));
+            d.Set(i, roof + 1, 4, "railing", Orient(new Int3(0, -1, 0), new Int3(0, 0, -1)));
+            if (i > -4 && i < 4 && i != 0) d.Set(4, roof + 1, i, "railing", Orient(new Int3(0, -1, 0), new Int3(-1, 0, 0)));
+            if (i > -4 && i < 2) d.Set(-4, roof + 1, i, "railing", Orient(new Int3(0, -1, 0), new Int3(1, 0, 0)));
+        }
+
         return d.Build("Command post", "olive");
     }
 

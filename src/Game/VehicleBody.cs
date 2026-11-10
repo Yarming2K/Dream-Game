@@ -228,7 +228,6 @@ public partial class VehicleBody : RigidBody3D, IGridHost
         float quieter = PlayerSeat != null ? 0f : -5f;
         _engineSound.VolumeDb = Mathf.Lerp(_engineSound.VolumeDb, -15f + 9f * load + 3f * rev + quieter, 0.1f);
     }
-    public override void _ExitTree() => GridRegistry.Remove(this);
 
     private void SetupWheels()
     {
@@ -446,6 +445,9 @@ public partial class VehicleBody : RigidBody3D, IGridHost
         if (PlayerInput.Fire) FirePlayerGuns();
         Perf.Add(Perf.Ai, t3);
         PowerTick(dt);
+        FireTick(dt);
+        InteriorTick(dt);
+        FloodViewTick(dt);
         foreach (GunRt g in Guns)
         {
             if (g.SalvoLeft > 0) SalvoTick(g, dt);

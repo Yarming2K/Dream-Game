@@ -57,6 +57,33 @@ public struct HydroStats
     public int Compartments;
 }
 
+/// <summary>Where the water inside a compartment stands.</summary>
+public static class Flood
+{
+    /// <summary>
+    /// Height of the water surface in a compartment, in design cells (the middle of the lowest cell is its
+    /// y; a full layer reaches half a cell above). Negative infinity when it's dry. Water fills the lowest
+    /// cells first, a layer at a time.
+    /// </summary>
+    public static float SurfaceY(Compartment c)
+    {
+        if (c.Cells.Count == 0 || c.Water <= 0) return float.NegativeInfinity;
+        float n = c.FillFraction * c.Cells.Count;
+        int below = 0;
+        int i = 0;
+        while (i < c.Cells.Count)
+        {
+            int y = c.Cells[i].Y, layer = 0;
+            while (i + layer < c.Cells.Count && c.Cells[i + layer].Y == y) layer++;
+            if (n <= below + layer) return y - 0.5f + (n - below) / layer;
+            below += layer;
+            i += layer;
+        }
+
+        return c.Cells[^1].Y + 0.5f;
+    }
+}
+
 /// <summary>Floating, flooding and diving.</summary>
 public static class Hydro
 {

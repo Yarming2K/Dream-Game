@@ -498,9 +498,9 @@ public partial class TestRange : Node3D
 
     private bool Mounted => _mount != null && IsInstanceValid(_mount) && _mount.IsInsideTree();
 
-    private void EnterVehicle(VehicleBody v, SeatRole? role)
+    private void EnterVehicle(VehicleBody v, SeatRole? role, SeatRt exact = null)
     {
-        SeatRt seat = v.Enter(role);
+        SeatRt seat = v.Enter(role, exact);
         if (seat == null)
         {
             Big("No free seats");
@@ -548,13 +548,41 @@ public partial class TestRange : Node3D
             return;
         }
 
-        Vector3 spot = FindExitSpot(v);
+        Vector3 spot = StandBySeat(v) ?? FindExitSpot(v);
         v.Exit();
         _mount = null;
         _me.GlobalPosition = spot;
         _me.LookYaw(_yaw);
         if (_me.Alive) _me.SetActive(true);
         if (!silent) Sfx.Play2D(this, SoundId.PlaceLight, -6f, 1.1f);
+    }
+
+    /// <summary>
+    /// Getting up from a crew station inside a vehicle with room to stand (a ship's bridge, a turret you
+    /// walked into): a clear spot on the floor right beside the seat. Null if there's no room.
+    /// </summary>
+    private Vector3? StandBySeat(VehicleBody v)
+    {
+        if (v.PlayerSeat == null || v.Radius < 6f) return null;
+        PhysicsDirectSpaceState3D space = GetWorld3D().DirectSpaceState;
+        var shape = new CapsuleShape3D { Radius = 0.32f, Height = 1.8f };
+        Vector3 seat = v.SeatWorldPos(v.PlayerSeat);
+        Basis b = v.GlobalTransform.Basis.Orthonormalized();
+        foreach (Vector3 off in new[] { b.X, -b.X, b.Z, -b.Z, (b.X + b.Z) * 0.7f, (b.Z - b.X) * 0.7f, (-b.X - b.Z) * 0.7f, (b.X - b.Z) * 0.7f })
+        {
+            Vector3 c = seat + off * 0.8f;
+            Godot.Collections.Dictionary floor = space.IntersectRay(
+                PhysicsRayQueryParameters3D.Create(c + Vector3.Up * 0.4f, c + Vector3.Down * 1.2f, GridRegistry.Layers.Vehicles));
+            if (floor.Count == 0 || floor["collider"].AsGodotObject() != v || floor["normal"].AsVector3().Y < 0.7f) continue;
+            Vector3 spot = floor["position"].AsVector3();
+            var q = new PhysicsShapeQueryParameters3D
+            {
+                Shape = shape, Transform = new Transform3D(Basis.Identity, spot + Vector3.Up * 0.96f), CollisionMask = GridRegistry.Layers.All,
+            };
+            if (space.IntersectShape(q, 1).Count == 0) return spot + Vector3.Up * 0.05f;
+        }
+
+        return null;
     }
 
     /// <summary>A clear spot beside the vehicle to step out to: left, right, behind, in front, or on top.</summary>
@@ -1007,6 +1035,15 @@ public partial class TestRange : Node3D
             return;
         }
 
+        // Aboard a ship (or beside a tank), the seat you're standing at is the one you take: walk to the
+        // gun you want to man.
+        (VehicleBody station, SeatRt seat) = StationNear(_me.GlobalPosition + Vector3.Up * 0.9f);
+        if (station != null)
+        {
+            EnterVehicle(station, null, seat);
+            return;
+        }
+
         VehicleBody v = _lookedAt;
         if (v == null || !IsInstanceValid(v)) return;
         if (v.Faction != 0)
@@ -1016,6 +1053,27 @@ public partial class TestRange : Node3D
         }
 
         EnterVehicle(v, null);
+    }
+
+    /// <summary>A crew station of one of your vehicles within arm's reach.</summary>
+    private static (VehicleBody, SeatRt) StationNear(Vector3 at)
+    {
+        var near = new List<IGridHost>();
+        WorldQuery.HostsNear(at, 2f, near);
+        VehicleBody bestV = null;
+        SeatRt best = null;
+        float bestD = 1.4f;
+        foreach (IGridHost h in near)
+        {
+            if (h is not VehicleBody v || v.Faction != 0 || !IsInstanceValid(v)) continue;
+            SeatRt s = v.SeatNear(at, bestD);
+            if (s == null) continue;
+            bestD = v.SeatWorldPos(s).DistanceTo(at);
+            best = s;
+            bestV = v;
+        }
+
+        return (bestV, best);
     }
 
     private void ToggleGunnerMode()
@@ -1362,6 +1420,8 @@ public partial class TestRange : Node3D
         if (!v.IsNaval && v.Submerged > 0.25f) sb.Append($"[color={Ui.Hex(Ui.Warn)}]Deep water: land vehicles sink. Back out while the engine still runs.[/color]\n");
         if (v.IsUpsideDownOrStuck && (!v.IsAir || v.OnGround)) sb.Append($"[color={Ui.Hex(Ui.Warn)}]Tipped over: press R to get back up.[/color]\n");
         if (_resupplying) sb.Append($"[color={Ui.Hex(Ui.Good)}]Resupplying...[/color]\n");
+        if (v.FiresBurning > 0)
+            sb.Append($"[color={Ui.Hex(Ui.Bad)}][b]FIRE[/b]: {v.FiresBurning} block(s) burning. The crew are fighting it; get out with the welding torch (3) to put it out faster.[/color]\n");
         _missingTimer -= (float)GetProcessDeltaTime();
         if (_missingTimer <= 0)
         {
@@ -1570,6 +1630,8 @@ public partial class TestRange : Node3D
                 WeldState.Rebuilding => ($"Rebuilding {what}", Ui.Info),
                 WeldState.Rebuilt => ($"{what} rebuilt", Ui.Good),
                 WeldState.AlreadyFixed => ($"{what} is in good shape", Ui.Good),
+                WeldState.Extinguishing => ("Putting out the fire", Ui.Warn),
+                WeldState.PutOut => ("Fire's out", Ui.Good),
                 _ => ($"{what} has nothing to attach to yet: rebuild what's under it first", Ui.Warn),
             };
             _weldLabel.Text = text;

@@ -736,6 +736,54 @@ public static class Effects
         });
     }
 
+    // ---------- Fires aboard ----------
+
+    private static CpuParticles3D Loop(Material m, float size, int amount, float life, float spread, float vMin, float vMax, Vector3 gravity,
+        Gradient colors, float from, float to) => new()
+    {
+        Amount = amount, Lifetime = life, OneShot = false, Explosiveness = 0f, Randomness = 0.5f, LifetimeRandomness = 0.3f,
+        Direction = Vector3.Up, Spread = spread, InitialVelocityMin = vMin, InitialVelocityMax = vMax, Gravity = gravity,
+        DampingMin = 0.2f, DampingMax = 0.6f, AngleMin = 0, AngleMax = 360, ScaleAmountMin = size * 0.6f, ScaleAmountMax = size,
+        ScaleAmountCurve = ScaleCurve(from, to), ColorRamp = colors, Mesh = QuadFor(m), Emitting = true,
+        EmissionShape = CpuParticles3D.EmissionShapeEnum.Sphere, EmissionSphereRadius = 0.18f * size,
+    };
+
+    /// <summary>
+    /// A block on fire: flames licking up, smoke pouring off (it trails behind a moving vehicle), and a
+    /// flickering glow if there's light to spare. Stop it with <see cref="StopFireLoop"/>.
+    /// </summary>
+    public static Node3D FireLoop(Node3D parent, Vector3 pos, float size, bool light)
+    {
+        var root = new Node3D { Name = "Fire" };
+        parent.AddChild(root);
+        root.GlobalPosition = pos;
+        root.AddChild(Loop(Fire, 0.55f * size, 16, 0.7f, 18f, 0.8f, 1.8f, new Vector3(0, 2.5f, 0), FireRamp, 0.6f, 0.2f));
+        root.AddChild(Loop(Smoke, 1.3f * size, 12, 4f, 14f, 1f, 2.2f, new Vector3(0, 1.2f, 0), BlastSmoke, 0.3f, 1f));
+        if (light)
+            root.AddChild(new OmniLight3D
+            {
+                Name = "Light", LightColor = new Color(1f, 0.58f, 0.25f), LightEnergy = 2f, OmniRange = 3.5f * size, ShadowEnabled = false,
+                Position = Vector3.Up * 0.4f,
+            });
+        return root;
+    }
+
+    /// <summary>Puts a fire's flames out: the smoke already made drifts away before the node goes.</summary>
+    public static void StopFireLoop(Node3D fire)
+    {
+        if (!GodotObject.IsInstanceValid(fire)) return;
+        foreach (Node n in fire.GetChildren())
+        {
+            if (n is CpuParticles3D p) p.Emitting = false;
+            else if (n is OmniLight3D l) l.QueueFree();
+        }
+
+        fire.GetTree().CreateTimer(4.5f).Timeout += () =>
+        {
+            if (GodotObject.IsInstanceValid(fire)) fire.QueueFree();
+        };
+    }
+
     // ---------- Energy weapons ----------
 
     /// <summary>A railgun shot: a blue-white flash and crackle at the muzzle, a ring of plasma, a puff of hot gas.</summary>

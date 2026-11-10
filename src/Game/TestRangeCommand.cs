@@ -37,9 +37,11 @@ public partial class TestRange
 
     private void AddCommandPost()
     {
-        _commandPost = StructureBody.Create(ExampleDesigns.CommandPost(), new Transform3D(new Basis(Vector3.Up, Mathf.Pi * 0.5f), CommandPostAt), "Command post");
+        // Sunk a quarter of a meter, so its floor is level with the ground and you can walk straight in.
+        _commandPost = StructureBody.Create(ExampleDesigns.CommandPost(),
+            new Transform3D(new Basis(Vector3.Up, Mathf.Pi * 0.5f), CommandPostAt + Vector3.Down * 0.25f), "Command post");
         AddChild(_commandPost);
-        _commandPost.AddChild(Sign("COMMAND POST\nstand here, press M", new Vector3(0, 3.6f, 0), 60));
+        _commandPost.AddChild(Sign("COMMAND POST\nwalk in and press M", new Vector3(0, 4.6f, 0), 60));
     }
 
     private static bool HasConsole(GridModel m) => m.Instances.Any(b => b.Alive && b.Def.Kind == BlockKind.CommandConsole);

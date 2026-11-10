@@ -123,6 +123,7 @@ void fragment() {
 		m = mix(0.55, 0.5, bar);
 		r = mix(0.12, 0.55, bar);
 		g = mix(1.0, g, bar);
+		GLASS_ALPHA
 	} else {
 		vec3 p = per_part ? ppos : lpos;
 		col = pattern_color(p);
@@ -156,17 +157,23 @@ void fragment() {
 }
 ";
 
-    private static Shader _oneSided, _twoSided;
+    private static Shader _oneSided, _twoSided, _glassOne, _glassTwo;
     private static readonly Dictionary<string, ShaderMaterial> Cache = new();
 
-    private static Shader ShaderFor(bool twoSided)
+    private static Shader ShaderFor(bool twoSided, bool glass = false)
     {
+        if (glass)
+            return twoSided ? _glassTwo ??= new Shader { Code = Source("cull_disabled", true) } : _glassOne ??= new Shader { Code = Source("cull_back", true) };
         if (twoSided) return _twoSided ??= new Shader { Code = Source("cull_disabled") };
         return _oneSided ??= new Shader { Code = Source("cull_back") };
     }
 
-    /// <summary>The shader with its cull mode and the table of block turns filled in (columns of each turn's matrix).</summary>
-    private static string Source(string cull)
+    /// <summary>
+    /// The shader with its cull mode and the table of block turns filled in (columns of each turn's matrix).
+    /// Glass gets its own copy whose panes let light through (see-through windows); everything else stays
+    /// opaque, which is cheaper and sorts properly.
+    /// </summary>
+    private static string Source(string cull, bool glass = false)
     {
         var mats = new List<string>();
         for (int o = 0; o < Orientations.Count; o++)
@@ -176,7 +183,8 @@ void fragment() {
             mats.Add($"mat3({Col(0)}, {Col(1)}, {Col(2)})");
         }
 
-        return Code.Replace("CULL", cull).Replace("ORIENT_TABLE", string.Join(", ", mats));
+        return Code.Replace("CULL", glass ? cull + ", depth_draw_opaque" : cull).Replace("ORIENT_TABLE", string.Join(", ", mats))
+            .Replace("GLASS_ALPHA", glass ? "ALPHA = mix(0.24, 1.0, bar); m = mix(0.08, 0.5, bar); r = mix(0.05, 0.55, bar);" : "");
     }
 
     /// <summary>What a painted part's batch carries per instance: where it is and how its block is turned.</summary>
@@ -192,10 +200,10 @@ void fragment() {
         _ => 1,
     };
 
-    private static ShaderMaterial Make(string key, bool twoSided, System.Action<ShaderMaterial> setup)
+    private static ShaderMaterial Make(string key, bool twoSided, System.Action<ShaderMaterial> setup, bool glass = false)
     {
         if (Cache.TryGetValue(key, out ShaderMaterial m)) return m;
-        m = new ShaderMaterial { Shader = ShaderFor(twoSided) };
+        m = new ShaderMaterial { Shader = ShaderFor(twoSided, glass) };
         m.SetShaderParameter("grit", BlockVisuals.GritTexture);
         setup(m);
         return Cache[key] = m;
@@ -247,7 +255,7 @@ void fragment() {
             m.SetShaderParameter("use_shade", plating);
             m.SetShaderParameter("glass_color", new Color(def.ColorR, def.ColorG, def.ColorB));
             m.SetShaderParameter("frame_color", l == null || l.IsFactory ? new Color(0.2f, 0.21f, 0.22f) : C(l.Base));
-        });
+        }, glass: true);
 
     /// <summary>The far model's color for a point of plating or a part.</summary>
     public static Color FarColor(BlockDef def, Livery l, float? waterline, NVec p, NVec normal, bool plating, Color own)

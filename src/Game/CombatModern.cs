@@ -78,6 +78,7 @@ public partial class Combat
             if (host is VehicleBody victim) victim.NoteAttack(owner);
             float burn = DamageModel.LaserBurn(h.Block.Def, damage * Strength(h.DistanceM));
             bool destroyed = DamageModel.ApplyDamage(h.Block, burn);
+            if (!destroyed && host is VehicleBody burner) burner.HitBy(h.Block, burn * 2f);
             Effects.LaserBurn(this, at, _hitNormals[h], destroyed);
             if (destroyed)
             {

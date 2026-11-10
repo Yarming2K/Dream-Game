@@ -308,6 +308,9 @@ public partial class Combat : Node3D
                     });
                 }
 
+                // Shells through fuel, ammunition and engines can start fires.
+                foreach ((OrderedHit hit, bool gone) in damaged)
+                    if (!gone && hit.Owner is VehicleBody burner) burner.HitBy(hit.Block, p.Shell.Damage);
                 ApplyDestruction(damaged.Where(d => d.Item2).Select(d => d.Item1), from, dir * p.Shell.CaliberMm * 0.05f);
                 if (stop >= 0) return true;
             }
@@ -425,6 +428,8 @@ public partial class Combat : Node3D
             }
 
             hurtCount += hurt.Count;
+            if (h is VehicleBody burner && !flak)
+                foreach (BlockInstance b in hurt) burner.HitBy(b, damage * 0.4f);
             foreach (BlockInstance b in destroyed) destroyedAll.Add(new OrderedHit { Block = b, Owner = h });
             if (h.Body is RigidBody3D rb && hurt.Count > 0)
             {
@@ -508,6 +513,14 @@ public partial class Combat : Node3D
             SplitOff(host, source, push, blastDamage);
             host.OnBlocksRemoved();
         }
+    }
+
+    /// <summary>Damage from something that isn't a shell (a fire): if it uses the block up, it's destroyed with all that follows.</summary>
+    public void DamageBlock(IGridHost host, BlockInstance b, float damage, bool byPlayer = false)
+    {
+        if (b == null || !b.Alive || !IsInstanceValid(host.Body)) return;
+        if (!DamageModel.ApplyDamage(b, damage)) return;
+        ApplyDestruction(new[] { new OrderedHit { Block = b, Owner = host } }, host.View.BlockWorldPos(b), Vector3.Zero, byPlayer);
     }
 
     private void QueueBlast(Vector3 pos, float radius, float damage, bool byPlayer, string cause) =>

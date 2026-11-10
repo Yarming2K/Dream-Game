@@ -230,6 +230,22 @@ public sealed partial class GridView
         QueueFlush();
     }
 
+    /// <summary>True if every face of the block is against solid, opaque plate (armor or frame cubes, not glass).</summary>
+    private bool Enclosed(BlockInstance b)
+    {
+        Dictionary<Int3, BlockInstance> cells = Model.Sections[b.Section].Cells;
+        foreach (Int3 c in b.Cells)
+        foreach (Int3 d in Int3.Directions)
+        {
+            Int3 n = c + d;
+            if (!cells.TryGetValue(n, out BlockInstance o) || !o.Alive) return false;
+            if (o == b) continue;
+            if (o.Def.Kind is not (BlockKind.Armor or BlockKind.Frame) || o.Def.Glass || o.Def.Shape != BlockShape.Cube) return false;
+        }
+
+        return true;
+    }
+
     /// <summary>
     /// Marks for redrawing every chunk holding a block next to this one (diagonals too): their hull
     /// surfaces, chamfers and corner shading change when a neighbor comes or goes.
@@ -312,6 +328,10 @@ public sealed partial class GridView
                 surface.AddRange(b.Cells);
                 continue;
             }
+
+            // Machinery walled in on every side by solid plate can't be seen from anywhere: not drawn. It
+            // comes back as soon as a neighbor is shot away.
+            if (Enclosed(b)) continue;
 
             Transform3D at = Conv.BlockTransform(b.Cell, b.Orientation);
             void AddPart(Mesh mesh, Material own, Transform3D local, Paint finish)

@@ -45,6 +45,10 @@ public enum WeldState
     Rebuilding,
     Rebuilt,
     CantAttach,
+
+    /// <summary>Playing the torch on a fire to put it out.</summary>
+    Extinguishing,
+    PutOut,
 }
 
 /// <summary>The block (or missing block) a welding torch is pointed at.</summary>
@@ -134,16 +138,34 @@ public partial class VehicleBody
     public bool HasFreeSeat => Seats.Any(s => SeatAlive(s) && s.Occupant != Occupant.Player);
 
     /// <summary>Gets the player into a seat (their preferred role if it's free, else the driver's, else any).</summary>
-    public SeatRt Enter(SeatRole? preferred = null)
+    public SeatRt Enter(SeatRole? preferred = null, SeatRt exact = null)
     {
         List<SeatRt> free = Seats.Where(s => SeatAlive(s) && s.Occupant != Occupant.Player).ToList();
         if (free.Count == 0) return null;
-        SeatRt seat = (preferred.HasValue ? free.FirstOrDefault(s => s.Role == preferred.Value) : null) ??
+        SeatRt seat = (exact != null && free.Contains(exact) ? exact : null) ??
+                      (preferred.HasValue ? free.FirstOrDefault(s => s.Role == preferred.Value) : null) ??
                       free.FirstOrDefault(s => s.Role == SeatRole.Driver) ?? free[0];
         seat.Occupant = Occupant.Player;
         PlayerSeat = seat;
         _crewStamp++;
         return seat;
+    }
+
+    /// <summary>The working seat nearest a point, within <paramref name="range"/> m (walking up to a crew station).</summary>
+    public SeatRt SeatNear(Vector3 point, float range)
+    {
+        SeatRt best = null;
+        float bestD = range;
+        foreach (SeatRt s in Seats)
+        {
+            if (!SeatAlive(s) || s.Info.Remote) continue;
+            float d = SeatWorldPos(s).DistanceTo(point);
+            if (d >= bestD) continue;
+            bestD = d;
+            best = s;
+        }
+
+        return best;
     }
 
     /// <summary>The player gets out; the AI crew member who'd stepped aside takes the seat back.</summary>
@@ -616,6 +638,14 @@ public partial class VehicleBody
     /// <summary>One tick of welding. Returns what happened and how far along it is (0 to 1).</summary>
     public (WeldState state, float progress) Weld(WeldTarget t, float dt)
     {
+        // A fire within a meter of the torch comes first: the torch's flame-retardant spray puts it out.
+        if (FireNear(t.Point, out BlockInstance burning))
+        {
+            bool outNow = _fires.Douse(burning.Cell, dt);
+            if (outNow) RemoveFireFx(burning.Cell);
+            return outNow ? (WeldState.PutOut, 1) : (WeldState.Extinguishing, 0.5f);
+        }
+
         if (!t.Missing)
         {
             BlockInstance b = t.Block;

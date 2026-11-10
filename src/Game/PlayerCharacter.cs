@@ -92,6 +92,9 @@ public partial class PlayerCharacter : CharacterBody3D, ICharacter
                         GridRegistry.Layers.Debris;
         FloorMaxAngle = Mathf.DegToRad(50f);
         FloorSnapLength = 0.3f;
+        // Moving decks are handled by Ride (in the deck's own frame), not by the engine's platform velocity.
+        PlatformFloorLayers = 0;
+        PlatformOnLeave = PlatformOnLeaveEnum.DoNothing;
         AddChild(new CollisionShape3D
         {
             Shape = new CapsuleShape3D { Radius = 0.32f, Height = 1.8f }, Position = new Vector3(0, 0.9f, 0),
@@ -141,6 +144,7 @@ public partial class PlayerCharacter : CharacterBody3D, ICharacter
         CollisionLayer = active ? GridRegistry.Layers.Characters : 0;
         CollisionMask = active ? GridRegistry.Layers.World | GridRegistry.Layers.Vehicles | GridRegistry.Layers.Structures | GridRegistry.Layers.Debris : 0;
         Velocity = Vector3.Zero;
+        _deck = null;
         if (!active) StopWelding();
         if (active) Camera.MakeCurrent();
     }
@@ -222,6 +226,9 @@ public partial class PlayerCharacter : CharacterBody3D, ICharacter
         bool captured = Input.MouseMode == Input.MouseModeEnum.Captured;
         bool control = captured && Alive;
 
+        // Standing on a vehicle, it carries you first; then you walk relative to its deck.
+        Ride();
+
         // Movement
         Vector3 v = Velocity;
         bool wasSwimming = Swimming;
@@ -234,6 +241,17 @@ public partial class PlayerCharacter : CharacterBody3D, ICharacter
             Velocity = v;
             _fallSpeed = 0;
             MoveAndSlide();
+            UpdateDeck();
+            WeaponsTick(dt, control);
+            return;
+        }
+
+        if (Climb(dt, input, control, ref v))
+        {
+            Velocity = v;
+            _fallSpeed = 0;
+            MoveAndSlide();
+            UpdateDeck();
             WeaponsTick(dt, control);
             return;
         }
@@ -249,6 +267,7 @@ public partial class PlayerCharacter : CharacterBody3D, ICharacter
         Velocity = v;
         _fallSpeed = Mathf.Min(_fallSpeed, v.Y);
         MoveAndSlide();
+        UpdateDeck();
 
         Footsteps(dt, new Vector2(Velocity.X, Velocity.Z).Length());
         WeaponsTick(dt, control);
@@ -401,7 +420,7 @@ public partial class PlayerCharacter : CharacterBody3D, ICharacter
 
         (WeldState state, float progress) = v.Weld(t, dt);
         WeldStatus = (state, progress, t.Def?.Name);
-        bool working = state is WeldState.Repairing or WeldState.Rebuilding or WeldState.Rebuilt;
+        bool working = state is WeldState.Repairing or WeldState.Rebuilding or WeldState.Rebuilt or WeldState.Extinguishing;
         if (!working)
         {
             StopWelding();
