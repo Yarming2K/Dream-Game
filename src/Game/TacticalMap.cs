@@ -213,8 +213,11 @@ public partial class TacticalMap : Control
                 float hd = f.Heights[Math.Max(z - 1, 0) * f.Width + x], hu = f.Heights[Math.Min(z + 1, f.Depth - 1) * f.Width + x];
                 var n = new Vector3(hl - hr, 2f, hd - hu).Normalized();
                 float shade = Mathf.Clamp(0.55f + 0.6f * n.Dot(light), 0.6f, 1.2f);
-                c = h < Terrain.LandHeight + 0.6f ? new Color(0.62f, 0.57f, 0.42f)
-                    : new Color(0.3f, 0.38f, 0.22f).Lerp(new Color(0.5f, 0.48f, 0.42f), Mathf.Clamp((h - 6f) / 14f, 0, 1));
+                // Sand only on the beach, below the flat land; the firing lane is dirt, the hills grass turning to rock.
+                float wx = f.Origin.X + x * f.Spacing;
+                Color land = Mathf.Abs(wx) < Terrain.LaneHalfWidth ? new Color(0.4f, 0.39f, 0.27f) : new Color(0.3f, 0.38f, 0.22f);
+                c = h < Terrain.LandHeight - 0.4f ? new Color(0.62f, 0.57f, 0.42f)
+                    : land.Lerp(new Color(0.5f, 0.48f, 0.42f), Mathf.Clamp((h - 6f) / 14f, 0, 1));
                 c = new Color(c.R * shade, c.G * shade, c.B * shade);
             }
 
@@ -361,7 +364,8 @@ public partial class TacticalMap : Control
         float hp = v.Health;
         DrawRect(new Rect2(at + new Vector2(-10, 12), new Vector2(20, 3)), new Color(0, 0, 0, 0.6f * alpha));
         DrawRect(new Rect2(at + new Vector2(-10, 12), new Vector2(20 * hp, 3)), new Color(Ui.Grade(hp, 0.35f, 0.7f), alpha));
-        if (_zoom > 0.7f || picked)
+        // Names only when zoomed right in, or for a small pick, so a crowded map stays readable.
+        if (_zoom > 2.5f || (picked && _selected.Count <= 3))
             DrawString(font, at + new Vector2(-40, 28), v.ShortName, HorizontalAlignment.Center, 80, 12, new Color(1, 1, 1, 0.8f * alpha));
     }
 
