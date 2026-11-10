@@ -124,9 +124,11 @@ public sealed partial class GridView
         _far[section] = mi;
     }
 
+    // Two-sided, like the blocks' own materials: some part shapes (slopes) are wound either way round.
     private static StandardMaterial3D FarMaterial => _farMaterial ??= new StandardMaterial3D
     {
         VertexColorUseAsAlbedo = true, VertexColorIsSrgb = true, Roughness = 0.72f, Metallic = 0.25f,
+        CullMode = BaseMaterial3D.CullModeEnum.Disabled,
     };
 
     /// <summary>Re-applies the switch distances after <see cref="LodScale"/> changed.</summary>
@@ -217,7 +219,8 @@ public sealed partial class GridView
                 if (!paletteIndex.TryGetValue(b.Def, out int color))
                 {
                     color = palette.Count;
-                    palette.Add(new Color(b.Def.ColorR, b.Def.ColorG, b.Def.ColorB));
+                    // A touch darker than the block's color: the real plating is shaded into its corners.
+                    palette.Add(new Color(b.Def.ColorR * FarShade, b.Def.ColorG * FarShade, b.Def.ColorB * FarShade));
                     paletteIndex[b.Def] = color;
                 }
 
@@ -253,8 +256,10 @@ public sealed partial class GridView
                         used.Add((u0 + a, v0 + b));
 
                     float plane = (layer + 0.5f * sign) * CS - sign * inset;
-                    float ua = (u0 - 0.5f) * CS + inset, ub = (u0 + w - 0.5f) * CS - inset;
-                    float va = (v0 - 0.5f) * CS + inset, vb = (v0 + h - 0.5f) * CS - inset;
+                    // Sunk a little along the normal only: panels next to each other still meet exactly, and at
+                    // corners the panels cross, so there are no gaps.
+                    float ua = (u0 - 0.5f) * CS, ub = (u0 + w - 0.5f) * CS;
+                    float va = (v0 - 0.5f) * CS, vb = (v0 + h - 0.5f) * CS;
                     Quad(verts, norms, cols, idx, n, palette[color],
                         Make(axis, plane, uAxis, ua, vAxis, va), Make(axis, plane, uAxis, ub, vAxis, va),
                         Make(axis, plane, uAxis, ub, vAxis, vb), Make(axis, plane, uAxis, ua, vAxis, vb));
@@ -272,7 +277,7 @@ public sealed partial class GridView
                 Transform3D xf = at * local;
                 Aabb box = xf * mesh.GetAabb();
                 if (Mathf.Max(box.Size.X, Mathf.Max(box.Size.Y, box.Size.Z)) < 0.09f) continue;
-                Append(verts, norms, cols, idx, mesh, xf, ColorOf(mat));
+                Append(verts, norms, cols, idx, Simplified(mesh), xf, ColorOf(mat));
             }
         }
 
@@ -290,6 +295,27 @@ public sealed partial class GridView
     }
 
     private const float CS = Conv.CS;
+    private const float FarShade = 0.9f;
+
+    private static readonly Dictionary<Mesh, Mesh> Simpler = new();
+
+    /// <summary>Round parts with fewer sides for the far model (nobody can count a wheel's sides from 200 m).</summary>
+    private static Mesh Simplified(Mesh m)
+    {
+        if (Simpler.TryGetValue(m, out Mesh s)) return s;
+        s = m switch
+        {
+            CylinderMesh c when c.RadialSegments > 8 => new CylinderMesh
+            {
+                TopRadius = c.TopRadius, BottomRadius = c.BottomRadius, Height = c.Height, RadialSegments = 8, Rings = 0,
+                CapTop = c.CapTop, CapBottom = c.CapBottom,
+            },
+            TorusMesh t when t.Rings > 12 => new TorusMesh { InnerRadius = t.InnerRadius, OuterRadius = t.OuterRadius, Rings = 12, RingSegments = 4 },
+            SphereMesh sp when sp.RadialSegments > 8 => new SphereMesh { Radius = sp.Radius, Height = sp.Height, RadialSegments = 8, Rings = 4 },
+            _ => m,
+        };
+        return Simpler[m] = s;
+    }
 
     /// <summary>True when plating covers every side of a block, so it can't be seen from outside.</summary>
     private static bool Enclosed(BlockInstance b, SectionGrid grid)
