@@ -73,7 +73,21 @@ public partial class VehicleBody
     /// With the player aboard, AI gunners aim where the player aims and fire when the player fires.
     /// Turn it off ("weapons free") and they pick their own targets.
     /// </summary>
-    public bool GunnerFollowsPlayer = true;
+    public bool GunnerFollowsPlayer
+    {
+        get => _gunnerFollows;
+        set
+        {
+            _gunnerFollows = value;
+            _crewStamp++;
+        }
+    }
+
+    private bool _gunnerFollows = true;
+
+    // Who controls each gun is looked up once per physics step (and again whenever seats change), not
+    // every one of the dozen times a step the code asks.
+    private int _crewStamp;
 
     /// <summary>Raised when the seat the player is in gets destroyed.</summary>
     public event Action PlayerSeatDestroyed;
@@ -128,6 +142,7 @@ public partial class VehicleBody
                       free.FirstOrDefault(s => s.Role == SeatRole.Driver) ?? free[0];
         seat.Occupant = Occupant.Player;
         PlayerSeat = seat;
+        _crewStamp++;
         return seat;
     }
 
@@ -138,6 +153,7 @@ public partial class VehicleBody
         if (SeatAlive(PlayerSeat)) PlayerSeat.Occupant = Occupant.Ai;
         PlayerSeat = null;
         PlayerInput = default;
+        _crewStamp++;
     }
 
     /// <summary>Moves the player to another seat of this role, if there's a working one.</summary>
@@ -149,6 +165,7 @@ public partial class VehicleBody
         PlayerSeat.Occupant = Occupant.Ai;
         target.Occupant = Occupant.Player;
         PlayerSeat = target;
+        _crewStamp++;
         return target;
     }
 
@@ -159,6 +176,7 @@ public partial class VehicleBody
         if (PlayerSeat == null || SeatAlive(PlayerSeat)) return;
         PlayerSeat = null;
         PlayerInput = default;
+        _crewStamp++;
         PlayerSeatDestroyed?.Invoke();
     }
 
@@ -167,6 +185,16 @@ public partial class VehicleBody
     /// otherwise the driver. Null if nobody can.
     /// </summary>
     public SeatRt ControllerOf(GunRt g)
+    {
+        if (g.CrewStamp == _crewStamp) return g.Controller;
+        g.CrewStamp = _crewStamp;
+        g.Controller = FindController(g);
+        SeatRt c = g.Controller;
+        g.Directed = c != null && (c.Occupant == Occupant.Player || (c.Occupant == Occupant.Ai && PlayerSeat != null && GunnerFollowsPlayer));
+        return g.Controller;
+    }
+
+    private SeatRt FindController(GunRt g)
     {
         bool Manned(SeatRt s) => s != null && SeatAlive(s) && s.Occupant != Occupant.Empty;
         if (Analysis.GunController.TryGetValue(g.Index, out Int3 cell) && _seatAt.TryGetValue(cell, out SeatRt assigned) && Manned(assigned))
@@ -181,9 +209,8 @@ public partial class VehicleBody
     /// <summary>True when this gun goes where the player points: they're its gunner, or their AI gunner is following orders.</summary>
     public bool PlayerDirects(GunRt g)
     {
-        SeatRt c = ControllerOf(g);
-        if (c == null) return false;
-        return c.Occupant == Occupant.Player || (c.Occupant == Occupant.Ai && PlayerSeat != null && GunnerFollowsPlayer);
+        ControllerOf(g);
+        return g.Directed;
     }
 
     private bool AimFor(GunRt g, out Vector3 aim)
@@ -207,8 +234,16 @@ public partial class VehicleBody
         return _aiHasAim;
     }
 
-    private bool AaTargetValid() =>
-        _aaTarget != null && IsInstanceValid(_aaTarget) && _aaTarget.IsInsideTree() && _aaTarget.Model.Blocks.Count > 0 && !_aaTarget.OnGround;
+    private int _aaStamp = -1;
+    private bool _aaValid;
+
+    private bool AaTargetValid()
+    {
+        if (_aaStamp == _crewStamp) return _aaValid;
+        _aaStamp = _crewStamp;
+        return _aaValid = _aaTarget != null && IsInstanceValid(_aaTarget) && _aaTarget.IsInsideTree() && _aaTarget.Model.Blocks.Count > 0 &&
+                          !_aaTarget.OnGround;
+    }
 
     /// <summary>An AI-crewed gun on the anti-aircraft watch: it has flak (or there's nothing else to shoot) and there's an aircraft up.</summary>
     private bool OnAirWatch(GunRt g) =>
@@ -240,8 +275,10 @@ public partial class VehicleBody
         _aiRetarget -= dt;
         if (_aiRetarget <= 0 || !AiTargetValid())
         {
-            _aiRetarget = 0.7f;
+            // Spread out so a hundred vehicles spawned together don't all look round on the same step.
+            _aiRetarget = 0.7f + System.Random.Shared.NextSingle() * 0.3f;
             PickAiTarget();
+            _crewStamp++;
         }
 
         AirWatch(dt);
@@ -329,53 +366,66 @@ public partial class VehicleBody
         }
     }
 
+    private int _aiStamp = -1;
+    private bool _aiValid;
+
     private bool AiTargetValid()
+    {
+        if (_aiStamp == _crewStamp) return _aiValid;
+        _aiStamp = _crewStamp;
+        return _aiValid = AiTargetStillThere();
+    }
+
+    private bool AiTargetStillThere()
     {
         if (_aiVehicleTarget != null)
             return IsInstanceValid(_aiVehicleTarget) && _aiVehicleTarget.IsInsideTree() && _aiVehicleTarget.Model.Blocks.Count > 0;
         return _aiCharacterTarget != null && _aiCharacterTarget.Targetable;
     }
 
+    private readonly List<IGridHost> _candidates = new();
+    private readonly List<(float d, VehicleBody v, Vector3 p)> _sorted = new();
+
     private void PickAiTarget()
     {
         Vector3 eye = GlobalTransform * CenterOfMass + Vector3.Up * 1.5f;
-        PhysicsDirectSpaceState3D space = GetWorld3D().DirectSpaceState;
-        var exclude = new Godot.Collections.Array<Rid> { GetRid() };
         float best = float.MaxValue;
         VehicleBody bestVehicle = null;
         ICharacter bestCharacter = null;
 
-        bool Visible(Vector3 point, Rid target)
-        {
-            var q = PhysicsRayQueryParameters3D.Create(eye, point, GridRegistry.Layers.All | GridRegistry.Layers.Characters, exclude);
-            Godot.Collections.Dictionary hit = space.IntersectRay(q);
-            return hit.Count == 0 || hit["rid"].AsRid() == target;
-        }
+        bool Visible(Vector3 point, IGridHost target) => WorldQuery.LineClear(this, eye, point, this, target);
 
+        // Only vehicles in reach are considered (found through the world's grid, not by checking every
+        // vehicle), nearest first, and only the first few get a line-of-sight check.
         bool flak = HasFlak;
-        VehicleBody bestAir = null;
-        float bestAirD = float.MaxValue;
-        foreach (IGridHost h in GridRegistry.Hosts)
+        // Big naval guns reach much further than a tank's: their gunners look out to 3 km.
+        float reach = Guns.Exists(g => g.Alive && g.Stats.CaliberMm >= 150f) ? 3000f : 800f;
+        _candidates.Clear();
+        WorldQuery.HostsNear(eye, Mathf.Max(flak ? 2500f : 0f, reach), _candidates);
+        _sorted.Clear();
+        foreach (IGridHost h in _candidates)
         {
             if (h is not VehicleBody v || v == this || v.Faction == Faction || v.Model.Blocks.Count == 0) continue;
             Vector3 p = v.GlobalTransform * v.CenterOfMass;
-            float d = eye.DistanceTo(p);
+            _sorted.Add((eye.DistanceTo(p), v, p));
+        }
+
+        _sorted.Sort((a, b) => a.d.CompareTo(b.d));
+        VehicleBody bestAir = null;
+        int looks = 0, airLooks = 0;
+        foreach ((float d, VehicleBody v, Vector3 p) in _sorted)
+        {
             if (flak && v.IsAir && !v.OnGround)
             {
                 // Aircraft are for the flak guns, which reach much further.
-                if (d < 2500f && d < bestAirD && Visible(p, v.GetRid()))
-                {
-                    bestAirD = d;
-                    bestAir = v;
-                }
-
+                if (bestAir == null && d < 2500f && airLooks++ < 4 && Visible(p, v)) bestAir = v;
                 continue;
             }
 
-            if (d > 800f || d >= best || !Visible(p, v.GetRid())) continue;
+            if (bestVehicle != null || d > reach || looks++ >= 6) continue;
+            if (!Visible(p, v)) continue;
             best = d;
             bestVehicle = v;
-            bestCharacter = null;
         }
 
         if (bestAir != _aaTarget)
@@ -390,7 +440,7 @@ public partial class VehicleBody
             if (!c.Targetable || c.Faction == Faction) continue;
             float d = eye.DistanceTo(c.AimCenter);
             // People are a lower priority than vehicles unless they're much closer.
-            if (d > 350f || d * 1.6f >= best || !Visible(c.AimCenter, c.BodyRid)) continue;
+            if (d > 350f || d * 1.6f >= best || !Visible(c.AimCenter, null)) continue;
             best = d * 1.6f;
             bestCharacter = c;
             bestVehicle = null;

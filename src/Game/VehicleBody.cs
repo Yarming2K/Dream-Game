@@ -53,6 +53,11 @@ public partial class VehicleBody : RigidBody3D, IGridHost
 
         /// <summary>True while its own ship is in the way of its line of fire (it holds fire).</summary>
         public bool Masked;
+
+        // Who controls it and whether the player directs it, worked out once per physics step.
+        internal int CrewStamp = -1;
+        internal SeatRt Controller;
+        internal bool Directed;
         public string Label => Info.Label;
 
         /// <summary>From the breech's anchor to the end of the barrel, in cells.</summary>
@@ -117,6 +122,18 @@ public partial class VehicleBody : RigidBody3D, IGridHost
     private readonly RandomNumberGenerator _rng = new();
     private AudioStreamPlayer3D _engineSound;
 
+    // Parking: an AI vehicle sitting still with its brakes on is frozen in place, so it costs the physics
+    // engine nothing and needs no suspension rays, until something moves it.
+    public bool Parked { get; private set; }
+    private float _stillTime;
+    private PhysicsRayQueryParameters3D _wheelQuery;
+    private readonly List<IGridHost> _nearby = new();
+
+    /// <summary>How often the gunners think and aim, by distance from the camera: every step close up, less often far away.</summary>
+    private int _thinkEvery = 1;
+    private int _tick;
+    private float _thinkDt;
+
     public static VehicleBody Create(Blueprint bp, Transform3D where, bool player, VehicleAnalysis analysis = null)
     {
         // Each vehicle gets its own analysis (it keeps flood water in its compartments), so a shared one is only reused once.
@@ -134,7 +151,7 @@ public partial class VehicleBody : RigidBody3D, IGridHost
             if (g.Brake.HasValue) calibers[g.Brake.Value] = g.Stats.CaliberMm;
         }
 
-        v.View = new GridView(v, v.Model, c => calibers.TryGetValue(c, out float cal) ? cal : 76f);
+        v.View = new GridView(v, v.Model, c => calibers.TryGetValue(c, out float cal) ? cal : 76f, shareKey: bp, lod: true);
         v.Radius = v.View.BoundingRadius();
         v.CollisionLayer = GridRegistry.Layers.Vehicles;
         v.CollisionMask = GridRegistry.Layers.All;
@@ -361,6 +378,9 @@ public partial class VehicleBody : RigidBody3D, IGridHost
     public override void _PhysicsProcess(double delta)
     {
         float dt = (float)delta;
+        _crewStamp++;
+        _tick++;
+        long t0 = Perf.Now;
         SeatRt driver = DriverSeat();
         bool playerDrives = driver != null && driver.Occupant == Occupant.Player;
         if (playerDrives)
@@ -368,6 +388,10 @@ public partial class VehicleBody : RigidBody3D, IGridHost
             Throttle = PlayerInput.Throttle;
             Steer = PlayerInput.Steer;
             Braking = PlayerInput.Brake;
+        }
+        else if (driver != null && driver.Occupant == Occupant.Ai && AiDriving)
+        {
+            AiDrive(dt);
         }
         else
         {
@@ -379,15 +403,35 @@ public partial class VehicleBody : RigidBody3D, IGridHost
         // Ships hold the telegraph's speed whoever is at the wheel, as long as someone is.
         if (IsNaval) Throttle = driver != null && driver.Occupant != Occupant.Empty ? TelegraphThrottle[Telegraph] : 0f;
 
+        UpdatePark(dt, playerDrives);
         Drive(dt);
+        long t1 = Perf.Now;
+        Perf.Add(Perf.Vehicles, t0);
         if (IsNaval || PropsAlive > 0) NavalDrive(dt);
         WaterTick(dt);
+        long t2 = Perf.Now;
+        Perf.Add(Perf.Water, t1);
         AirTick(dt, playerDrives);
-        CrewTick(dt);
-        TorpedoTick(dt);
-        AiMissiles(dt);
-        Aim(dt);
+        long t3 = Perf.Now;
+        Perf.Add(Perf.Air, t2);
+
+        // Far from the camera the crew thinks and turns its guns less often (in bigger steps), which nobody
+        // can see from there; up close it's every step.
+        _thinkDt += dt;
+        if (_tick % _thinkEvery == 0 || PlayerSeat != null)
+        {
+            float tdt = _thinkDt;
+            _thinkDt = 0;
+            CrewTick(tdt);
+            TorpedoTick(tdt);
+            AiMissiles(tdt);
+            Aim(tdt);
+            float d = GlobalPosition.DistanceTo(WorldQuery.Viewer);
+            _thinkEvery = d < 500f ? 1 : d < 1500f ? 2 : 4;
+        }
+
         if (PlayerInput.Fire) FirePlayerGuns();
+        Perf.Add(Perf.Ai, t3);
         foreach (GunRt g in Guns)
         {
             if (g.ReloadLeft <= 0) continue;
@@ -401,6 +445,41 @@ public partial class VehicleBody : RigidBody3D, IGridHost
         View.SyncColliders();
     }
 
+    /// <summary>Freezes an AI ground vehicle that has sat still with its brakes on for a while, and thaws it when it should move.</summary>
+    private void UpdatePark(float dt, bool playerDrives)
+    {
+        bool wantsToMove = playerDrives || Mathf.Abs(Throttle) > 0.01f || Mathf.Abs(Steer) > 0.01f || !Braking;
+        bool canPark = !IsNaval && !IsAir && Wheels.Count > 0 && Analysis.Mode == MobilityMode.Ground;
+        if (Parked)
+        {
+            // Thawed when the camera comes near too, so you can shove it with your own vehicle.
+            if (wantsToMove || !canPark || GlobalPosition.DistanceSquaredTo(WorldQuery.Viewer) < 100f * 100f) Unpark();
+            return;
+        }
+
+        if (!canPark || wantsToMove || LinearVelocity.LengthSquared() > 0.01f || AngularVelocity.LengthSquared() > 0.003f ||
+            Wheels.Any(w => !w.Contact) || GlobalPosition.DistanceSquaredTo(WorldQuery.Viewer) < 120f * 120f)
+        {
+            _stillTime = 0;
+            return;
+        }
+
+        _stillTime += dt;
+        if (_stillTime < 1.5f) return;
+        Parked = true;
+        FreezeMode = FreezeModeEnum.Static;
+        Freeze = true;
+    }
+
+    /// <summary>Lets a parked vehicle move again (hit by a blast, damaged, given orders).</summary>
+    public void Unpark()
+    {
+        _stillTime = 0;
+        if (!Parked) return;
+        Parked = false;
+        Freeze = false;
+    }
+
     private void Drive(float dt)
     {
         Transform3D xf = GlobalTransform;
@@ -411,7 +490,7 @@ public partial class VehicleBody : RigidBody3D, IGridHost
         Vector3 ang = AngularVelocity;
         float speed = vel.Dot(fwd);
         SpeedKmh = speed * 3.6f;
-        if (Wheels.Count == 0) return;
+        if (Wheels.Count == 0 || Parked) return;
 
         float mass = Mass;
         float share = mass / Wheels.Count;
@@ -432,20 +511,44 @@ public partial class VehicleBody : RigidBody3D, IGridHost
             FuelL = Mathf.Max(0, FuelL - burn);
         }
 
-        PhysicsDirectSpaceState3D space = GetWorld3D().DirectSpaceState;
-        var exclude = new Godot.Collections.Array<Rid> { GetRid() };
+        // Out in the open, with nothing but the ground under it, the wheels test the island's height grid
+        // directly; near other vehicles, buildings or ramps they ask the physics engine.
+        bool open = WorldQuery.Ground != null && OnlyGroundNear();
+        PhysicsDirectSpaceState3D space = open ? null : GetWorld3D().DirectSpaceState;
+        if (!open && _wheelQuery == null)
+            _wheelQuery = new PhysicsRayQueryParameters3D
+            {
+                CollisionMask = GridRegistry.Layers.All, Exclude = new Godot.Collections.Array<Rid> { GetRid() },
+            };
         int contacts = 0, leftTracks = 0, rightTracks = 0, trackContacts = 0;
         foreach (WheelRt w in Wheels)
         {
             Vector3 mount = xf * w.Mount;
             Vector3 end = mount - up * (w.Rest + w.Radius);
-            var query = PhysicsRayQueryParameters3D.Create(mount, end, GridRegistry.Layers.All, exclude);
-            Godot.Collections.Dictionary hit = space.IntersectRay(query);
-            w.Contact = hit.Count > 0;
+            if (open)
+            {
+                w.Contact = WorldQuery.Ground.Raycast(mount.N(), end.N(), out float gd, out System.Numerics.Vector3 gn);
+                if (w.Contact)
+                {
+                    w.HitPos = mount + (end - mount).Normalized() * gd;
+                    w.HitNormal = gn.G();
+                }
+            }
+            else
+            {
+                _wheelQuery.From = mount;
+                _wheelQuery.To = end;
+                Godot.Collections.Dictionary hit = space.IntersectRay(_wheelQuery);
+                w.Contact = hit.Count > 0;
+                if (w.Contact)
+                {
+                    w.HitPos = hit["position"].AsVector3();
+                    w.HitNormal = hit["normal"].AsVector3();
+                }
+            }
+
             if (w.Contact)
             {
-                w.HitPos = hit["position"].AsVector3();
-                w.HitNormal = hit["normal"].AsVector3();
                 float dist = mount.DistanceTo(w.HitPos);
                 w.Offset = Mathf.Clamp(dist - w.Radius, 0, w.Rest);
                 w.Compression = w.Rest - w.Offset;
@@ -543,6 +646,18 @@ public partial class VehicleBody : RigidBody3D, IGridHost
         }
     }
 
+    /// <summary>True when nothing but the bare ground is near enough for the wheels to touch.</summary>
+    private bool OnlyGroundNear()
+    {
+        Vector3 c = GlobalPosition;
+        float r = Radius + 3f;
+        _nearby.Clear();
+        WorldQuery.HostsNear(c, r, _nearby);
+        foreach (IGridHost h in _nearby)
+            if (h != this) return false;
+        return !WorldQuery.PropsIn(new Aabb(c - Vector3.One * r, Vector3.One * r * 2f));
+    }
+
     private static float Wrap(float a)
     {
         while (a > Mathf.Pi) a -= Mathf.Tau;
@@ -626,12 +741,8 @@ public partial class VehicleBody : RigidBody3D, IGridHost
     /// Whether a shot along <paramref name="dir"/> would clear the vehicle's own hull, turrets and
     /// superstructure. Guns that can't bear hold fire instead of shooting their own ship.
     /// </summary>
-    private bool LineOfFireClear(Vector3 muzzle, Vector3 dir)
-    {
-        var q = PhysicsRayQueryParameters3D.Create(muzzle + dir * 0.3f, muzzle + dir * (Radius * 2f + 20f), GridRegistry.Layers.Vehicles);
-        Godot.Collections.Dictionary hit = GetWorld3D().DirectSpaceState.IntersectRay(q);
-        return hit.Count == 0 || hit["rid"].AsRid() != GetRid();
-    }
+    private bool LineOfFireClear(Vector3 muzzle, Vector3 dir) =>
+        float.IsPositiveInfinity(WorldQuery.FirstBlockOf(this, muzzle + dir * 0.3f, dir, Radius * 2f + 20f));
 
     /// <summary>Fires one gun if it's loaded and has ammo.</summary>
     public bool FireGun(GunRt g, bool byPlayer, AmmoType? ammo = null)
@@ -681,6 +792,7 @@ public partial class VehicleBody : RigidBody3D, IGridHost
         Vector3 f = -GlobalTransform.Basis.Z;
         f.Y = 0;
         float yaw = f.LengthSquared() > 0.001f ? Mathf.Atan2(-f.X, -f.Z) : 0;
+        Unpark();
         GlobalTransform = new Transform3D(new Basis(Vector3.Up, yaw), GlobalPosition + Vector3.Up * 2.5f);
         LinearVelocity = Vector3.Zero;
         AngularVelocity = Vector3.Zero;
@@ -691,6 +803,7 @@ public partial class VehicleBody : RigidBody3D, IGridHost
 
     public void OnBlocksRemoved()
     {
+        Unpark();
         if (Model.Blocks.Count == 0)
         {
             Vanish();

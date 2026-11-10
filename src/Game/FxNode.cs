@@ -7,6 +7,9 @@ namespace DreamGame.Game;
 public partial class FxNode : Node3D
 {
     public float Life = 0.5f;
+
+    /// <summary>Where the effect started (kept so budget checks don't have to ask the engine).</summary>
+    public Vector3 At;
     public Action<float> Animate;
     private float _t;
 

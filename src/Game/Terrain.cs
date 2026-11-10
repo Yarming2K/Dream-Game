@@ -62,6 +62,9 @@ public static class Terrain
         for (int x = 0; x < n; x++)
             heights[z * n + x] = HeightAt(noise, x - half, z - half);
 
+        // The same grid, for the fast ground tests shells, wheels and gunners use (see WorldQuery).
+        WorldQuery.Ground = new DreamGame.Core.HeightField(n, n, 1f, new System.Numerics.Vector2(-half, -half), heights, SeabedDepth);
+
         var body = new StaticBody3D { Name = "Terrain", CollisionLayer = GridRegistry.Layers.World, CollisionMask = 0 };
         body.AddChild(new CollisionShape3D
         {

@@ -28,6 +28,8 @@ public static class GameInput
         AddKeys("dive", Key.C);
         AddKeys("bomb", Key.B);
         AddKeys("vtol", Key.V);
+        AddKeys("perf_overlay", Key.F3);
+        AddKeys("battle_drill", Key.F8);
     }
 
     private static void AddKeys(string action, params Key[] keys)

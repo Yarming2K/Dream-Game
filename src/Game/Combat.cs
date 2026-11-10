@@ -38,7 +38,10 @@ public partial class Combat : Node3D
         public bool ByPlayer;
         public bool HitSomething;
         public float Age;
-        public TracerFx Tracer;
+        public bool Tracer;
+        public float TracerWidth;
+        public float HeadSize;
+        public Color Tint;
         public CpuParticles3D Trail;
         public float InfantryDamage;
         public Rid Ignore;
@@ -73,6 +76,15 @@ public partial class Combat : Node3D
     private readonly Dictionary<OrderedHit, Vector3> _hitPoints = new(new HitComparer());
     private readonly Dictionary<OrderedHit, Vector3> _hitNormals = new(new HitComparer());
     private readonly RandomNumberGenerator _rng = new();
+    private readonly List<IGridHost> _near = new();
+    private TracerBatch _tracers;
+    private PhysicsRayQueryParameters3D _bodyQuery;
+
+    /// <summary>Shells, bullets and rockets in flight right now.</summary>
+    public int ShellCount => _shells.Count;
+
+    /// <summary>Tracer pieces drawn this step (streaks, heads and trails).</summary>
+    public int TracersDrawn => _tracers?.Drawn ?? 0;
 
     public event Action<CombatEvent> Event;
 
@@ -80,6 +92,12 @@ public partial class Combat : Node3D
     public event Action<Vector3, float, float> Blast;
 
     public override void _EnterTree() => Instance = this;
+
+    public override void _Ready()
+    {
+        _tracers = new TracerBatch { Name = "Tracers" };
+        AddChild(_tracers);
+    }
 
     public override void _ExitTree()
     {
@@ -108,13 +126,23 @@ public partial class Combat : Node3D
             Ignore = ignore, Small = stats.CaliberMm < 20f, FuseM = fuseM, Owner = owner,
         };
         if (rocket) p.Trail = Effects.RocketTrail(this, pos);
-        else if (tracer) p.Tracer = Effects.Tracer(this, stats.CaliberMm, type);
+        else if (tracer)
+        {
+            p.Tracer = true;
+            p.Tint = type == AmmoType.AP ? new Color(1f, 0.82f, 0.5f) : new Color(1f, 0.5f, 0.25f);
+            p.TracerWidth = Mathf.Clamp(stats.CaliberMm / 1000f * 0.5f, 0.02f, 0.06f);
+            p.HeadSize = 0.5f + stats.CaliberMm / 160f;
+        }
+
         _shells.Add(p);
     }
 
     public override void _PhysicsProcess(double delta)
     {
         float dt = (float)delta;
+        long started = Perf.Now;
+        WorldQuery.Refresh();
+        _tracers.Begin(dt);
         for (int i = _shells.Count - 1; i >= 0; i--)
         {
             Projectile p = _shells[i];
@@ -131,22 +159,26 @@ public partial class Combat : Node3D
             {
                 p.Pos = p.Moved ?? to;
                 p.Moved = null;
-                if (p.Tracer != null) Effects.UpdateTracer(p.Tracer, from, p.Pos);
+                if (p.Tracer) _tracers.Shell(from, p.Pos, p.TracerWidth, p.Tint, p.HeadSize);
                 Effects.Follow(p.Trail, p.Pos);
                 if (p.Age > 8f || p.Pos.Y < -100f || (p.Underwater && p.Vel.Length() < 60f)) done = true;
             }
 
             if (done)
             {
-                Effects.EndTracer(p.Tracer);
                 Effects.StopTrail(p.Trail);
-                _shells.RemoveAt(i);
+                _shells[i] = _shells[^1];
+                _shells.RemoveAt(_shells.Count - 1);
             }
         }
 
+        _tracers.End();
+        Perf.Add(Perf.Shells, started);
+        long ordnance = Perf.Now;
         TorpedoTick(dt);
         OrdnanceTick(dt);
         RunBlasts(dt);
+        Perf.Add(Perf.Blasts, ordnance);
     }
 
     /// <summary>
@@ -160,9 +192,11 @@ public partial class Combat : Node3D
         Vector3 dir = (to - from) / len;
         float burstAt = float.PositiveInfinity;
         if (p.FuseM > 0 && p.Travelled + len >= p.FuseM) burstAt = p.FuseM - p.Travelled;
-        foreach (IGridHost h in GridRegistry.Hosts)
+        _near.Clear();
+        WorldQuery.HostsAlong(from, to, 8f, _near);
+        foreach (IGridHost h in _near)
         {
-            if (h is not VehicleBody v || h == p.Owner || !v.IsAir || v.OnGround || !IsInstanceValid(v)) continue;
+            if (h is not VehicleBody v || h == p.Owner || !IsInstanceValid(v) || !v.IsAir || v.OnGround) continue;
             Vector3 c = v.GlobalTransform * v.CenterOfMass;
             float t = Mathf.Clamp((c - from).Dot(dir), 0, len);
             if ((from + dir * t).DistanceTo(c) <= v.Radius * 0.45f + 3.5f) burstAt = Mathf.Min(burstAt, t);
@@ -190,15 +224,7 @@ public partial class Combat : Node3D
         Vector3 dir = seg / len;
 
         float terrainT = float.PositiveInfinity;
-        Vector3 terrainPos = Vector3.Zero, terrainNormal = Vector3.Up;
-        var query = PhysicsRayQueryParameters3D.Create(from, to, GridRegistry.Layers.World);
-        Godot.Collections.Dictionary hit = GetWorld3D().DirectSpaceState.IntersectRay(query);
-        if (hit.Count > 0)
-        {
-            terrainPos = hit["position"].AsVector3();
-            terrainNormal = hit["normal"].AsVector3();
-            terrainT = from.DistanceTo(terrainPos);
-        }
+        if (WorldQuery.GroundRay(this, from, to, out Vector3 terrainPos, out Vector3 terrainNormal)) terrainT = from.DistanceTo(terrainPos);
 
         // The sea surface: shells splash, HE goes off on it, small arms stop.
         float waterT = float.PositiveInfinity;
@@ -215,14 +241,21 @@ public partial class Combat : Node3D
             waterT = float.PositiveInfinity;
         }
 
-        // People and practice targets.
+        // People and practice targets (asked of the physics engine only when someone is near the shell's path).
         float bodyT = float.PositiveInfinity;
         IHittable body = null;
         Vector3 bodyPos = Vector3.Zero;
-        var bodyQuery = PhysicsRayQueryParameters3D.Create(from, to, GridRegistry.Layers.Characters | GridRegistry.Layers.Targets);
-        if (p.Ignore.IsValid) bodyQuery.Exclude = new Godot.Collections.Array<Rid> { p.Ignore };
-        Godot.Collections.Dictionary bodyHit = GetWorld3D().DirectSpaceState.IntersectRay(bodyQuery);
-        if (bodyHit.Count > 0 && bodyHit["collider"].AsGodotObject() is IHittable h)
+        Godot.Collections.Dictionary bodyHit = null;
+        if (WorldQuery.PeopleNear(from, to, 3f))
+        {
+            _bodyQuery ??= new PhysicsRayQueryParameters3D { CollisionMask = GridRegistry.Layers.Characters | GridRegistry.Layers.Targets };
+            _bodyQuery.From = from;
+            _bodyQuery.To = to;
+            _bodyQuery.Exclude = p.Ignore.IsValid ? new Godot.Collections.Array<Rid> { p.Ignore } : null;
+            bodyHit = GetWorld3D().DirectSpaceState.IntersectRay(_bodyQuery);
+        }
+
+        if (bodyHit != null && bodyHit.Count > 0 && bodyHit["collider"].AsGodotObject() is IHittable h)
         {
             bodyPos = bodyHit["position"].AsVector3();
             float t = from.DistanceTo(bodyPos);
@@ -317,22 +350,22 @@ public partial class Combat : Node3D
         _hits.Clear();
         _hitPoints.Clear();
         _hitNormals.Clear();
-        foreach (IGridHost h in GridRegistry.Hosts.ToArray())
+        _near.Clear();
+        WorldQuery.HostsAlong(from, from + dir * maxLen, 0f, _near);
+        foreach (IGridHost h in _near)
         {
             if (!IsInstanceValid(h.Body)) continue;
-            Vector3 center = h.Body.GlobalPosition;
-            float along = Mathf.Clamp((center - from).Dot(dir), 0, maxLen);
-            if ((from + dir * along).DistanceTo(center) > h.Radius) continue;
-
             foreach (Section s in h.Model.Sections)
             {
                 if (s.Cells.Count == 0) continue;
-                Transform3D inv = h.View.SectionGlobal(s.Id).AffineInverse();
+                Transform3D xf = h.View.SectionWorldFast(s.Id);
+                if (!h.View.RayNearSection(s, xf, from, dir, maxLen)) continue;
+                Transform3D inv = xf.AffineInverse();
                 Vector3 o = inv * from / Conv.CS;
                 Vector3 d = (inv.Basis * dir).Normalized();
                 _cellHits.Clear();
                 GridRaycast.Cast(s, s.Min, s.Max, o.N(), d.N(), maxLen / Conv.CS, _cellHits);
-                Basis toWorld = h.View.SectionGlobal(s.Id).Basis;
+                Basis toWorld = xf.Basis;
                 foreach (RayCellHit c in _cellHits)
                 {
                     if (!s.Cells.TryGetValue(c.Cell, out BlockInstance b) || !b.Alive) continue;
@@ -364,16 +397,17 @@ public partial class Combat : Node3D
         Blast?.Invoke(center, radius, damage);
         var destroyedAll = new List<OrderedHit>();
         int hurtCount = 0;
-        foreach (IGridHost h in GridRegistry.Hosts.ToArray())
+        var caught = new List<IGridHost>();
+        WorldQuery.HostsNear(center, radius, caught);
+        foreach (IGridHost h in caught)
         {
             if (!IsInstanceValid(h.Body)) continue;
-            if (h.Body.GlobalPosition.DistanceTo(center) > h.Radius + radius) continue;
             var destroyed = new List<BlockInstance>();
             var hurt = new List<BlockInstance>();
             foreach (Section s in h.Model.Sections)
             {
                 if (s.Cells.Count == 0) continue;
-                Vector3 local = h.View.SectionGlobal(s.Id).AffineInverse() * center / Conv.CS;
+                Vector3 local = h.View.SectionWorldFast(s.Id).AffineInverse() * center / Conv.CS;
                 DamageModel.ApplyBlast(s, local.N(), radius, damage, destroyed, hurt);
             }
 
@@ -381,6 +415,7 @@ public partial class Combat : Node3D
             foreach (BlockInstance b in destroyed) destroyedAll.Add(new OrderedHit { Block = b, Owner = h });
             if (h.Body is RigidBody3D rb && hurt.Count > 0)
             {
+                if (h is VehicleBody vb) vb.Unpark();
                 Vector3 away = (rb.GlobalPosition - center).Normalized();
                 rb.ApplyImpulse(away * Mathf.Min(damage * 6f, rb.Mass * 3f), center - rb.GlobalPosition);
             }
@@ -516,8 +551,9 @@ public partial class Combat : Node3D
     /// <summary>Clears every shell and pending explosion (used when the range resets).</summary>
     public void Clear()
     {
-        foreach (Projectile p in _shells) Effects.EndTracer(p.Tracer);
+        foreach (Projectile p in _shells) Effects.StopTrail(p.Trail);
         _shells.Clear();
+        _tracers?.Clear();
         _blasts.Clear();
         ClearTorpedoes();
         ClearOrdnance();

@@ -127,14 +127,72 @@ public static class Effects
     private static readonly Gradient ClodRamp = Ramp(
         (0f, new Color(0.24f, 0.19f, 0.13f, 1f)), (0.8f, new Color(0.26f, 0.21f, 0.15f, 0.9f)), (1f, new Color(0.3f, 0.25f, 0.18f, 0f)));
 
+    // ---------- Budgets ----------
+    //
+    // A big battle sets off far more effects than anyone can see. Each effect asks how much detail it's
+    // worth where it is: everything up close, a flash and a little smoke further out, and only the sound
+    // (which has its own range) beyond that. A crowded scene shrinks those distances, and only a couple of
+    // dozen flashes of light are allowed at once, because every light costs the renderer.
+
+    private const int MaxLights = 24;
+    private static int _lights;
+
+    /// <summary>How many effect lights are lit right now.</summary>
+    public static int LightsLive => _lights;
+
+    /// <summary>
+    /// 2 = full effect, 1 = reduced, 0 = sound only, for an effect of the given size (1 = a 76 mm shell)
+    /// at <paramref name="pos"/>.
+    /// </summary>
+    private static int Detail(Vector3 pos, float size)
+    {
+        float d = pos.DistanceTo(WorldQuery.Viewer);
+        float near = 220f * size, far = 1200f * size;
+        int live = FxNode.Live;
+        if (live > 450)
+        {
+            near *= 0.35f;
+            far *= 0.55f;
+        }
+        else if (live > 200)
+        {
+            near *= 0.65f;
+            far *= 0.8f;
+        }
+
+        _amount = d < near ? 1f : 0.4f;
+        return d < near ? 2 : d < far ? 1 : 0;
+    }
+
+    /// <summary>Particle counts are scaled by this (set by <see cref="Detail"/>).</summary>
+    private static float _amount = 1f;
+
+    private static readonly Dictionary<long, Curve> Curves = new();
+    private static readonly Dictionary<Material, QuadMesh> Quads = new();
+
+    private static Curve ScaleCurve(float from, float to)
+    {
+        from = Mathf.Clamp(from, 0, 1);
+        to = Mathf.Clamp(to, 0, 1);
+        long key = ((long)Mathf.RoundToInt(from * 1000) << 20) | (uint)Mathf.RoundToInt(to * 1000);
+        if (Curves.TryGetValue(key, out Curve c)) return c;
+        c = new Curve();
+        c.AddPoint(new Vector2(0, from));
+        c.AddPoint(new Vector2(1, to));
+        return Curves[key] = c;
+    }
+
+    private static QuadMesh QuadFor(Material m)
+    {
+        if (Quads.TryGetValue(m, out QuadMesh q)) return q;
+        return Quads[m] = new QuadMesh { Size = Vector2.One, Material = m };
+    }
+
     private static void Emit(Node3D fx, Burst b)
     {
-        var scale = new Curve();
-        scale.AddPoint(new Vector2(0, Mathf.Clamp(b.ScaleFrom, 0, 1)));
-        scale.AddPoint(new Vector2(1, Mathf.Clamp(b.ScaleTo, 0, 1)));
         var p = new CpuParticles3D
         {
-            Amount = Math.Max(1, b.Amount),
+            Amount = Math.Max(1, (int)(b.Amount * _amount)),
             Lifetime = b.Life,
             LifetimeRandomness = b.LifeRandom,
             OneShot = true,
@@ -151,9 +209,9 @@ public static class Effects
             AngleMax = 360f,
             ScaleAmountMin = b.Size * 0.7f,
             ScaleAmountMax = b.Size,
-            ScaleAmountCurve = scale,
+            ScaleAmountCurve = ScaleCurve(b.ScaleFrom, b.ScaleTo),
             ColorRamp = b.Colors,
-            Mesh = new QuadMesh { Size = Vector2.One, Material = b.Mat },
+            Mesh = QuadFor(b.Mat),
             Emitting = true,
         };
         if (b.EmitRadius > 0)
@@ -167,7 +225,7 @@ public static class Effects
 
     private static FxNode Spawn(Node3D world, Vector3 pos, float life)
     {
-        var fx = new FxNode { Life = life };
+        var fx = new FxNode { Life = life, At = pos };
         world.AddChild(fx);
         fx.GlobalPosition = pos;
         return fx;
@@ -186,7 +244,12 @@ public static class Effects
     /// <summary>A flash of light that dies away over <paramref name="seconds"/>.</summary>
     private static void Light(FxNode fx, Color c, float energy, float range, float seconds, bool flicker = false)
     {
-        var light = new OmniLight3D { LightColor = c, LightEnergy = energy, OmniRange = range, OmniAttenuation = 1.6f };
+        // Lights only near the camera (a light lights things within its range; from far off nobody sees
+        // the ground glow), and only so many at once.
+        if (_lights >= MaxLights || fx.At.DistanceTo(WorldQuery.Viewer) > 160f + range * 4f) return;
+        var light = new OmniLight3D { LightColor = c, LightEnergy = energy, OmniRange = range, OmniAttenuation = 1.6f, ShadowEnabled = false };
+        _lights++;
+        light.TreeExiting += () => _lights--;
         fx.AddChild(light);
         Chain(fx, u =>
         {
@@ -199,12 +262,16 @@ public static class Effects
     }
 
     /// <summary>A camera-facing glow that pops and fades.</summary>
+    private static readonly Dictionary<Color, StandardMaterial3D> FlareMats = new();
+    private static QuadMesh _unitQuad;
+
+    /// <summary>A camera-facing glow that pops and fades. Flashes of one color share a material; each fades on its own.</summary>
     private static void Flash(FxNode fx, Color c, float size, float seconds, Vector3 offset = default)
     {
-        StandardMaterial3D mat = SpriteMat(FxTextures.Flare, c);
+        if (!FlareMats.TryGetValue(c, out StandardMaterial3D mat)) FlareMats[c] = mat = SpriteMat(FxTextures.Flare, c);
         var mi = new MeshInstance3D
         {
-            Mesh = new QuadMesh { Size = Vector2.One }, MaterialOverride = mat,
+            Mesh = _unitQuad ??= new QuadMesh { Size = Vector2.One }, MaterialOverride = mat,
             CastShadow = GeometryInstance3D.ShadowCastingSetting.Off, Position = offset,
             Scale = Vector3.One * size * Rng.RandfRange(0.85f, 1.15f),
         };
@@ -213,7 +280,7 @@ public static class Effects
         {
             float t = u * fx.Life / seconds;
             float k = Mathf.Max(0, 1f - t);
-            mat.AlbedoColor = new Color(c.R, c.G, c.B, k);
+            mi.Transparency = 1f - k;
             mi.Visible = k > 0;
         });
     }
@@ -222,14 +289,7 @@ public static class Effects
 
     private static bool GroundBelow(Node3D world, Vector3 from, float maxDist, out Vector3 point, out Vector3 normal)
     {
-        point = default;
-        normal = Vector3.Up;
-        var q = PhysicsRayQueryParameters3D.Create(from + Vector3.Up * 0.2f, from + Vector3.Down * maxDist, GridRegistry.Layers.World);
-        Godot.Collections.Dictionary hit = world.GetWorld3D().DirectSpaceState.IntersectRay(q);
-        if (hit.Count == 0) return false;
-        point = hit["position"].AsVector3();
-        normal = hit["normal"].AsVector3();
-        return true;
+        return WorldQuery.GroundRay(world, from + Vector3.Up * 0.2f, from + Vector3.Down * maxDist, out point, out normal);
     }
 
     // ---------- Gunfire ----------
@@ -240,11 +300,28 @@ public static class Effects
         // Battleship guns get a blast to match (a 406 mm flash is about three times a tank gun's).
         float s = Mathf.Clamp(caliber / 76f, 0.5f, 1.8f) * (caliber > 150f ? Mathf.Clamp(Mathf.Sqrt(caliber / 137f), 1f, 1.8f) : 1f);
         float pitch = caliber > 150f ? Mathf.Clamp(Mathf.Pow(120f / caliber, 0.35f), 0.6f, 1f) : 1f;
-        // When a lot is already going off (a ship's whole flak battery), small guns just bang.
+        // When a lot is already going off (a ship's whole flak battery), small guns just bang; far away,
+        // only the flash shows.
         bool busy = FxNode.Live > BusyEffects;
-        if (busy && caliber < 60f)
+        int lod = Detail(pos, s);
+        if ((busy && caliber < 60f) || lod == 0)
         {
-            Sfx.At(world, pos, Sfx.CannonFor(caliber), 2f, Rng.RandfRange(0.94f, 1.06f), 26f, delayByDistance: false);
+            Sfx.At(world, pos, Sfx.CannonFor(caliber), caliber > 150f ? 5f : 2f, Rng.RandfRange(0.94f, 1.06f) * pitch, caliber > 150f ? 60f : 26f,
+                delayByDistance: false);
+            return;
+        }
+
+        if (lod == 1)
+        {
+            FxNode far = Spawn(world, pos, 3f);
+            Flash(far, new Color(1f, 0.82f, 0.55f), 3f * s, 0.08f, dir * 0.5f * s);
+            Emit(far, new Burst
+            {
+                Mat = Smoke, Size = 1.8f * s, Amount = 6, Life = 2.5f, Dir = dir, Spread = 28, VelMin = 4 * s, VelMax = 12 * s,
+                DampMin = 4, DampMax = 7, Gravity = new Vector3(0, 0.5f, 0), ScaleFrom = 0.3f, ScaleTo = 1f, Colors = GunSmoke,
+            });
+            Sfx.At(world, pos, Sfx.CannonFor(caliber), caliber > 150f ? 5f : 2f, Rng.RandfRange(0.94f, 1.06f) * pitch, caliber > 150f ? 60f : 26f,
+                delayByDistance: false);
             return;
         }
 
@@ -293,27 +370,6 @@ public static class Effects
     /// <summary>Above this many live effects, small-caliber muzzle flashes are skipped.</summary>
     private const int BusyEffects = 90;
 
-    public static TracerFx Tracer(Node3D parent, float caliber, AmmoType type)
-    {
-        Color c = type == AmmoType.AP ? new Color(1f, 0.82f, 0.5f) : new Color(1f, 0.5f, 0.25f);
-        float w = Mathf.Clamp(caliber / 1000f * 0.5f, 0.02f, 0.06f);
-        var t = new TracerFx { Width = w, Tint = c };
-        parent.AddChild(t);
-        t.Head = new MeshInstance3D
-        {
-            Mesh = new QuadMesh { Size = Vector2.One }, MaterialOverride = SpriteMat(FxTextures.Flare, c),
-            CastShadow = GeometryInstance3D.ShadowCastingSetting.Off, Scale = Vector3.One * (0.5f + caliber / 160f), Visible = false,
-        };
-        t.Streak = new MeshInstance3D
-        {
-            Mesh = new CylinderMesh { TopRadius = 1, BottomRadius = 1, Height = 1, RadialSegments = 6, Rings = 1 },
-            MaterialOverride = BlockVisuals.Emissive(c, 6f), CastShadow = GeometryInstance3D.ShadowCastingSetting.Off, Visible = false,
-        };
-        parent.AddChild(t.Head);
-        parent.AddChild(t.Streak);
-        return t;
-    }
-
     private static Transform3D Segment(Vector3 from, Vector3 to, float width)
     {
         Vector3 d = to - from;
@@ -323,42 +379,6 @@ public static class Effects
         // The cylinder's long axis is Y; turn it to lie along the segment, then stretch it.
         Basis basis = Basis.LookingAt(dir, up) * new Basis(Vector3.Right, Mathf.Pi / 2) * Basis.FromScale(new Vector3(width, len, width));
         return new Transform3D(basis, (from + to) * 0.5f);
-    }
-
-    public static void UpdateTracer(TracerFx t, Vector3 from, Vector3 to)
-    {
-        if (t == null || !GodotObject.IsInstanceValid(t)) return;
-        Vector3 d = to - from;
-        float len = d.Length();
-        if (len < 0.01f) return;
-        Vector3 dir = d / len;
-        float streak = Mathf.Min(len, 28f);
-        t.Streak.GlobalTransform = Segment(to - dir * streak, to, t.Width);
-        t.Streak.Visible = true;
-        t.Head.GlobalPosition = to;
-        t.Head.Visible = true;
-
-        // A thin glowing trail that hangs in the air for a moment.
-        Node parent = t.GetParent();
-        if (parent is not Node3D world) return;
-        StandardMaterial3D mat = GlowLine(new Color(t.Tint.R, t.Tint.G * 0.85f, t.Tint.B * 0.7f, 0.5f));
-        var seg = new MeshInstance3D
-        {
-            Mesh = t.Streak.Mesh, MaterialOverride = mat, CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
-        };
-        var fx = new FxNode { Life = 0.18f };
-        world.AddChild(fx);
-        fx.AddChild(seg);
-        seg.GlobalTransform = Segment(from, to, t.Width * 0.55f);
-        fx.Animate = u => mat.AlbedoColor = new Color(mat.AlbedoColor.R, mat.AlbedoColor.G, mat.AlbedoColor.B, 0.5f * (1f - u));
-    }
-
-    public static void EndTracer(TracerFx t)
-    {
-        if (t == null || !GodotObject.IsInstanceValid(t)) return;
-        if (GodotObject.IsInstanceValid(t.Head)) t.Head.QueueFree();
-        if (GodotObject.IsInstanceValid(t.Streak)) t.Streak.QueueFree();
-        t.QueueFree();
     }
 
     // ---------- Hits ----------
@@ -371,8 +391,26 @@ public static class Effects
     {
         float s = Mathf.Clamp(caliber / 76f, 0.5f, 1.8f);
         Vector3 bounce = Reflect(dir, normal);
+        int lod = Detail(pos, s * 0.8f);
+        if (lod == 0)
+        {
+            Sfx.At(world, pos, kind == HitKind.Penetration ? SoundId.Penetration : SoundId.Clang, 0f, Rng.RandfRange(0.9f, 1.08f) / Mathf.Sqrt(s), 14f);
+            return;
+        }
+
         FxNode fx = Spawn(world, pos, 3f);
         Flash(fx, new Color(1f, 0.9f, 0.7f), 1.6f * s, 0.06f);
+        if (lod == 1)
+        {
+            Emit(fx, new Burst
+            {
+                Mat = Sparks, Size = 0.14f, Amount = 30, Life = 0.5f, Dir = bounce, Spread = 40, VelMin = 8, VelMax = 22,
+                DampMin = 1, DampMax = 3, Colors = SparkRamp, ScaleFrom = 1f, ScaleTo = 0.4f,
+            });
+            Sfx.At(world, pos, kind == HitKind.Penetration ? SoundId.Penetration : SoundId.Clang, 0f, Rng.RandfRange(0.9f, 1.08f) / Mathf.Sqrt(s), 14f);
+            return;
+        }
+
         Light(fx, new Color(1f, 0.75f, 0.45f), 8f * s, 7f, 0.1f);
         Node3D decalParent = surface != null && GodotObject.IsInstanceValid(surface) ? surface : world;
 
@@ -447,7 +485,26 @@ public static class Effects
     public static void Dirt(Node3D world, Vector3 pos, Vector3 normal, float caliber)
     {
         float s = Mathf.Clamp(caliber / 76f, 0.5f, 1.8f);
+        int lod = Detail(pos, s);
+        if (lod == 0)
+        {
+            Sfx.At(world, pos, SoundId.Dirt, -1f, Rng.RandfRange(0.85f, 1.1f) / Mathf.Sqrt(s), 14f);
+            return;
+        }
+
         FxNode fx = Spawn(world, pos, 4.5f);
+        if (lod == 1)
+        {
+            Emit(fx, new Burst
+            {
+                Mat = Smoke, Size = 2.4f * s, Amount = 12, Life = 3f, LifeRandom = 0.4f, Dir = normal, Spread = 50,
+                VelMin = 1.5f, VelMax = 5f * s, DampMin = 2, DampMax = 3, Gravity = new Vector3(0, 0.25f, 0),
+                Colors = DustRamp, ScaleFrom = 0.3f, ScaleTo = 1f,
+            });
+            Sfx.At(world, pos, SoundId.Dirt, -1f, Rng.RandfRange(0.85f, 1.1f) / Mathf.Sqrt(s), 14f);
+            return;
+        }
+
         Emit(fx, new Burst
         {
             Mat = Smoke, Size = 0.3f * s, Amount = 28, Life = 1.2f, Dir = normal, Spread = 26, VelMin = 7 * s, VelMax = 17 * s,
@@ -467,8 +524,32 @@ public static class Effects
     public static void Explosion(Node3D world, Vector3 pos, float radius)
     {
         float r = Mathf.Clamp(radius, 0.6f, 5f);
+        int lod = Detail(pos, Mathf.Max(1.5f, r));
+        if (lod == 0)
+        {
+            Sfx.At(world, pos, Sfx.ExplosionFor(radius), 3f, Rng.RandfRange(0.9f, 1.08f), 40f);
+            return;
+        }
+
         FxNode fx = Spawn(world, pos, 6f);
         Flash(fx, new Color(1f, 0.85f, 0.6f), r * 5f, 0.13f);
+        if (lod == 1)
+        {
+            Emit(fx, new Burst
+            {
+                Mat = Fire, Size = r * 1.5f, Amount = 10, Life = 0.7f, LifeRandom = 0.4f, EmitRadius = r * 0.25f,
+                Dir = Vector3.Up, Spread = 180, VelMin = r * 1.5f, VelMax = r * 4f, DampMin = r * 5f, DampMax = r * 8f,
+                Gravity = new Vector3(0, 1.5f, 0), ScaleFrom = 0.45f, ScaleTo = 1f, Colors = FireRamp,
+            });
+            Emit(fx, new Burst
+            {
+                Mat = Smoke, Size = r * 1.9f, Amount = 10, Life = 4.5f, LifeRandom = 0.35f, EmitRadius = r * 0.4f,
+                Dir = Vector3.Up, Spread = 70, VelMin = r * 0.5f, VelMax = r * 1.8f, DampMin = 0.6f, DampMax = 1.2f,
+                Gravity = new Vector3(0, 1.3f, 0), ScaleFrom = 0.35f, ScaleTo = 1f, Colors = BlastSmoke,
+            });
+            Sfx.At(world, pos, Sfx.ExplosionFor(radius), 3f, Rng.RandfRange(0.9f, 1.08f), 40f);
+            return;
+        }
 
         StandardMaterial3D coreMat = SpriteMat(null, new Color(1f, 0.9f, 0.7f, 1f));
         coreMat.BillboardMode = BaseMaterial3D.BillboardModeEnum.Disabled;
@@ -551,6 +632,7 @@ public static class Effects
 
     public static void RifleFlash(Node3D world, Vector3 pos, Vector3 dir)
     {
+        if (Detail(pos, 0.4f) < 2) return;
         FxNode fx = Spawn(world, pos, 1.2f);
         Flash(fx, new Color(1f, 0.8f, 0.5f), 0.55f, 0.04f, dir * 0.08f);
         Light(fx, new Color(1f, 0.75f, 0.45f), 2.5f, 4f, 0.05f);
@@ -564,6 +646,9 @@ public static class Effects
     /// <summary>A bullet striking metal (sparks, ping) or dirt (puff, thud).</summary>
     public static void BulletImpact(Node3D world, Vector3 pos, Vector3 normal, Vector3 dir, bool metal, Node3D surface)
     {
+        int lod = Detail(pos, 0.35f);
+        if (lod == 0) return;
+        if (lod == 1) surface = null;
         FxNode fx = Spawn(world, pos, 1.5f);
         if (metal)
         {
@@ -674,6 +759,7 @@ public static class Effects
     public static void Splash(Node3D world, Vector3 pos, float size)
     {
         var at = new Vector3(pos.X, Ocean.Level + 0.05f, pos.Z);
+        if (Detail(at, Mathf.Max(size, 0.3f) * 1.4f) == 0) return;
         FxNode fx = Spawn(world, at, 4f);
         Emit(fx, new Burst
         {
@@ -723,6 +809,13 @@ public static class Effects
     /// <summary>A flak shell going off in the air: a sharp flash and a hanging black puff.</summary>
     public static void FlakBurst(Node3D world, Vector3 pos, float radius)
     {
+        // Flak puffs are what you see of an air battle from a distance, so they reach a long way.
+        if (Detail(pos, 2.5f) == 0)
+        {
+            Sfx.At(world, pos, SoundId.ExplosionSmall, 0f, Rng.RandfRange(1.15f, 1.35f), 30f);
+            return;
+        }
+
         FxNode fx = Spawn(world, pos, 7f);
         Flash(fx, new Color(1f, 0.8f, 0.5f), radius * 3f, 0.08f);
         Emit(fx, new Burst
@@ -748,7 +841,9 @@ public static class Effects
     /// <summary>Chunks flying off a destroyed block.</summary>
     public static void Shatter(Node3D world, Vector3 pos, BlockDef def, Vector3 velocity, Vector3 away)
     {
-        Fragments.Spawn(world, pos, def, velocity, away, def.IsArmorLike ? 4 : 3);
+        int lod = Detail(pos, 1f);
+        if (lod == 0) return;
+        if (lod == 2) Fragments.Spawn(world, pos, def, velocity, away, def.IsArmorLike ? 4 : 3);
         FxNode fx = Spawn(world, pos, 2.5f);
         Emit(fx, new Burst
         {

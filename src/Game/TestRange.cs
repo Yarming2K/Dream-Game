@@ -112,6 +112,7 @@ public partial class TestRange : Node3D
 
     public override void _Ready()
     {
+        WorldQuery.Reset();
         Sfx.Prewarm();
         _env = Scenery.AddSkyAndSun(this, true);
         _airFogDensity = _env.FogDensity;
@@ -124,6 +125,7 @@ public partial class TestRange : Node3D
         AddSeaDepot();
         AddAirfield();
         AddPopupTargets();
+        RegisterProps(this);
         _combat = new Combat { Name = "Combat" };
         AddChild(_combat);
         _combat.Event += OnCombatEvent;
@@ -157,7 +159,19 @@ public partial class TestRange : Node3D
         Input.MouseMode = Input.MouseModeEnum.Captured;
     }
 
+    public override void _ExitTree() => WorldQuery.Reset();
+
     // ---------- World ----------
+
+    /// <summary>Tells the fast world queries about solid scenery that isn't the ground (ramps, crates).</summary>
+    private static void RegisterProps(Node n)
+    {
+        foreach (Node c in n.GetChildren())
+        {
+            if (c is StaticBody3D sb && sb.Name != "Terrain" && (sb.CollisionLayer & GridRegistry.Layers.World) != 0) WorldQuery.AddProps(sb);
+            else if (c is not IGridHost && c is not PhysicsBody3D) RegisterProps(c);
+        }
+    }
 
     private void AddRamps()
     {
@@ -795,6 +809,8 @@ public partial class TestRange : Node3D
         float n1 = _shakeNoise.GetNoise2D(_shakeTime * 60f, 0), n2 = _shakeNoise.GetNoise2D(0, _shakeTime * 60f);
         float n3 = _shakeNoise.GetNoise2D(_shakeTime * 60f, 100f);
         Camera3D active = Mounted ? _cam : _me.Camera;
+        WorldQuery.Viewer = active.GlobalPosition;
+        DrillTick();
         UpdateUnderwater(active);
         active.HOffset = n1 * 0.35f * shake;
         active.VOffset = n2 * 0.35f * shake;
@@ -805,6 +821,15 @@ public partial class TestRange : Node3D
         float baseFov = Mathf.Lerp(_cam.Fov - _lastKick, _zoom ? zoomFov : 70f, Mathf.Min(1f, dt * 10f));
         _lastKick = _fovKick * (_zoom ? 0.3f : 1f);
         _cam.Fov = baseFov + _lastKick;
+
+        // Zoomed in, far vehicles keep their full detail further out.
+        float lodScale = _zoom && Mounted ? Mathf.Clamp(70f / zoomFov, 1f, 6f) : 1f;
+        if (!Mathf.IsEqualApprox(lodScale, GridView.LodScale))
+        {
+            GridView.LodScale = lodScale;
+            foreach (IGridHost h in GridRegistry.Hosts)
+                if (h.View != null) h.View.RefreshLod();
+        }
 
         _hurtFlash = Mathf.Max(0, _hurtFlash - dt * 1.2f);
         UpdateHud(dt);
@@ -898,6 +923,8 @@ public partial class TestRange : Node3D
             Big("Targets reset");
         }
         else if (e.IsActionPressed("live_fire")) ToggleLiveFire();
+        else if (e.IsActionPressed("battle_drill")) ToggleDrill();
+        else if (e.IsActionPressed("perf_overlay")) _perf.Toggle();
         else if (e.IsActionPressed("to_builder")) ExitRequested?.Invoke();
         else if (e.IsActionPressed("help")) _help.Visible = !_help.Visible;
     }
@@ -1109,13 +1136,15 @@ public partial class TestRange : Node3D
         _liveChip.OffsetTop = 14;
         _liveChip.AddThemeConstantOverride("outline_size", 6);
 
-        Label hint = Ui.Small("F1 help   ·   E get in / out   ·   F torpedo / missile   ·   B bomb   ·   L live fire   ·   Tab builder");
+        Label hint = Ui.Small("F1 help   ·   E get in / out   ·   F torpedo / missile   ·   B bomb   ·   L live fire   ·   F8 battle drill   ·   F3 performance   ·   Tab builder");
         root.AddChild(hint);
         hint.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.BottomLeft);
         hint.GrowVertical = Control.GrowDirection.Begin;
         hint.OffsetLeft = 14;
         hint.OffsetBottom = -10;
         hint.AddThemeConstantOverride("outline_size", 4);
+
+        SetupDrill(root);
 
         _big = Ui.Label("", 26, Ui.Accent, "Title");
         root.AddChild(_big);
@@ -1168,6 +1197,7 @@ public partial class TestRange : Node3D
             "E get into the vehicle you're looking at. The supply pad heals you and refills ammo and fuel.\n\n" +
             "[b][color=#ffb845]Range[/color][/b]\n" +
             "L live fire: the parked vehicles' crews shoot back · T reset targets · Backspace respawn · Tab builder · Esc free the mouse\n" +
+            "F8 battle drill: two armies (about 100 vehicles; again for about 200, again to clear) fight across the range · F3 performance readout\n" +
             "[color=#73f27f]PEN[/color] got through · [color=#ff6b61]NO PEN[/color] armor stopped it (angled armor counts as thicker) · " +
             "[color=#ffcc66]RICOCHET[/color] bounced off a steep angle";
         helpCol.AddChild(text);

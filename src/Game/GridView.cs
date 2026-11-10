@@ -19,7 +19,7 @@ namespace DreamGame.Game;
 /// </list>
 /// When blocks are destroyed or welded back, only their chunks are rebuilt, once per frame.
 /// </summary>
-public sealed class GridView
+public sealed partial class GridView
 {
     private const int ChunkSize = 16;
 
@@ -32,6 +32,7 @@ public sealed class GridView
     private sealed class Chunk
     {
         public int Section;
+        public (int, Int3) Key;
         public Node3D Node;
         public readonly HashSet<BlockInstance> Blocks = new();
         public readonly List<(CollisionShape3D shape, Transform3D local)> Colliders = new();
@@ -50,6 +51,10 @@ public sealed class GridView
     private readonly List<BlockDef> _surfaceDefs = new();
     private readonly Dictionary<BlockDef, int> _surfaceIndex = new();
     private bool _flushQueued;
+    private readonly Transform3D[] _toBody;
+    private bool _toBodyDirty = true;
+    private ulong _bodyFrame = ulong.MaxValue;
+    private Transform3D _bodyXf;
 
     /// <summary>One section of the grid, as the hull mesher sees it.</summary>
     private sealed class SectionGrid : IHullGrid
@@ -81,13 +86,16 @@ public sealed class GridView
         return _surfaceIndex[def] = _surfaceDefs.Count - 1;
     }
 
-    public GridView(PhysicsBody3D body, GridModel model, Func<Int3, float> caliberOf = null)
+    /// <param name="shareKey">Grids made from the same design pass the same key (the blueprint) and share their meshes.</param>
+    /// <param name="lod">Draw a simpler far model at a distance (vehicles and structures; not short-lived wreckage).</param>
+    public GridView(PhysicsBody3D body, GridModel model, Func<Int3, float> caliberOf = null, object shareKey = null, bool lod = false)
     {
         Body = body;
         Model = model;
         _caliberOf = caliberOf;
         _sections = new Node3D[model.Sections.Count];
         _syncedAngle = new float[model.Sections.Count];
+        _toBody = new Transform3D[model.Sections.Count];
         foreach (Section s in model.Sections)
         {
             var node = new Node3D { Name = $"{s.Kind}{s.Id}" };
@@ -97,8 +105,12 @@ public sealed class GridView
             _sections[s.Id] = node;
         }
 
+        SetupLod(shareKey, lod);
+        _building = true;
         foreach (BlockInstance b in model.Instances) Place(b);
         Flush();
+        _building = false;
+        BuildAllFar();
     }
 
     /// <summary>How many draw batches and collider shapes this grid uses (for checking performance).</summary>
@@ -137,7 +149,7 @@ public sealed class GridView
         var key = (b.Section, ChunkKey(b.Cell));
         if (!_chunks.TryGetValue(key, out Chunk chunk))
         {
-            chunk = new Chunk { Section = b.Section };
+            chunk = new Chunk { Section = b.Section, Key = key };
             _chunks[key] = chunk;
         }
 
@@ -149,7 +161,9 @@ public sealed class GridView
         {
             nodes.Visual = BlockVisuals.Create(b.Def, CaliberOf(b));
             nodes.Visual.Transform = Conv.BlockTransform(b.Cell, b.Orientation);
+            ApplyNear(nodes.Visual);
             _sections[b.Section].AddChild(nodes.Visual);
+            FarChanged(b.Section);
         }
         else
         {
@@ -186,6 +200,7 @@ public sealed class GridView
         if (!_chunkOf.Remove(b, out Chunk chunk)) return;
         chunk.Blocks.Remove(b);
         if (!BlockVisuals.IsAnimated(b.Def)) chunk.VisualDirty = true;
+        else FarChanged(b.Section);
         TouchNeighbors(b);
         if (b.Def.HasCollider && b.Def.Shape != BlockShape.Wedge) chunk.ColliderDirty = true;
         _dirty.Add(chunk);
@@ -223,6 +238,7 @@ public sealed class GridView
     {
         _flushQueued = false;
         if (!GodotObject.IsInstanceValid(Body)) return;
+        _nearNodes.RemoveAll(g => !GodotObject.IsInstanceValid(g));
         foreach (Chunk c in _dirty)
         {
             if (c.VisualDirty) RebuildVisual(c);
@@ -247,6 +263,22 @@ public sealed class GridView
             child.QueueFree();
         }
 
+        // A vehicle fresh from a design it shares with others reuses their meshes.
+        if (_building && _shared != null && _shared.Chunks.TryGetValue(c.Key, out List<Piece> pieces))
+        {
+            foreach (Piece piece in pieces)
+            {
+                GeometryInstance3D g = piece.Instance();
+                ApplyNear(g);
+                c.Node.AddChild(g);
+            }
+
+            return;
+        }
+
+        long started = Perf.Now;
+        FarChanged(c.Section);
+        List<Piece> made = _building && _shared != null ? new List<Piece>() : null;
         var groups = new Dictionary<(Mesh, Material), List<Transform3D>>();
         var surface = new List<Int3>();
         foreach (BlockInstance b in c.Blocks)
@@ -270,18 +302,29 @@ public sealed class GridView
         {
             var mm = new MultiMesh { TransformFormat = MultiMesh.TransformFormatEnum.Transform3D, Mesh = mesh, InstanceCount = xfs.Count };
             for (int i = 0; i < xfs.Count; i++) mm.SetInstanceTransform(i, xfs[i]);
-            var mmi = new MultiMeshInstance3D { Multimesh = mm, MaterialOverride = mat };
-            if (mat is StandardMaterial3D sm && sm.ShadingMode == BaseMaterial3D.ShadingModeEnum.Unshaded)
-                mmi.CastShadow = GeometryInstance3D.ShadowCastingSetting.Off;
-            c.Node.AddChild(mmi);
+            var piece = new Piece
+            {
+                Res = mm, Mat = mat, ShadowOff = mat is StandardMaterial3D sm && sm.ShadingMode == BaseMaterial3D.ShadingModeEnum.Unshaded,
+            };
+            made?.Add(piece);
+            GeometryInstance3D g = piece.Instance();
+            ApplyNear(g);
+            c.Node.AddChild(g);
         }
 
-        if (surface.Count == 0) return;
-        foreach ((int mat, HullMesher.Surface s) in HullMesher.Build(surface, new SectionGrid(this, c.Section), Conv.CS))
-        {
-            if (s.Indices.Count == 0) continue;
-            c.Node.AddChild(new MeshInstance3D { Mesh = BlockVisuals.HullMesh(s), MaterialOverride = BlockVisuals.SurfaceMaterial(_surfaceDefs[mat]) });
-        }
+        if (surface.Count > 0)
+            foreach ((int mat, HullMesher.Surface s) in HullMesher.Build(surface, new SectionGrid(this, c.Section), Conv.CS))
+            {
+                if (s.Indices.Count == 0) continue;
+                var piece = new Piece { Res = BlockVisuals.HullMesh(s), Mat = BlockVisuals.SurfaceMaterial(_surfaceDefs[mat]) };
+                made?.Add(piece);
+                GeometryInstance3D g = piece.Instance();
+                ApplyNear(g);
+                c.Node.AddChild(g);
+            }
+
+        if (made != null) _shared.Chunks[c.Key] = made;
+        Perf.Add(Perf.Visuals, started);
     }
 
     /// <summary>Merges the chunk's solid cells into boxes: runs along X, then rows along Z, then layers along Y.</summary>
@@ -363,17 +406,56 @@ public sealed class GridView
     public void SetAngle(int sectionId, float angle)
     {
         Section s = Model.Sections[sectionId];
+        if (s.Angle == angle) return;
         s.Angle = angle;
         _sections[sectionId].Transform = Conv.SectionLocal(s);
+        _toBodyDirty = true;
+    }
+
+    /// <summary>
+    /// Where a section is in the world, worked out in C# from the body's place at the start of this physics
+    /// step and the turret angles, without asking the engine for every section. Good for shell and blast tests.
+    /// </summary>
+    public Transform3D SectionWorldFast(int id)
+    {
+        ulong f = Engine.GetPhysicsFrames();
+        if (f != _bodyFrame)
+        {
+            _bodyFrame = f;
+            _bodyXf = Body.GlobalTransform;
+        }
+
+        if (_toBodyDirty)
+        {
+            _toBodyDirty = false;
+            foreach (Section s in Model.Sections)
+                _toBody[s.Id] = (s.Parent >= 0 ? _toBody[s.Parent] : Transform3D.Identity) * Conv.SectionLocal(s);
+        }
+
+        return _bodyXf * _toBody[id];
+    }
+
+    /// <summary>Whether a ray passes close enough to a section's blocks to be worth walking through them.</summary>
+    public bool RayNearSection(Section s, in Transform3D sectionWorld, Vector3 from, Vector3 dir, float len)
+    {
+        Vector3 lo = s.Min.G() * Conv.CS, hi = s.Max.G() * Conv.CS;
+        Vector3 center = sectionWorld * ((lo + hi) * 0.5f);
+        float radius = (hi - lo).Length() * 0.5f + Conv.CS * 1.5f;
+        float t = Mathf.Clamp((center - from).Dot(dir), 0f, len);
+        return (from + dir * t).DistanceSquaredTo(center) <= radius * radius;
     }
 
     /// <summary>
     /// Moves turret colliders to match the visuals. Physics engines rebuild a body's shape when a collider
     /// moves, so this only happens once a section has turned a few degrees.
     /// </summary>
+    private bool[] _syncDirty;
+
     public void SyncColliders(bool force = false)
     {
-        var dirty = new bool[Model.Sections.Count];
+        _syncDirty ??= new bool[Model.Sections.Count];
+        bool[] dirty = _syncDirty;
+        System.Array.Clear(dirty);
         bool any = false;
         foreach (Section s in Model.Sections)
         {

@@ -150,6 +150,23 @@ Guns inside a turret group traverse (turn left and right); every gun elevates.
   - F fires torpedoes on anything with tubes; X fires missiles.
   - The HUD shows one line per kind of gun. A broadside's sound, muzzle effects and camera kick are capped so it stays readable.
 
+### Big battles (performance)
+The goal is hundreds of vehicles and thousands of shells in the air at once, on an ordinary gaming PC. What makes that possible:
+- **Shells are plain data.** Each shell is a few numbers in a list, not a node. Every tracer in the world is drawn in two batches (streaks and trails, and the glowing heads), refilled each physics step. Far away, tracers are drawn slightly thicker than they really are so they stay visible.
+- **Shells don't ask the physics engine where they are.** Calling into the engine from C# costs several microseconds, and a battle would make tens of thousands of calls a second. Instead:
+  - The ground is the island's height grid, tested exactly in C# (`HeightField`).
+  - Vehicles, structures and wrecks are filed in a flat grid of 48 m squares every step (`SphereGrid`), so a shell only looks at what's near its path. Those are then tested block by block, as before.
+  - The engine is only asked near people and pop-up targets, or near solid scenery that isn't the ground (ramps, crates).
+- **Wheels** on open ground test the height grid too; near other vehicles or scenery they use the engine as before.
+- **Parking.** An AI ground vehicle that has sat still with its brakes on for a moment (and is well away from the camera) is frozen in place. It costs the physics engine nothing until it's hit by a blast, damaged, given an order, or the camera comes close.
+- **Gunners think less often far away.** Within 500 m of the camera they aim and decide every physics step; out to 1.5 km every other step; beyond that every fourth (in bigger steps, so they turn just as fast). Target picking only looks at vehicles in reach (through the grid), nearest first, and stops after a few line-of-sight checks. Gunners spread their target checks out so a hundred vehicles don't all look round on the same step. Big naval guns (150 mm and up) look for targets out to 3 km.
+- **Shared looks.** Vehicles built from the same design share their meshes. A vehicle gets meshes of its own only for parts of it that get damaged.
+- **Far models.** Each hull, turret and gun also has a one-piece low-detail model: plating as flat panels, other parts in simple shapes, in their own colors. Past a distance that grows with the vehicle's size (about 180 m for a tank, 1.6 km for the Colossus), the detailed batches switch off and the far model shows instead, so a distant tank costs about 3 draw calls instead of dozens. Looking through a zoomed sight stretches that distance, so what you're zoomed in on keeps its detail. Far models are rebuilt after damage, at most every few seconds and only while they're being looked at.
+- **Effect budgets.** Every effect asks how much detail it's worth where it is: the full effect close up, a flash and a little smoke further out, only the sound beyond that. A crowded scene shrinks those distances. Only 24 flashes of light can be lit at once, and only near the camera. Effects reuse their meshes, materials and curves instead of making new ones each time.
+- **Measuring.** F3 shows frame rate, draw calls, counts (vehicles, far models, parked, shells, tracer pieces, effects, lights) and how many milliseconds go to shells, explosions, driving, AI gunners, ships, aircraft, effects and mesh rebuilds. F8 on the range starts a **battle drill**: about 100 vehicles in two armies (tanks across the firing lane, patrol boats at sea, planes and helicopters overhead). F8 again starts the big drill, about 200 with a battleship on each side, and once more clears it.
+- **Benchmark** (headless, the core parts only): 200 tanks and 3,000 shells in flight take about 3.4 ms a step to check against the vehicles (7.2 ms testing every vehicle for every shell, plus 600,000 engine calls a step that the old way also made to read vehicle positions) and 4 ms against the ground in hilly country. 1,400 wheel rays on open ground take 0.45 ms.
+- **Not yet:** simplified far-off battles with no physics at all, and running the shell checks on several CPU cores. Both are planned once fleet command makes battles bigger than the island.
+
 ## Technical approach
 
 - **Engine:** Godot 4.7 with C# and Jolt physics.
@@ -165,7 +182,7 @@ Guns inside a turret group traverse (turn left and right); every gun elevates.
 - **Damping:** vehicles replace Godot's default damping (which pulls in proportion to mass) instead of adding to it. Ships and aircraft model their own drag and get almost none; land vehicles keep the amount they've always had.
 - **Water** is a flat surface for physics (the waves are only drawn). Every block and every compartment cell under it pushes up on the hull where it is, so trim, list and capsizing come out of the shape. Water drag on each piece gives a ship its keel and its roll damping. Submarine depth keeping and rudder steering have gentle assists, and a standalone simulation checks the example ships float level, right themselves, turn and dive before each change ships.
 - **Flight** uses the same approach: every panel's lift and drag is applied where it is, and the assists are rate controllers on each axis, capped by what the control surfaces can do at the current airspeed. A standalone flight simulation checks the examples take off within the airstrip, hold level flight, turn, recover from a zoom climb, and (for helicopters, drones and airships) hover and hold height.
-- **Level of detail:** full block simulation near players. Far-off battles use the core stat math with no physics.
+- **Level of detail:** full block simulation near players, with gunners thinking less often, simpler far models and lighter effects further out (see *Big battles*). Far-off battles beyond the map will use the core stat math with no physics.
 
 ## Roadmap
 
@@ -188,6 +205,7 @@ Each milestone is playable on its own.
    - **Air** *(built)*: wing panels and self-mapping control surfaces, air propellers, aero engines, jets, rotors, lift fans and gas cells; planes (mouse aim), helicopters, VTOL and drones (flown by remote), airships; bombs with a bombsight, guided missiles built from parts (optical or radar), a 40 mm autocannon with air-burst flak; an airstrip, a helipad, and enemy aircraft on the range.
    - **Scale** *(built)*: colossal machines, 300 m and up. Big multi-cell blocks, chunked drawing and merged collision, bricked buoyancy, a 320 m build area, box fill / hollow / clear tools, background analysis, the Colossus battleship and the fleet anchorage.
    - **Looks and firepower** *(built)*: merged hull surfaces with chamfers, shading and weathering; detailed block models; the Colossus armed with 84 guns, torpedoes and missiles; firing arcs, the anti-aircraft watch and a grouped weapons HUD.
+   - **Big battles** *(built)*: shells as data, two-batch tracers, ground and vehicle checks in C#, parking, far models, shared meshes, effect budgets, the F3 performance readout and the F8 battle drill.
    - Not yet: giant aircraft and land battleships. They can be built from the same blocks, but their wings and tracks are still worked out panel by panel, so a giant one costs more to fly than it needs to.
 4. **Terrain + industry:** deformable terrain, mining, machines you design, conveyors, power, assembly bays that print blueprints.
 5. **Planet war:** a generated planet, a rival faction that designs its own vehicles, territory, the supply network, research, salvage, captured sites, simplified far-off battles.
