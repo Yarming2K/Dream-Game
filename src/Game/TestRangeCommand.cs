@@ -162,10 +162,13 @@ public partial class TestRange
         v.AiCrewActive = true;
         _ = v.Callsign; // numbered in the order they arrive
         AddChild(v);
+        // Fixed-size labels are drawn as if a metre away, so their pixel size is tiny: the diamond is about 3% of
+        // the screen's height and each line of text about 2%, near or far.
+        Vector3 over = Vector3.Up * ((a.Max.Y + 0.5f) * Conv.CS + 2f);
         var diamond = new Label3D
         {
-            Text = "◆", FontSize = 40, PixelSize = 0.01f, FixedSize = true, Billboard = BaseMaterial3D.BillboardModeEnum.Enabled,
-            Modulate = faction == 0 ? BlueTeam : RedTeam, OutlineSize = 6, Position = Vector3.Up * (v.Radius * 0.6f + 2f),
+            Text = "◆", FontSize = 44, PixelSize = 0.0009f, FixedSize = true, Billboard = BaseMaterial3D.BillboardModeEnum.Enabled,
+            Modulate = faction == 0 ? BlueTeam : RedTeam, OutlineSize = 8, Position = over, VerticalAlignment = VerticalAlignment.Top,
             NoDepthTest = false,
         };
         v.AddChild(diamond);
@@ -174,12 +177,13 @@ public partial class TestRange
             // Your units say who they are and what they're doing, just above their marker.
             v.Marker = new Label3D
             {
-                FontSize = 15, PixelSize = 0.01f, FixedSize = true, Billboard = BaseMaterial3D.BillboardModeEnum.Enabled,
-                Modulate = BlueTeam, OutlineSize = 5, OutlineModulate = new Color(0, 0, 0, 0.8f), VerticalAlignment = VerticalAlignment.Bottom,
-                Position = diamond.Position + Vector3.Up * 0.25f, NoDepthTest = true, VisibilityRangeEnd = 900f, RenderPriority = 2,
+                FontSize = 30, PixelSize = 0.0009f, FixedSize = true, Billboard = BaseMaterial3D.BillboardModeEnum.Enabled,
+                Modulate = BlueTeam, OutlineSize = 8, OutlineModulate = new Color(0, 0, 0, 0.8f), VerticalAlignment = VerticalAlignment.Bottom,
+                Position = over, NoDepthTest = true, VisibilityRangeEnd = 900f, RenderPriority = 2,
             };
             v.AddChild(v.Marker);
         }
+
         _drill.Add(v);
         return v;
     }

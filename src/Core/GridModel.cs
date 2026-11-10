@@ -159,6 +159,43 @@ public sealed class GridModel
     /// <summary>The block whose anchor is <paramref name="anchor"/>, if it's there.</summary>
     public bool TryGetInstance(Int3 anchor, out BlockInstance b) => _byAnchor.TryGetValue(anchor, out b);
 
+    /// <summary>
+    /// How far (in cells) any cell can get from the origin, however the turrets and guns are turned. A cell on a
+    /// turret swings round the turret's pivot, and a gun's round its own pivot, which the turret carries: so the
+    /// furthest it can get is its distance from its pivot, plus each pivot's distance from the one it turns round,
+    /// down to the hull.
+    /// </summary>
+    public float MaxReach()
+    {
+        float reach = 0;
+        foreach (Section s in Sections)
+        {
+            bool turns = s.Kind != SectionKind.Hull && s.Parent >= 0;
+            Vector3 about = turns ? s.Pivot : Vector3.Zero;
+            float swing = turns ? PivotReach(s) : 0f;
+            foreach (Int3 c in s.Cells.Keys)
+                reach = MathF.Max(reach, (c.ToVector3() - about).Length() + swing);
+        }
+
+        return reach;
+    }
+
+    /// <summary>How far a turning section's pivot can get from the origin, through the sections it rides on.</summary>
+    private float PivotReach(Section s)
+    {
+        float d = 0;
+        Section at = s;
+        for (int guard = 0; guard < Sections.Count; guard++)
+        {
+            if (at.Parent < 0 || at.Parent >= Sections.Count || Sections[at.Parent].Kind == SectionKind.Hull) break;
+            Section up = Sections[at.Parent];
+            d += (at.Pivot - up.Pivot).Length();
+            at = up;
+        }
+
+        return d + at.Pivot.Length();
+    }
+
     public void RecomputeBounds()
     {
         foreach (Section s in Sections) s.RecomputeBounds();

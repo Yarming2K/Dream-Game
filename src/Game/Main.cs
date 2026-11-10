@@ -14,9 +14,20 @@ public partial class Main : Node
     {
         GameInput.Register();
         Sfx.SetupBuses();
+        Window w = GetWindow();
+        Display.Fit(w);
+        w.SizeChanged += () => Display.Fit(w);
         _builder = new Builder();
         _builder.TestDriveRequested += bp => Callable.From(() => StartTestDrive(bp)).CallDeferred();
         AddChild(_builder);
+    }
+
+    public override void _UnhandledInput(InputEvent e)
+    {
+        if (!e.IsActionPressed("render_scale")) return;
+        Display.FullRes = !Display.FullRes;
+        Display.Fit(GetWindow());
+        GetViewport().SetInputAsHandled();
     }
 
     private void StartTestDrive(Blueprint bp)

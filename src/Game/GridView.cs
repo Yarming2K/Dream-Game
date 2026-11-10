@@ -568,9 +568,6 @@ public sealed partial class GridView
     /// <summary>Radius around the body origin that contains every block, however its turrets are turned.</summary>
     public float BoundingRadius()
     {
-        float r = 0, pivots = 0;
-        foreach (Int3 c in Model.Blocks.Keys) r = MathF.Max(r, Conv.CellPos(c).Length());
-        foreach (Section s in Model.Sections) pivots = MathF.Max(pivots, s.Pivot.Length() * Conv.CS);
-        return r + 2f * pivots + Conv.CS * 2f;
+        return Model.MaxReach() * Conv.CS + Conv.CS * 2f;
     }
 }

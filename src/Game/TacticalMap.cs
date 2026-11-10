@@ -392,21 +392,28 @@ public partial class TacticalMap : Control
         fwd = fwd.LengthSquared() > 1e-4f ? fwd.Normalized() : new Vector2(0, -1);
         var right = new Vector2(-fwd.Y, fwd.X);
         var col = new Color(c, alpha);
+        // Drawn at its real size from above (no smaller than an icon you can click), offset to where its blocks are.
+        Rect2 plan = v.Plan;
+        Vector2 mid = plan.GetCenter();
+        Vector2 c0 = at + (right * mid.X - fwd * mid.Y) * _zoom;
+        float halfLen = plan.Size.Y * 0.5f * _zoom, halfWid = plan.Size.X * 0.5f * _zoom;
         Vector2[] poly;
         if (v.IsAir)
         {
-            float s = 9f;
+            float s = Mathf.Max(9f, Mathf.Max(halfLen, halfWid));
             poly = new[] { at + fwd * s, at - fwd * s * 0.6f + right * s * 0.8f, at - fwd * s * 0.2f, at - fwd * s * 0.6f - right * s * 0.8f };
         }
         else if (v.IsNaval)
         {
-            float len = Mathf.Max(14f, v.Radius * 1.6f * _zoom), half = Mathf.Max(4f, len * 0.22f);
-            poly = new[] { at + fwd * len * 0.6f, at + fwd * len * 0.25f + right * half, at - fwd * len * 0.45f + right * half, at - fwd * len * 0.45f - right * half, at + fwd * len * 0.25f - right * half };
+            float len = Mathf.Max(7f, halfLen), half = Mathf.Max(3f, halfWid);
+            if (len < 7.5f) c0 = at;
+            poly = new[] { c0 + fwd * len, c0 + fwd * len * 0.6f + right * half, c0 - fwd * len + right * half, c0 - fwd * len - right * half, c0 + fwd * len * 0.6f - right * half };
         }
         else
         {
-            float s = Mathf.Max(6f, v.Radius * 0.9f * _zoom);
-            poly = new[] { at + (fwd + right * 0.75f) * s, at + (-fwd + right * 0.75f) * s, at + (-fwd - right * 0.75f) * s, at + (fwd - right * 0.75f) * s };
+            float len = Mathf.Max(6f, halfLen), half = Mathf.Max(4.5f, halfWid);
+            if (len < 6.5f && half < 5f) c0 = at;
+            poly = new[] { c0 + fwd * len + right * half, c0 - fwd * len + right * half, c0 - fwd * len - right * half, c0 + fwd * len - right * half };
         }
 
         // Rings: orange while it's firing, pulsing red while it's under fire.

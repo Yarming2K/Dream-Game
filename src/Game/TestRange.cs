@@ -70,6 +70,8 @@ public partial class TestRange : Node3D
     private float _yaw;
     private float _pitch = -0.28f;
     private float _dist = 13f;
+    private Vector3 _follow;
+    private VehicleBody _camFor;
     private bool _zoom;
     private bool _holdFire;
     private float _lastKick;
@@ -143,7 +145,7 @@ public partial class TestRange : Node3D
             SpringLength = _dist, Margin = 0.3f, CollisionMask = GridRegistry.Layers.World | GridRegistry.Layers.Structures,
         };
         _pivot.AddChild(_arm);
-        _cam = new Camera3D { Fov = 70f, Far = 3000f };
+        _cam = new Camera3D { Fov = 70f, Far = 8000f };
         _arm.AddChild(_cam);
 
         BuildHud();
@@ -291,7 +293,12 @@ public partial class TestRange : Node3D
             });
         }
 
-        fleet.AddChild(Sign("FLEET ANCHORAGE\nbig ships start and resupply here", new Vector3(0, 30f, -AnchorageRadius), 200));
+        // Once you're in the anchorage (on a big ship's deck, say) the sign over it would fill the sky: it fades out.
+        Label3D fleetSign = Sign("FLEET ANCHORAGE\nbig ships start and resupply here", new Vector3(0, 30f, -AnchorageRadius), 200);
+        fleetSign.VisibilityRangeBegin = AnchorageRadius + 60f;
+        fleetSign.VisibilityRangeBeginMargin = 40f;
+        fleetSign.VisibilityRangeFadeMode = GeometryInstance3D.VisibilityRangeFadeModeEnum.Self;
+        fleet.AddChild(fleetSign);
     }
 
     /// <summary>A concrete airstrip with centerline and threshold markings, an apron that resupplies, and a helipad.</summary>
@@ -524,10 +531,13 @@ public partial class TestRange : Node3D
         }
 
         _cam.MakeCurrent();
-        _dist = v.IsAir ? Mathf.Max(_dist, v.Radius * 1.6f + 8f) : v.Radius > 15f ? Mathf.Max(_dist, v.Radius * 1.3f) : _dist;
+        // A new machine starts from its own camera distance (the last one's, after a battleship, would be far too far).
+        if (v != _camFor) _dist = v.IsAir ? Mathf.Max(13f, v.Radius * 1.6f + 8f) : v.Radius > 15f ? v.Radius * 1.3f : 13f;
+        _camFor = v;
         _arm.ClearExcludedObjects();
         _arm.AddExcludedObject(v.GetRid());
-        _pivot.GlobalPosition = v.GlobalTransform * v.CenterOfMass + Vector3.Up * 2f;
+        _follow = v.GlobalTransform * v.CenterOfMass + Vector3.Up * 2f;
+        _pivot.GlobalPosition = _follow;
         Vector3 f = -v.GlobalTransform.Basis.Z;
         _yaw = Mathf.Atan2(-f.X, -f.Z);
         BuildGunRows();
@@ -858,11 +868,21 @@ public partial class TestRange : Node3D
         {
             Vector3 target = _mount.GlobalTransform * _mount.CenterOfMass + Vector3.Up * 2f;
             // Aircraft are too quick for a lagging camera: stay right on them.
-            _pivot.GlobalPosition = _mount.IsAir ? target : _pivot.GlobalPosition.Lerp(target, Mathf.Min(1f, dt * 14f));
+            _follow = _mount.IsAir ? target : _follow.Lerp(target, Mathf.Min(1f, dt * 14f));
         }
 
         _pivot.Rotation = new Vector3(_pitch, _yaw, 0);
-        _arm.SpringLength = _zoom ? Mathf.Min(_dist, 8f) : _dist;
+        float arm = _zoom ? Mathf.Min(_dist, 8f) : _dist;
+        if (Mounted)
+        {
+            // However close you've zoomed, the camera stays outside the machine itself (from the side of a long
+            // ship it can come in close; from astern, it sits past the stern), and above the sea.
+            _pivot.GlobalPosition = _follow;
+            arm = Mathf.Max(arm, OutsideBox(_mount, _follow, _pivot.GlobalBasis.Z) + 2f);
+            _pivot.GlobalPosition = _follow + Vector3.Up * AboveTheSea(_follow, arm);
+        }
+
+        _arm.SpringLength = arm;
 
         // Shake comes from "trauma" that fades; squaring it keeps small bumps subtle and big blasts violent.
         _trauma = Mathf.Max(0, _trauma - dt * 1.4f);
@@ -898,12 +918,53 @@ public partial class TestRange : Node3D
         UpdateHud(dt);
     }
 
-    /// <summary>Below the surface the world turns murky green-blue and close.</summary>
+    /// <summary>
+    /// Looking up from beside a ship would swing the camera down under the sea: lift the point it circles instead,
+    /// so it stays just above the waves (unless what you're in is under water itself: a diving sub, a wreck).
+    /// </summary>
+    private float AboveTheSea(Vector3 pivot, float arm)
+    {
+        const float clearance = 1.5f;
+        if (pivot.Y < Ocean.Level + clearance) return 0f;
+        // Over land the spring arm already keeps the camera out of the ground.
+        float ground = WorldQuery.Ground?.HeightAt(_cam.GlobalPosition.X, _cam.GlobalPosition.Z) ?? Ocean.Level - 1f;
+        if (ground > Ocean.Level) return 0f;
+        float camY = pivot.Y - arm * Mathf.Sin(_pitch);
+        return Mathf.Max(0f, Ocean.Level + clearance - camY);
+    }
+
+    /// <summary>How far along <paramref name="dir"/> from <paramref name="from"/> you'd have to go to be clear of the machine's box.</summary>
+    private static float OutsideBox(VehicleBody v, Vector3 from, Vector3 dir)
+    {
+        Transform3D inv = v.GlobalTransform.AffineInverse();
+        Vector3 o = inv * from, d = inv.Basis * dir;
+        VehicleAnalysis a = v.Analysis;
+        Vector3 lo = new Vector3(a.Min.X - 0.5f, a.Min.Y - 0.5f, a.Min.Z - 0.5f) * Conv.CS;
+        Vector3 hi = new Vector3(a.Max.X + 0.5f, a.Max.Y + 0.5f, a.Max.Z + 0.5f) * Conv.CS;
+        float enter = 0f, exit = float.MaxValue;
+        for (int i = 0; i < 3; i++)
+        {
+            if (Mathf.Abs(d[i]) < 1e-5f)
+            {
+                if (o[i] < lo[i] || o[i] > hi[i]) return 0f;
+                continue;
+            }
+
+            float t1 = (lo[i] - o[i]) / d[i], t2 = (hi[i] - o[i]) / d[i];
+            enter = Mathf.Max(enter, Mathf.Min(t1, t2));
+            exit = Mathf.Min(exit, Mathf.Max(t1, t2));
+        }
+
+        return exit >= enter ? exit : 0f;
+    }
+
+    /// <summary>Below the surface the world turns murky green-blue and close. Above it the haze thins with height.</summary>
     private void UpdateUnderwater(Camera3D cam)
     {
         bool under = cam.GlobalPosition.Y < Ocean.Level - 0.05f;
         _underwaterTint.Visible = under;
-        _env.FogDensity = under ? 0.075f : _airFogDensity;
+        float height = Mathf.Max(0f, cam.GlobalPosition.Y - 20f);
+        _env.FogDensity = under ? 0.075f : _airFogDensity / (1f + height / 150f);
         _env.FogLightColor = under ? new Color(0.05f, 0.22f, 0.26f) : _airFogColor;
         _env.FogSkyAffect = under ? 1f : 0.3f;
     }
@@ -1368,7 +1429,7 @@ public partial class TestRange : Node3D
             "[b][color=#ffb845]Range[/color][/b]\n" +
             "L live fire: the parked vehicles' crews shoot back · T reset targets · Backspace respawn · Tab builder · Esc free the mouse\n" +
             "M tactical map (fleet command), from a vehicle with a command console or at the command post by the depot: pick units, right click to attack, escort or move them in formation; J jumps into one; Deploy calls more in\n" +
-            "F8 battle drill: two armies (about 100 vehicles; again for about 200, again to clear) fight across the range · F3 performance readout\n" +
+            "F8 battle drill: two armies (about 100 vehicles; again for about 200, again to clear) fight across the range · F3 performance readout · F4 full-resolution 3D on or off\n" +
             "[color=#73f27f]PEN[/color] got through · [color=#ff6b61]NO PEN[/color] armor stopped it (angled armor counts as thicker) · " +
             "[color=#ffcc66]RICOCHET[/color] bounced off a steep angle";
         helpCol.AddChild(text);
@@ -1421,7 +1482,7 @@ public partial class TestRange : Node3D
 
     private void UpdateHud(float dt)
     {
-        _resume.Visible = Input.MouseMode != Input.MouseModeEnum.Captured && !_help.Visible;
+        _resume.Visible = Input.MouseMode != Input.MouseModeEnum.Captured && !_help.Visible && !(_map != null && _map.Visible);
         if (_bigTime > 0)
         {
             _bigTime -= dt;
@@ -1524,14 +1585,32 @@ public partial class TestRange : Node3D
 
         var crew = new StringBuilder("[b]CREW[/b]\n");
         int n = 0;
-        foreach (SeatRt s in v.Seats)
+        // One line per job: a battleship's forty gunners are "40 AI crew", not forty lines.
+        foreach (SeatRole role in new[] { SeatRole.Driver, SeatRole.Gunner, SeatRole.Commander })
         {
-            n++;
-            string who = !v.SeatAlive(s) ? $"[color={Ui.Hex(Ui.Bad)}]knocked out[/color]"
-                : s.Occupant == Occupant.Player ? $"[color={Ui.Hex(Ui.Accent)}]You[/color]"
-                : s.Occupant == Occupant.Ai ? "AI crew" : $"[color={Ui.Hex(Ui.Dim)}]empty[/color]";
-            string key = s.Role == SeatRole.Driver ? "1" : s.Role == SeatRole.Gunner ? "2" : "3";
-            crew.Append($"[color={Ui.Hex(Ui.Dim)}]{key}[/color]  {Crew.Name(s.Role)}: {who}\n");
+            int seats = 0, ai = 0, empty = 0, down = 0;
+            bool you = false;
+            foreach (SeatRt s in v.Seats)
+            {
+                if (s.Role != role) continue;
+                seats++;
+                if (!v.SeatAlive(s)) down++;
+                else if (s.Occupant == Occupant.Player) you = true;
+                else if (s.Occupant == Occupant.Ai) ai++;
+                else empty++;
+            }
+
+            if (seats == 0) continue;
+            n += seats;
+            string Count(int k, string what) => seats == 1 ? what : $"{k} {what}";
+            var who = new List<string>();
+            if (you) who.Add($"[color={Ui.Hex(Ui.Accent)}]You[/color]");
+            if (ai > 0) who.Add(Count(ai, "AI crew"));
+            if (empty > 0) who.Add($"[color={Ui.Hex(Ui.Dim)}]{Count(empty, "empty")}[/color]");
+            if (down > 0) who.Add($"[color={Ui.Hex(Ui.Bad)}]{Count(down, "knocked out")}[/color]");
+            string key = role == SeatRole.Driver ? "1" : role == SeatRole.Gunner ? "2" : "3";
+            string job = seats == 1 ? Crew.Name(role) : $"{Crew.Name(role)}s ({seats})";
+            crew.Append($"[color={Ui.Hex(Ui.Dim)}]{key}[/color]  {job}: {string.Join(", ", who)}\n");
         }
 
         if (n == 0) crew.Append("No seats.\n");

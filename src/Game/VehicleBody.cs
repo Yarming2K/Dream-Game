@@ -93,6 +93,13 @@ public partial class VehicleBody : RigidBody3D, IGridHost
     public KeepRule Keep => Analysis.IsBuilding ? KeepRule.Anchored : KeepRule.DriverSeat;
     public float Radius { get; private set; }
 
+    /// <summary>
+    /// Its outline seen from above, in its own frame and in metres: x across, y along its length (the front is at
+    /// low y). Unlike <see cref="Radius"/>, which allows for every way its turrets could turn, this is its real size.
+    /// </summary>
+    public Rect2 Plan => new(new Vector2(Analysis.Min.X - 0.5f, Analysis.Min.Z - 0.5f) * Conv.CS,
+        new Vector2(Analysis.Max.X - Analysis.Min.X + 1, Analysis.Max.Z - Analysis.Min.Z + 1) * Conv.CS);
+
     public Blueprint Blueprint { get; private set; }
     public VehicleAnalysis Analysis { get; private set; }
     public string DisplayName => Blueprint.Name;

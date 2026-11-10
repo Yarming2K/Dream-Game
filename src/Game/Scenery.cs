@@ -13,8 +13,10 @@ public static class Scenery
             {
                 SkyTopColor = new Color(0.32f, 0.45f, 0.62f),
                 SkyHorizonColor = new Color(0.68f, 0.72f, 0.74f),
-                GroundHorizonColor = new Color(0.55f, 0.55f, 0.52f),
-                GroundBottomColor = new Color(0.2f, 0.2f, 0.19f),
+                // Below the horizon the sky is the far sea in haze, so where the water stops (far out, or seen
+                // from high up) there's no grey band.
+                GroundHorizonColor = new Color(0.6f, 0.66f, 0.7f),
+                GroundBottomColor = new Color(0.1f, 0.2f, 0.27f),
                 SunAngleMax = 20f,
             }
             : new ProceduralSkyMaterial

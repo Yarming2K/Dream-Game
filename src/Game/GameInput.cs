@@ -29,6 +29,7 @@ public static class GameInput
         AddKeys("bomb", Key.B);
         AddKeys("vtol", Key.V);
         AddKeys("perf_overlay", Key.F3);
+        AddKeys("render_scale", Key.F4);
         AddKeys("battle_drill", Key.F8);
         AddKeys("tactical_map", Key.M);
         AddKeys("lights", Key.H);

@@ -83,6 +83,7 @@ public partial class PerfOverlay : PanelContainer
         sb.Append($"Vehicles [b]{vehicles}[/b] ({far} far model, {parked} parked) · structures {structures} · wrecks {wrecks}\n");
         sb.Append($"Shells [b]{c?.ShellCount ?? 0}[/b] · tracer pieces {c?.TracersDrawn ?? 0} · effects {FxNode.Live} · lights {Effects.LightsLive}\n");
         sb.Append($"Nodes {nodes:0} · bodies awake {awake:0}\n");
+        sb.Append($"[color={Ui.Hex(Ui.Dim)}]{Display.Describe()}[/color]\n");
         if (heavy.Count > 0)
             sb.Append($"[color={Ui.Hex(Ui.Dim)}]Heaviest near you: {string.Join(" · ", heavy.OrderByDescending(x => x.batches).Take(3).Select(x => $"{x.name} {x.batches} batches, {x.shapes} shapes"))}[/color]\n");
         sb.Append($"[color={Ui.Hex(Ui.Accent)}]Per frame (ms):[/color] ");

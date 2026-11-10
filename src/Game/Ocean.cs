@@ -71,7 +71,7 @@ void fragment() {
             Position = new Vector3(0, Level, 0),
         };
         // The open sea beyond: four strips around the detailed square, so no water is drawn twice.
-        const float inner = 700f, outer = 4000f;
+        const float inner = 700f, outer = 12000f;
         (Vector2 size, Vector3 pos)[] strips =
         {
             (new Vector2(outer * 2, outer - inner), new Vector3(0, 0, -(inner + outer) / 2)),
@@ -82,7 +82,7 @@ void fragment() {
         foreach ((Vector2 size, Vector3 pos) in strips)
             root.AddChild(new MeshInstance3D
             {
-                Mesh = new PlaneMesh { Size = size, SubdivideWidth = 30, SubdivideDepth = 30 },
+                Mesh = new PlaneMesh { Size = size, SubdivideWidth = 90, SubdivideDepth = 90 },
                 MaterialOverride = mat, CastShadow = GeometryInstance3D.ShadowCastingSetting.Off, Position = pos,
             });
         return root;
