@@ -262,7 +262,7 @@ public partial class VehicleBody
 
     private void CrewTick(float dt)
     {
-        bool aiGuns = AiCrewActive && Guns.Any(g => g.Alive && ControllerOf(g)?.Occupant == Occupant.Ai && !PlayerDirects(g));
+        bool aiGuns = AiCrewActive && Roe != Engagement.HoldFire && Guns.Any(g => g.Alive && ControllerOf(g)?.Occupant == Occupant.Ai && !PlayerDirects(g));
         if (!aiGuns)
         {
             _aiHasAim = _aaHasAim = false;
@@ -403,14 +403,28 @@ public partial class VehicleBody
         _candidates.Clear();
         WorldQuery.HostsNear(eye, Mathf.Max(flak ? 2500f : 0f, reach), _candidates);
         _sorted.Clear();
+        // Rules of engagement: returning fire only, the gunners look at what's shooting at them and
+        // what they were told to attack.
+        bool returnOnly = Roe == Engagement.ReturnFire;
+        VehicleBody attacker = UnderFire ? LastAttacker : null;
+        VehicleBody ordered = Order == OrderKind.Attack && OrderTarget != null && IsInstanceValid(OrderTarget) ? OrderTarget : null;
         foreach (IGridHost h in _candidates)
         {
             if (h is not VehicleBody v || v == this || v.Faction == Faction || v.Model.Blocks.Count == 0) continue;
+            if (returnOnly && v != attacker && v != ordered) continue;
             Vector3 p = v.GlobalTransform * v.CenterOfMass;
             _sorted.Add((eye.DistanceTo(p), v, p));
         }
 
         _sorted.Sort((a, b) => a.d.CompareTo(b.d));
+        // An attack order puts its target first in line.
+        int oi = ordered != null ? _sorted.FindIndex(x => x.v == ordered) : -1;
+        if (oi > 0)
+        {
+            var o = _sorted[oi];
+            _sorted.RemoveAt(oi);
+            _sorted.Insert(0, o);
+        }
         VehicleBody bestAir = null;
         int looks = 0, airLooks = 0;
         foreach ((float d, VehicleBody v, Vector3 p) in _sorted)
@@ -437,7 +451,7 @@ public partial class VehicleBody
 
         foreach (ICharacter c in Hittables.Characters)
         {
-            if (!c.Targetable || c.Faction == Faction) continue;
+            if (!c.Targetable || c.Faction == Faction || returnOnly || ordered != null) continue;
             float d = eye.DistanceTo(c.AimCenter);
             // People are a lower priority than vehicles unless they're much closer.
             if (d > 350f || d * 1.6f >= best || !Visible(c.AimCenter, null)) continue;

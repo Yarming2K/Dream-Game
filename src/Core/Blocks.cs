@@ -46,6 +46,12 @@ public enum BlockKind
 
     /// <summary>Cosmetic parts (hatches, lights, stowage, railings): a little mass, no other effect.</summary>
     Detail,
+
+    /// <summary>Screens and radios: from a vehicle or post with one, the tactical map commands your other units.</summary>
+    CommandConsole,
+
+    /// <summary>A search radar: everything aboard sees further.</summary>
+    Radar,
 }
 
 public enum BlockShape
@@ -364,6 +370,20 @@ public static class BlockCatalog
             Id = "pilot_seat", Name = "Pilot Seat", Category = "Control", Kind = BlockKind.DriverSeat,
             Description = "An open seat with a control stick and instruments, made to sit under a canopy: build the canopy round it from glazing (press V for slopes and corners). Works like a driver seat.",
             MassKg = 70, Hp = 70, ArmorMm = 3, ColorR = 0.22f, ColorG = 0.24f, ColorB = 0.25f, Metallic = 0.4f, Roughness = 0.6f,
+            Watertight = false,
+        },
+        new BlockDef
+        {
+            Id = "command_console", Name = "Command Console", Category = "Control", Kind = BlockKind.CommandConsole,
+            Description = "Map tables, screens and radios. Aboard a vehicle with one (or standing at a command post), press M for the tactical map: pick units and give them orders. Orders reach 4 km. If it's destroyed, your units carry on with their last orders.",
+            MassKg = 120, Hp = 90, ArmorMm = 5, ColorR = 0.22f, ColorG = 0.24f, ColorB = 0.26f, Metallic = 0.4f, Roughness = 0.55f,
+            Watertight = false,
+        },
+        new BlockDef
+        {
+            Id = "radar", Name = "Search Radar", Category = "Control", Kind = BlockKind.Radar,
+            Description = "A radar mast. Everything aboard spots enemies nearly twice as far, which shows more of them on the tactical map.",
+            MassKg = 80, Hp = 50, ArmorMm = 3, HasCollider = false, ColorR = 0.5f, ColorG = 0.52f, ColorB = 0.53f, Metallic = 0.5f, Roughness = 0.5f,
             Watertight = false,
         },
         new BlockDef

@@ -292,6 +292,35 @@ public static class BlockModels
                 Detail(k, def);
                 break;
 
+            case BlockKind.CommandConsole:
+            {
+                // A desk of screens and a plotting table, with a chair.
+                k.Bevel(new Vector3(Full, 0.06f, Full), Paint.SelfDark, new Vector3(0, -0.22f, 0), 0.015f);
+                k.Bevel(new Vector3(0.44f, 0.16f, 0.18f), Paint.Self, new Vector3(0, -0.11f, -0.14f), 0.012f);
+                Quaternion tilt = Rot(Vector3.UnitX, 0.3f);
+                k.Bevel(new Vector3(0.44f, 0.18f, 0.04f), Paint.Dark, new Vector3(0, 0.06f, -0.2f), 0.01f, tilt);
+                foreach (float x in new[] { -0.13f, 0.13f }) k.Glow(new Vector3(0.17f, 0.12f, 0.006f), x < 0 ? Green : Cyan, 1.1f, new Vector3(x, 0.07f, -0.23f));
+                k.Glow(new Vector3(0.3f, 0.005f, 0.12f), new Vector3(0.3f, 0.6f, 0.9f), 0.8f, new Vector3(0, -0.025f, -0.12f));
+                k.Bevel(new Vector3(0.16f, 0.04f, 0.16f), Paint.Dark, new Vector3(0, -0.12f, 0.12f), 0.01f);
+                k.Bevel(new Vector3(0.16f, 0.18f, 0.035f), Paint.Dark, new Vector3(0, -0.02f, 0.2f), 0.01f);
+                k.Cyl(0.015f, 0.08f, Paint.Steel, new Vector3(0, -0.18f, 0.12f), sides: 6);
+                k.Cyl(0.006f, 0.18f, Paint.Dark, new Vector3(0.2f, 0.08f, -0.2f), sides: 6);
+                break;
+            }
+
+            case BlockKind.Radar:
+            {
+                // A mast with a turning bedstead antenna.
+                k.Cyl(0.06f, 0.12f, Paint.SelfDark, new Vector3(0, -0.19f, 0), sides: 12);
+                k.Cyl(0.025f, 0.32f, Paint.Steel, new Vector3(0, 0.0f, 0), sides: 8);
+                k.Node = k.AddNode("Spinner", new Vector3(0, 0.17f, 0));
+                k.Box(new Vector3(0.46f, 0.12f, 0.02f), Paint.Self, new Vector3(0, 0.03f, 0));
+                for (int i = 0; i < 5; i++) k.Box(new Vector3(0.012f, 0.14f, 0.03f), Paint.Steel, new Vector3(-0.2f + i * 0.1f, 0.03f, 0.02f));
+                k.Box(new Vector3(0.05f, 0.05f, 0.06f), Paint.Dark, new Vector3(0, -0.03f, 0.03f));
+                k.Node = -1;
+                break;
+            }
+
             case BlockKind.DriverSeat:
                 k.Bevel(new Vector3(Full), Paint.Self, Vector3.Zero);
                 k.Box(new Vector3(0.32f, 0.08f, 0.05f), Paint.Glass, new Vector3(0, 0.15f, -0.25f));

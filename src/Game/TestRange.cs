@@ -154,6 +154,7 @@ public partial class TestRange : Node3D
             _trauma = Mathf.Min(1f, _trauma + dmg / 120f);
         };
 
+        AddCommandPost();
         SpawnVehicle();
         EnterVehicle(_vehicle, SeatRole.Driver);
         Input.MouseMode = Input.MouseModeEnum.Captured;
@@ -451,7 +452,17 @@ public partial class TestRange : Node3D
         var where = new Transform3D(Basis.Identity, at);
         _vehicle = VehicleBody.Create(_bp, where, true, a);
         _vehicle.AiCrewActive = _liveFire;
-        VehicleBody v = _vehicle;
+        HookVehicle(_vehicle);
+        AddChild(_vehicle);
+    }
+
+    private readonly HashSet<VehicleBody> _hooked = new();
+
+    /// <summary>Listens to a vehicle the player may ride: its status messages, its guns firing, and its seat being hit.</summary>
+    private void HookVehicle(VehicleBody v)
+    {
+        if (!_hooked.Add(v)) return;
+        v.TreeExiting += () => _hooked.Remove(v);
         v.Status += msg =>
         {
             if (v == _mount) Big(msg);
@@ -476,7 +487,6 @@ public partial class TestRange : Node3D
             Big("Your seat was hit!");
             _me.Damage(999f);
         };
-        AddChild(v);
     }
 
     // ---------- Getting in and out ----------
@@ -847,6 +857,24 @@ public partial class TestRange : Node3D
 
     public override void _UnhandledInput(InputEvent e)
     {
+        // The tactical map takes the keys while it's open; M or Esc closes it.
+        if (_map != null && _map.Visible)
+        {
+            if (e.IsActionPressed("tactical_map") || (e is InputEventKey { Pressed: true, PhysicalKeycode: Key.Escape }))
+            {
+                ToggleMap();
+                GetViewport().SetInputAsHandled();
+            }
+
+            return;
+        }
+
+        if (e.IsActionPressed("tactical_map"))
+        {
+            ToggleMap();
+            return;
+        }
+
         bool captured = Input.MouseMode == Input.MouseModeEnum.Captured;
         if (e is InputEventMouseMotion mm && captured && Mounted)
         {
@@ -1136,7 +1164,7 @@ public partial class TestRange : Node3D
         _liveChip.OffsetTop = 14;
         _liveChip.AddThemeConstantOverride("outline_size", 6);
 
-        Label hint = Ui.Small("F1 help   ·   E get in / out   ·   F torpedo / missile   ·   B bomb   ·   L live fire   ·   F8 battle drill   ·   F3 performance   ·   Tab builder");
+        Label hint = Ui.Small("F1 help   ·   E get in / out   ·   M tactical map   ·   F torpedo / missile   ·   B bomb   ·   L live fire   ·   F8 battle drill   ·   F3 performance   ·   Tab builder");
         root.AddChild(hint);
         hint.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.BottomLeft);
         hint.GrowVertical = Control.GrowDirection.Begin;
@@ -1145,6 +1173,7 @@ public partial class TestRange : Node3D
         hint.AddThemeConstantOverride("outline_size", 4);
 
         SetupDrill(root);
+        SetupCommand(root);
 
         _big = Ui.Label("", 26, Ui.Accent, "Title");
         root.AddChild(_big);
@@ -1197,6 +1226,7 @@ public partial class TestRange : Node3D
             "E get into the vehicle you're looking at. The supply pad heals you and refills ammo and fuel.\n\n" +
             "[b][color=#ffb845]Range[/color][/b]\n" +
             "L live fire: the parked vehicles' crews shoot back · T reset targets · Backspace respawn · Tab builder · Esc free the mouse\n" +
+            "M tactical map (fleet command), from a vehicle with a command console or at the command post by the depot: pick units, right click to attack, escort or move them in formation; J jumps into one; Deploy calls more in\n" +
             "F8 battle drill: two armies (about 100 vehicles; again for about 200, again to clear) fight across the range · F3 performance readout\n" +
             "[color=#73f27f]PEN[/color] got through · [color=#ff6b61]NO PEN[/color] armor stopped it (angled armor counts as thicker) · " +
             "[color=#ffcc66]RICOCHET[/color] bounced off a steep angle";

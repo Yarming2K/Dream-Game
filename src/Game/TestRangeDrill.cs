@@ -136,13 +136,8 @@ public partial class TestRange
             (string design, int faction, Vector3 pos, float yaw) = _drillQueue.Dequeue();
             Blueprint bp = DrillDesign(design, faction);
             VehicleAnalysis a = VehicleAnalysis.Analyze(bp);
-            Vector3 at = pos;
-            if (a.IsNaval) at.Y = VehicleBody.FloatHeight(a);
-            else if (a.Mode == MobilityMode.Ground) at.Y = (WorldQuery.Ground?.HeightAt(pos.X, pos.Z) ?? Ground) + VehicleBody.SpawnHeight(a);
-            var where = new Transform3D(new Basis(Vector3.Up, Mathf.DegToRad(yaw)), at);
-            VehicleBody v = VehicleBody.Create(bp, where, false, a);
-            v.Faction = faction;
-            v.AiCrewActive = true;
+            VehicleBody v = SpawnUnit(bp, faction, pos, yaw, a);
+            Transform3D where = v.Transform;
             Vector3 enemy = faction == 0 ? new Vector3(0, 0, -130f) : new Vector3(0, 0, 160f);
             if (a.IsNaval)
             {
@@ -171,15 +166,6 @@ public partial class TestRange
                 v.StopToShoot = 330f;
                 v.GoalRadius = 20f;
             }
-
-            AddChild(v);
-            v.AddChild(new Label3D
-            {
-                Text = "◆", FontSize = 40, PixelSize = 0.01f, FixedSize = true, Billboard = BaseMaterial3D.BillboardModeEnum.Enabled,
-                Modulate = faction == 0 ? BlueTeam : RedTeam, OutlineSize = 6, Position = Vector3.Up * (v.Radius * 0.6f + 2f),
-                NoDepthTest = false,
-            });
-            _drill.Add(v);
         }
 
         if (_drillLevel == 0)

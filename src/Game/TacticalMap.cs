@@ -1,0 +1,803 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using DreamGame.Core;
+using Godot;
+using NVec2 = System.Numerics.Vector2;
+
+namespace DreamGame.Game;
+
+/// <summary>
+/// Fleet command's tactical map (M, from a vehicle or post with a command console). A top-down map of
+/// the island with your units on it, and enemies only where one of your units can see them (fog of war;
+/// those it lost sight of show faded where they were last seen).
+/// <list type="bullet">
+/// <item>Left click picks a unit, drag picks a box of them (Shift adds). Ctrl+1-9 saves a group, 1-9 picks it.</item>
+/// <item>Right click gives the obvious order: on an enemy, attack it; on one of yours, escort it; on open
+/// ground or sea, move there in formation. Shift+right click patrols. H holds.</item>
+/// <item>The bar along the bottom sets the formation and the rules of engagement, and J jumps into a unit.</item>
+/// <item>Deploy (on the right) calls in more units, yours or the enemy's, from the examples and your own designs.</item>
+/// </list>
+/// Orders only reach units within the console's range (4 km). The game keeps running while the map is open.
+/// </summary>
+public partial class TacticalMap : Control
+{
+    /// <summary>The block host with the console you're commanding from (a vehicle or the command post).</summary>
+    public Func<IGridHost> ConsoleHost;
+
+    public Func<VehicleBody> PlayerVehicle;
+    public Action<VehicleBody> JumpInto;
+
+    /// <summary>Calls in a unit: design, side (0 yours, 1 enemy), where. Returns why it can't, or null.</summary>
+    public Func<Blueprint, int, Vector3, string> Deploy;
+
+    /// <summary>Shows a message on the main HUD.</summary>
+    public Action<string> Say;
+
+    /// <summary>Called when the map closes itself (the console was lost), so the game can take the mouse back.</summary>
+    public Action Closed;
+
+    private static readonly Color Friendly = new(0.35f, 0.62f, 1f), Enemy = new(1f, 0.36f, 0.3f), Mine = new(1f, 0.8f, 0.3f);
+    private static readonly Color Sea = new(0.07f, 0.15f, 0.24f);
+
+    private Vector2 _center = new(60, 0);
+    private float _zoom = 1.2f;
+    private readonly HashSet<VehicleBody> _selected = new();
+    private readonly Dictionary<int, List<VehicleBody>> _groups = new();
+    private Formation _formation = Formation.Line;
+    private bool _dragging, _panning;
+    private Vector2 _dragStart, _dragNow;
+    private ImageTexture _terrain;
+    private float _redraw, _sense;
+    private readonly Dictionary<VehicleBody, (Vector3 pos, double seen, bool now)> _spotted = new();
+    private Blueprint _placing;
+    private int _placingSide;
+    private Label _title, _info;
+    private RichTextLabel _list;
+    private readonly List<Button> _formationButtons = new(), _roeButtons = new();
+    private VBoxContainer _deployList;
+    private Button _sideButton;
+    private readonly List<(string name, Func<Blueprint> make)> _designs = new();
+
+    public override void _Ready()
+    {
+        SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
+        MouseFilter = MouseFilterEnum.Stop;
+        Visible = false;
+        BuildUi();
+    }
+
+    // ------------------------------------------------------------------ opening and closing
+
+    public void Open()
+    {
+        if (_terrain == null) _terrain = BuildTerrain();
+        Visible = true;
+        IGridHost console = ConsoleHost?.Invoke();
+        if (console?.Body != null && IsInstanceValid(console.Body))
+        {
+            Vector3 p = console.Body.GlobalPosition;
+            _center = new Vector2(p.X, p.Z);
+        }
+
+        _selected.RemoveWhere(v => !Alive(v));
+        Sense();
+        RefreshDeploy();
+        QueueRedraw();
+    }
+
+    public void Close()
+    {
+        Visible = false;
+        _placing = null;
+        _dragging = _panning = false;
+    }
+
+    private static bool Alive(VehicleBody v) => v != null && IsInstanceValid(v) && v.IsInsideTree() && v.Model.Blocks.Count > 0;
+
+    private IEnumerable<VehicleBody> Vehicles() =>
+        GridRegistry.Hosts.OfType<VehicleBody>().Where(Alive);
+
+    private Vector3 ConsolePos()
+    {
+        IGridHost h = ConsoleHost?.Invoke();
+        return h?.Body != null && IsInstanceValid(h.Body) ? h.Body.GlobalPosition : Vector3.Zero;
+    }
+
+    /// <summary>One of your AI units that the console's orders reach.</summary>
+    private bool InRange(VehicleBody v) => v.GlobalPosition.DistanceTo(ConsolePos()) <= Sensors.CommandRangeM;
+
+    private bool Commandable(VehicleBody v) => Alive(v) && v.Faction == 0 && v != PlayerVehicle?.Invoke();
+
+    // ------------------------------------------------------------------ fog of war
+
+    /// <summary>Which enemies any of your units (or you) can see right now; the rest keep their last-seen place.</summary>
+    private void Sense()
+    {
+        double now = Time.GetTicksMsec() / 1000.0;
+        List<VehicleBody> all = Vehicles().ToList();
+        List<VehicleBody> eyes = all.Where(v => v.Faction == 0).ToList();
+        foreach (VehicleBody e in all)
+        {
+            if (e.Faction == 0) continue;
+            Vector3 ep = e.GlobalPosition;
+            bool seen = false;
+            foreach (VehicleBody f in eyes)
+            {
+                Vector3 fp = f.GlobalPosition;
+                if (fp.DistanceTo(ep) > f.SightM) continue;
+                // Hills block sight (the sea and the sky don't).
+                if (!WorldQuery.GroundRay(null, fp + Vector3.Up * 3f, ep + Vector3.Up * 2f, out _, out _))
+                {
+                    seen = true;
+                    break;
+                }
+            }
+
+            if (seen) _spotted[e] = (ep, now, true);
+            else if (_spotted.TryGetValue(e, out var old)) _spotted[e] = (old.pos, old.seen, false);
+        }
+
+        foreach (VehicleBody k in _spotted.Keys.ToList())
+            if (!Alive(k) || now - _spotted[k].seen > 60.0) _spotted.Remove(k);
+    }
+
+    // ------------------------------------------------------------------ frame
+
+    public override void _Process(double delta)
+    {
+        if (!Visible) return;
+        float dt = (float)delta;
+        IGridHost console = ConsoleHost?.Invoke();
+        if (console == null)
+        {
+            Close();
+            Closed?.Invoke();
+            Say?.Invoke("Command console lost! Your units carry on with their last orders.");
+            return;
+        }
+
+        // Pan with W A S D (faster zoomed out).
+        var pan = new Vector2(
+            (Input.IsPhysicalKeyPressed(Key.D) ? 1 : 0) - (Input.IsPhysicalKeyPressed(Key.A) ? 1 : 0),
+            (Input.IsPhysicalKeyPressed(Key.S) ? 1 : 0) - (Input.IsPhysicalKeyPressed(Key.W) ? 1 : 0));
+        if (pan != Vector2.Zero) _center += pan.Normalized() * dt * 600f / _zoom;
+
+        _sense -= dt;
+        if (_sense <= 0)
+        {
+            _sense = 0.5f;
+            Sense();
+            UpdatePanels();
+        }
+
+        _redraw -= dt;
+        if (_redraw <= 0)
+        {
+            _redraw = 0.05f;
+            QueueRedraw();
+        }
+    }
+
+    private Vector2 ToScreen(Vector3 w) => Size / 2f + (new Vector2(w.X, w.Z) - _center) * _zoom;
+    private Vector2 ToWorld2(Vector2 s) => (s - Size / 2f) / _zoom + _center;
+
+    private Vector3 ToWorld(Vector2 s)
+    {
+        Vector2 g = ToWorld2(s);
+        float h = WorldQuery.Ground?.HeightAt(g.X, g.Y) ?? 0f;
+        return new Vector3(g.X, Mathf.Max(h, Ocean.Level), g.Y);
+    }
+
+    // ------------------------------------------------------------------ drawing
+
+    private ImageTexture BuildTerrain()
+    {
+        HeightField f = WorldQuery.Ground;
+        if (f == null) return null;
+        var img = Image.CreateEmpty(f.Width, f.Depth, false, Image.Format.Rgb8);
+        var light = new Vector3(-1, 1.6f, -1).Normalized();
+        for (int z = 0; z < f.Depth; z++)
+        for (int x = 0; x < f.Width; x++)
+        {
+            float h = f.Heights[z * f.Width + x];
+            Color c;
+            if (h < Ocean.Level)
+            {
+                float k = Mathf.Clamp(-h / 26f, 0, 1);
+                c = new Color(0.17f, 0.34f, 0.46f).Lerp(Sea, k);
+            }
+            else
+            {
+                float hl = f.Heights[z * f.Width + Math.Max(x - 1, 0)], hr = f.Heights[z * f.Width + Math.Min(x + 1, f.Width - 1)];
+                float hd = f.Heights[Math.Max(z - 1, 0) * f.Width + x], hu = f.Heights[Math.Min(z + 1, f.Depth - 1) * f.Width + x];
+                var n = new Vector3(hl - hr, 2f, hd - hu).Normalized();
+                float shade = Mathf.Clamp(0.55f + 0.6f * n.Dot(light), 0.6f, 1.2f);
+                c = h < Terrain.LandHeight + 0.6f ? new Color(0.62f, 0.57f, 0.42f)
+                    : new Color(0.3f, 0.38f, 0.22f).Lerp(new Color(0.5f, 0.48f, 0.42f), Mathf.Clamp((h - 6f) / 14f, 0, 1));
+                c = new Color(c.R * shade, c.G * shade, c.B * shade);
+            }
+
+            img.SetPixel(x, z, c);
+        }
+
+        return ImageTexture.CreateFromImage(img);
+    }
+
+    public override void _Draw()
+    {
+        DrawRect(new Rect2(Vector2.Zero, Size), Sea);
+        HeightField f = WorldQuery.Ground;
+        if (_terrain != null && f != null)
+        {
+            Vector2 a = ToScreen(new Vector3(f.Origin.X, 0, f.Origin.Y));
+            Vector2 b = ToScreen(new Vector3(f.Origin.X + (f.Width - 1) * f.Spacing, 0, f.Origin.Y + (f.Depth - 1) * f.Spacing));
+            DrawTextureRect(_terrain, new Rect2(a, b - a), false);
+            // The airstrip.
+            Vector2 s0 = ToScreen(new Vector3(Terrain.StripX - Terrain.StripHalfWidth, 0, -Terrain.StripHalfLength));
+            Vector2 s1 = ToScreen(new Vector3(Terrain.StripX + Terrain.StripHalfWidth, 0, Terrain.StripHalfLength));
+            DrawRect(new Rect2(s0, s1 - s0), new Color(0.45f, 0.45f, 0.43f, 0.85f));
+        }
+
+        Font font = Ui.BodyFont;
+        // A grid every 100 m (every 500 m when zoomed out), labeled.
+        float step = _zoom < 0.25f ? 500f : 100f;
+        Vector2 w0 = ToWorld2(Vector2.Zero), w1 = ToWorld2(Size);
+        var grid = new Color(1, 1, 1, 0.06f);
+        for (float x = Mathf.Floor(w0.X / step) * step; x <= w1.X; x += step)
+            DrawLine(ToScreen(new Vector3(x, 0, w0.Y)), ToScreen(new Vector3(x, 0, w1.Y)), grid);
+        for (float z = Mathf.Floor(w0.Y / step) * step; z <= w1.Y; z += step)
+            DrawLine(ToScreen(new Vector3(w0.X, 0, z)), ToScreen(new Vector3(w1.X, 0, z)), grid);
+
+        // Command range round the console.
+        Vector3 cp = ConsolePos();
+        DrawArc(ToScreen(cp), Sensors.CommandRangeM * _zoom, 0, Mathf.Tau, 128, new Color(Mine, 0.35f), 1.5f, true);
+        DrawCircle(ToScreen(cp), 5f, Mine);
+
+        VehicleBody me = PlayerVehicle?.Invoke();
+        List<VehicleBody> all = Vehicles().ToList();
+
+        // Sight circles of the units you've picked.
+        foreach (VehicleBody v in _selected)
+            if (Alive(v)) DrawArc(ToScreen(v.GlobalPosition), v.SightM * _zoom, 0, Mathf.Tau, 64, new Color(Friendly, 0.12f), 1f, true);
+
+        // What each of your units is doing.
+        foreach (VehicleBody v in all)
+        {
+            if (v.Faction != 0 || v.Order == OrderKind.None) continue;
+            Vector2 at = ToScreen(v.GlobalPosition);
+            bool picked = _selected.Contains(v);
+            float alpha = picked ? 0.9f : 0.35f;
+            switch (v.Order)
+            {
+                case OrderKind.Move:
+                case OrderKind.Hold:
+                    if (v.Order == OrderKind.Move) DrawDashedLine(at, ToScreen(v.OrderPoint), new Color(Friendly, alpha), 1.5f, 6f);
+                    break;
+                case OrderKind.Attack when Alive(v.OrderTarget):
+                    DrawLine(at, ToScreen(v.OrderTarget.GlobalPosition), new Color(Enemy, alpha), 1.5f, true);
+                    break;
+                case OrderKind.Escort when Alive(v.OrderTarget):
+                    DrawDashedLine(at, ToScreen(v.OrderTarget.GlobalPosition), new Color(0.6f, 0.9f, 1f, alpha), 1.2f, 3f);
+                    break;
+                case OrderKind.Patrol:
+                    DrawDashedLine(at, ToScreen(v.OrderPoint), new Color(0.7f, 1f, 0.7f, alpha), 1.2f, 8f);
+                    break;
+            }
+        }
+
+        // Units.
+        foreach (VehicleBody v in all)
+        {
+            if (v.Faction == 0) DrawUnit(v, v.GlobalPosition, v == me ? Mine : InRange(v) ? Friendly : Friendly.Darkened(0.45f), 1f, font);
+        }
+
+        foreach ((VehicleBody v, (Vector3 pos, double seen, bool now)) in _spotted)
+        {
+            if (!Alive(v)) continue;
+            DrawUnit(v, now ? v.GlobalPosition : pos, Enemy, now ? 1f : 0.4f, font);
+            if (!now) DrawString(font, ToScreen(pos) + new Vector2(8, -8), "?", HorizontalAlignment.Left, -1, 13, new Color(Enemy, 0.7f));
+        }
+
+        // The box being dragged out.
+        if (_dragging && _dragStart.DistanceTo(_dragNow) > 4f)
+        {
+            var r = new Rect2(_dragStart, _dragNow - _dragStart).Abs();
+            DrawRect(r, new Color(1, 1, 1, 0.08f));
+            DrawRect(r, new Color(1, 1, 1, 0.7f), false, 1f);
+        }
+
+        // Placing a unit: a ghost marker under the cursor.
+        if (_placing != null)
+        {
+            Vector2 m = GetLocalMousePosition();
+            DrawCircle(m, 7f, new Color(_placingSide == 0 ? Friendly : Enemy, 0.6f));
+            DrawString(font, m + new Vector2(12, 4), $"{_placing.Name}  (click to place, right click to stop)", HorizontalAlignment.Left, -1, 14, Colors.White);
+        }
+
+        // Scale bar.
+        float bar = step * _zoom;
+        var b0 = new Vector2(24, Size.Y - 96);
+        DrawLine(b0, b0 + new Vector2(bar, 0), Colors.White, 2f);
+        DrawString(font, b0 + new Vector2(0, -6), step >= 1000 ? $"{step / 1000:0} km" : $"{step:0} m", HorizontalAlignment.Left, -1, 13, Colors.White);
+    }
+
+    /// <summary>A unit's icon: a block for land, a hull shape for ships, a chevron for aircraft, facing its heading.</summary>
+    private void DrawUnit(VehicleBody v, Vector3 pos, Color c, float alpha, Font font)
+    {
+        Vector2 at = ToScreen(pos);
+        if (at.X < -40 || at.Y < -40 || at.X > Size.X + 40 || at.Y > Size.Y + 40) return;
+        Vector3 f3 = -v.GlobalTransform.Basis.Z;
+        var fwd = new Vector2(f3.X, f3.Z);
+        fwd = fwd.LengthSquared() > 1e-4f ? fwd.Normalized() : new Vector2(0, -1);
+        var right = new Vector2(-fwd.Y, fwd.X);
+        var col = new Color(c, alpha);
+        Vector2[] poly;
+        if (v.IsAir)
+        {
+            float s = 9f;
+            poly = new[] { at + fwd * s, at - fwd * s * 0.6f + right * s * 0.8f, at - fwd * s * 0.2f, at - fwd * s * 0.6f - right * s * 0.8f };
+        }
+        else if (v.IsNaval)
+        {
+            float len = Mathf.Max(14f, v.Radius * 1.6f * _zoom), half = Mathf.Max(4f, len * 0.22f);
+            poly = new[] { at + fwd * len * 0.6f, at + fwd * len * 0.25f + right * half, at - fwd * len * 0.45f + right * half, at - fwd * len * 0.45f - right * half, at + fwd * len * 0.25f - right * half };
+        }
+        else
+        {
+            float s = Mathf.Max(6f, v.Radius * 0.9f * _zoom);
+            poly = new[] { at + (fwd + right * 0.75f) * s, at + (-fwd + right * 0.75f) * s, at + (-fwd - right * 0.75f) * s, at + (fwd - right * 0.75f) * s };
+        }
+
+        DrawColoredPolygon(poly, col);
+        var outline = new Vector2[poly.Length + 1];
+        poly.CopyTo(outline, 0);
+        outline[^1] = poly[0];
+        bool picked = _selected.Contains(v);
+        DrawPolyline(outline, picked ? Colors.White : new Color(0, 0, 0, 0.6f * alpha), picked ? 2f : 1f, true);
+        if (picked) DrawArc(at, 16f, 0, Mathf.Tau, 24, Colors.White, 1.5f, true);
+
+        // Health bar, and a name when zoomed in.
+        float hp = v.Health;
+        DrawRect(new Rect2(at + new Vector2(-10, 12), new Vector2(20, 3)), new Color(0, 0, 0, 0.6f * alpha));
+        DrawRect(new Rect2(at + new Vector2(-10, 12), new Vector2(20 * hp, 3)), new Color(Ui.Grade(hp, 0.35f, 0.7f), alpha));
+        if (_zoom > 0.7f || picked)
+            DrawString(font, at + new Vector2(-40, 28), v.ShortName, HorizontalAlignment.Center, 80, 12, new Color(1, 1, 1, 0.8f * alpha));
+    }
+
+    // ------------------------------------------------------------------ input
+
+    public override void _GuiInput(InputEvent e)
+    {
+        if (e is InputEventMouseButton mb)
+        {
+            switch (mb.ButtonIndex)
+            {
+                case MouseButton.WheelUp when mb.Pressed:
+                    ZoomAt(mb.Position, 1.15f);
+                    break;
+                case MouseButton.WheelDown when mb.Pressed:
+                    ZoomAt(mb.Position, 1f / 1.15f);
+                    break;
+                case MouseButton.Middle:
+                    _panning = mb.Pressed;
+                    break;
+                case MouseButton.Left when _placing != null:
+                    if (mb.Pressed) PlaceUnit(mb.Position);
+                    break;
+                case MouseButton.Left:
+                    if (mb.Pressed)
+                    {
+                        _dragging = true;
+                        _dragStart = _dragNow = mb.Position;
+                    }
+                    else if (_dragging)
+                    {
+                        _dragging = false;
+                        Select(mb.Position, mb.ShiftPressed);
+                    }
+
+                    break;
+                case MouseButton.Right when mb.Pressed:
+                    if (_placing != null)
+                    {
+                        _placing = null;
+                        break;
+                    }
+
+                    OrderAt(mb.Position, mb.ShiftPressed);
+                    break;
+            }
+
+            AcceptEvent();
+        }
+        else if (e is InputEventMouseMotion mm)
+        {
+            if (_panning) _center -= mm.Relative / _zoom;
+            if (_dragging) _dragNow = mm.Position;
+            AcceptEvent();
+        }
+    }
+
+    public override void _UnhandledInput(InputEvent e)
+    {
+        if (!Visible || e is not InputEventKey { Pressed: true, Echo: false } k) return;
+        bool ctrl = k.CtrlPressed || k.MetaPressed;
+        if (k.PhysicalKeycode >= Key.Key1 && k.PhysicalKeycode <= Key.Key9)
+        {
+            int n = (int)(k.PhysicalKeycode - Key.Key1) + 1;
+            if (ctrl)
+            {
+                _groups[n] = _selected.ToList();
+                Say?.Invoke($"Group {n}: {_selected.Count} unit(s)");
+            }
+            else if (_groups.TryGetValue(n, out List<VehicleBody> g))
+            {
+                _selected.Clear();
+                foreach (VehicleBody v in g)
+                    if (Alive(v)) _selected.Add(v);
+                if (_selected.Count > 0)
+                {
+                    Vector3 mid = _selected.Aggregate(Vector3.Zero, (a, v) => a + v.GlobalPosition) / _selected.Count;
+                    if (k.ShiftPressed) _center = new Vector2(mid.X, mid.Z);
+                }
+            }
+
+            UpdatePanels();
+        }
+        else
+            switch (k.PhysicalKeycode)
+            {
+                case Key.H:
+                    Hold();
+                    break;
+                case Key.J:
+                    Jump();
+                    break;
+                case Key.Escape when _placing != null:
+                    _placing = null;
+                    break;
+                case Key.F:
+                    SetFormation((Formation)(((int)_formation + 1) % 4));
+                    break;
+                default:
+                    return;
+            }
+
+        GetViewport().SetInputAsHandled();
+    }
+
+    private void ZoomAt(Vector2 screen, float k)
+    {
+        Vector2 before = ToWorld2(screen);
+        _zoom = Mathf.Clamp(_zoom * k, 0.05f, 12f);
+        _center += before - ToWorld2(screen);
+    }
+
+    /// <summary>The unit under a screen point (yours, or an enemy you can see), if any.</summary>
+    private VehicleBody UnitAt(Vector2 screen, bool friendly)
+    {
+        VehicleBody best = null;
+        float bestD = 14f;
+        foreach (VehicleBody v in Vehicles())
+        {
+            if ((v.Faction == 0) != friendly) continue;
+            Vector3 pos = v.GlobalPosition;
+            if (!friendly)
+            {
+                if (!_spotted.TryGetValue(v, out var s)) continue;
+                pos = s.now ? v.GlobalPosition : s.pos;
+            }
+
+            float d = ToScreen(pos).DistanceTo(screen);
+            if (d < bestD)
+            {
+                bestD = d;
+                best = v;
+            }
+        }
+
+        return best;
+    }
+
+    private void Select(Vector2 releasedAt, bool add)
+    {
+        if (!add) _selected.Clear();
+        if (_dragStart.DistanceTo(releasedAt) < 5f)
+        {
+            VehicleBody v = UnitAt(releasedAt, true);
+            if (v != null && Commandable(v))
+            {
+                if (add && _selected.Contains(v)) _selected.Remove(v);
+                else _selected.Add(v);
+            }
+        }
+        else
+        {
+            var r = new Rect2(_dragStart, releasedAt - _dragStart).Abs();
+            foreach (VehicleBody v in Vehicles())
+                if (Commandable(v) && r.HasPoint(ToScreen(v.GlobalPosition))) _selected.Add(v);
+        }
+
+        UpdatePanels();
+    }
+
+    /// <summary>The units picked that the console's orders reach (it says how many are out of range).</summary>
+    private List<VehicleBody> Reachable()
+    {
+        List<VehicleBody> units = _selected.Where(Alive).ToList();
+        List<VehicleBody> ok = units.Where(InRange).ToList();
+        if (ok.Count < units.Count)
+            Say?.Invoke($"{units.Count - ok.Count} unit(s) out of command range (4 km): they carry on with their last orders.");
+        return ok;
+    }
+
+    /// <summary>A right click: attack an enemy, escort a friend, or move (Shift: patrol) to a spot, in formation.</summary>
+    private void OrderAt(Vector2 screen, bool patrol)
+    {
+        List<VehicleBody> units = Reachable();
+        if (units.Count == 0) return;
+        VehicleBody enemy = UnitAt(screen, false);
+        if (enemy != null)
+        {
+            foreach (VehicleBody v in units) v.GiveOrder(OrderKind.Attack, enemy.GlobalPosition, enemy);
+            Say?.Invoke($"{units.Count} unit(s): attack {enemy.ShortName}");
+            UpdatePanels();
+            return;
+        }
+
+        VehicleBody friend = UnitAt(screen, true);
+        if (friend != null && !_selected.Contains(friend))
+        {
+            foreach (VehicleBody v in units) v.GiveOrder(OrderKind.Escort, friend.GlobalPosition, friend);
+            Say?.Invoke($"{units.Count} unit(s): escort {friend.ShortName}");
+            UpdatePanels();
+            return;
+        }
+
+        Vector3 dest = ToWorld(screen);
+        bool water = (WorldQuery.Ground?.HeightAt(dest.X, dest.Z) ?? 0f) < Ocean.Level - 1.5f;
+        // Ships only go where there's water, land vehicles only where there's land; aircraft anywhere.
+        List<VehicleBody> going = units.Where(v => v.IsAir || (v.IsNaval ? water : !water)).ToList();
+        int refused = units.Count - going.Count;
+        if (going.Count == 0)
+        {
+            Say?.Invoke(water ? "Land units can't go out to sea." : "Ships can't go on land.");
+            return;
+        }
+
+        Vector3 mid = going.Aggregate(Vector3.Zero, (a, v) => a + v.GlobalPosition) / going.Count;
+        float spacing = going.Max(v => v.Radius) * 2f + (going.Any(v => v.IsNaval) ? 25f : 8f);
+        List<NVec2> slots = Formations.Place(_formation, going.Count, spacing, new NVec2(dest.X, dest.Z), new NVec2(dest.X - mid.X, dest.Z - mid.Z));
+        int[] assign = Formations.Assign(going.Select(v => new NVec2(v.GlobalPosition.X, v.GlobalPosition.Z)).ToList(), slots);
+        for (int i = 0; i < going.Count; i++)
+        {
+            NVec2 s = slots[assign[i]];
+            float h = WorldQuery.Ground?.HeightAt(s.X, s.Y) ?? 0f;
+            going[i].GiveOrder(patrol ? OrderKind.Patrol : OrderKind.Move, new Vector3(s.X, Mathf.Max(h, Ocean.Level), s.Y));
+        }
+
+        Say?.Invoke($"{going.Count} unit(s): {(patrol ? "patrol to" : "move to")} there in {Formations.NameOf(_formation).ToLowerInvariant()}" +
+                    (refused > 0 ? $" ({refused} can't go there)" : ""));
+        UpdatePanels();
+    }
+
+    private void Hold()
+    {
+        List<VehicleBody> units = Reachable();
+        foreach (VehicleBody v in units) v.GiveOrder(OrderKind.Hold, v.GlobalPosition);
+        if (units.Count > 0) Say?.Invoke($"{units.Count} unit(s): hold position");
+        UpdatePanels();
+    }
+
+    private void SetRoe(Engagement roe)
+    {
+        List<VehicleBody> units = Reachable();
+        foreach (VehicleBody v in units) v.Roe = roe;
+        if (units.Count > 0)
+            Say?.Invoke($"{units.Count} unit(s): " + roe switch
+            {
+                Engagement.FireAtWill => "fire at will",
+                Engagement.ReturnFire => "return fire only",
+                _ => "hold fire",
+            });
+        UpdatePanels();
+    }
+
+    private void SetFormation(Formation f)
+    {
+        _formation = f;
+        for (int i = 0; i < _formationButtons.Count; i++) _formationButtons[i].SetPressedNoSignal(i == (int)f);
+    }
+
+    private void Jump()
+    {
+        VehicleBody v = _selected.FirstOrDefault(Alive);
+        if (v == null)
+        {
+            Say?.Invoke("Pick a unit first, then J jumps into it.");
+            return;
+        }
+
+        Close();
+        JumpInto?.Invoke(v);
+    }
+
+    private void PlaceUnit(Vector2 screen)
+    {
+        if (_placing == null || Deploy == null) return;
+        Vector3 at = ToWorld(screen);
+        string why = Deploy(_placing, _placingSide, at);
+        Say?.Invoke(why ?? $"{(_placingSide == 0 ? "Your" : "Enemy")} {_placing.Name.Split(" (")[0]} called in");
+    }
+
+    // ------------------------------------------------------------------ panels
+
+    private void BuildUi()
+    {
+        _title = Ui.Label("TACTICAL MAP", 20, Ui.Accent, "Title");
+        AddChild(_title);
+        _title.Position = new Vector2(24, 16);
+        Label hint = Ui.Small("Left click / drag: pick units   ·   Right click: attack, escort or move   ·   Shift+right click: patrol   ·   H hold   ·   Ctrl+1-9 save a group, 1-9 pick it   ·   F formation   ·   J jump in   ·   Wheel zoom, W A S D pan   ·   M close");
+        AddChild(hint);
+        hint.Position = new Vector2(24, 48);
+        hint.MouseFilter = MouseFilterEnum.Ignore;
+
+        // What's picked, on the left.
+        var left = new PanelContainer { MouseFilter = MouseFilterEnum.Stop };
+        AddChild(left);
+        left.Position = new Vector2(16, 80);
+        left.CustomMinimumSize = new Vector2(300, 0);
+        VBoxContainer lc = Ui.Column(6);
+        left.AddChild(lc);
+        _info = Ui.Heading("No units picked");
+        lc.AddChild(_info);
+        _list = Ui.Rich();
+        _list.CustomMinimumSize = new Vector2(280, 0);
+        lc.AddChild(_list);
+
+        // Orders along the bottom.
+        var bar = new PanelContainer { MouseFilter = MouseFilterEnum.Stop };
+        AddChild(bar);
+        bar.SetAnchorsAndOffsetsPreset(LayoutPreset.CenterBottom);
+        bar.GrowHorizontal = GrowDirection.Both;
+        bar.GrowVertical = GrowDirection.Begin;
+        bar.OffsetBottom = -14;
+        HBoxContainer row = Ui.Row(6);
+        bar.AddChild(row);
+        row.AddChild(Ui.Caption("Formation"));
+        foreach (Formation f in Enum.GetValues<Formation>())
+        {
+            Formation pick = f;
+            Button b = Ui.Button(Formations.NameOf(f), () => SetFormation(pick), "Formation for the next move (F cycles)", "Pill");
+            b.ToggleMode = true;
+            b.FocusMode = FocusModeEnum.None;
+            _formationButtons.Add(b);
+            row.AddChild(b);
+        }
+
+        row.AddChild(Ui.Caption("  Fire"));
+        foreach ((Engagement roe, string label, string tip) in new[]
+                 {
+                     (Engagement.FireAtWill, "At will", "Shoot any enemy in reach"),
+                     (Engagement.ReturnFire, "Return", "Only shoot back at what shoots at them, or what they were told to attack"),
+                     (Engagement.HoldFire, "Hold", "Don't shoot at all"),
+                 })
+        {
+            Engagement pick = roe;
+            Button b = Ui.Button(label, () => SetRoe(pick), tip, "Pill");
+            b.FocusMode = FocusModeEnum.None;
+            _roeButtons.Add(b);
+            row.AddChild(b);
+        }
+
+        Button hold = Ui.Button("Hold (H)", Hold, "Stop and hold where they are");
+        hold.FocusMode = FocusModeEnum.None;
+        row.AddChild(hold);
+        Button jump = Ui.Button("Jump in (J)", Jump, "Take over the first unit picked", "PrimaryButton");
+        jump.FocusMode = FocusModeEnum.None;
+        row.AddChild(jump);
+        SetFormation(_formation);
+
+        // Deploy, on the right.
+        var right = new PanelContainer { MouseFilter = MouseFilterEnum.Stop };
+        AddChild(right);
+        right.SetAnchorsAndOffsetsPreset(LayoutPreset.TopRight);
+        right.GrowHorizontal = GrowDirection.Begin;
+        right.OffsetRight = -16;
+        right.OffsetTop = 80;
+        VBoxContainer rc = Ui.Column(6);
+        right.AddChild(rc);
+        rc.AddChild(Ui.Heading("Deploy"));
+        rc.AddChild(Ui.Wrapped("Call in more units: pick a design, then click the map (land units on land, ships at sea).", 13, Ui.Dim));
+        _sideButton = Ui.Button("Side: yours", () =>
+        {
+            _placingSide = 1 - _placingSide;
+            _sideButton.Text = _placingSide == 0 ? "Side: yours" : "Side: enemy";
+        }, "Whose side the units you call in fight on");
+        _sideButton.FocusMode = FocusModeEnum.None;
+        rc.AddChild(_sideButton);
+        var scroll = new ScrollContainer { CustomMinimumSize = new Vector2(240, 360), HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled };
+        rc.AddChild(scroll);
+        _deployList = Ui.Column(4);
+        _deployList.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+        scroll.AddChild(_deployList);
+    }
+
+    /// <summary>The designs that can be called in: the examples, then your own saved designs.</summary>
+    private void RefreshDeploy()
+    {
+        _designs.Clear();
+        foreach (Blueprint ex in ExampleDesigns.All)
+        {
+            Blueprint copy = ex;
+            _designs.Add((ex.Name, () => copy));
+        }
+
+        const string dir = "user://blueprints";
+        DirAccess.MakeDirRecursiveAbsolute(dir);
+        foreach (string file in DirAccess.GetFilesAt(dir).Where(f => f.EndsWith(".json")).OrderBy(f => f))
+        {
+            string path = $"{dir}/{file}";
+            _designs.Add((file[..^5], () =>
+            {
+                try
+                {
+                    return Blueprint.FromJson(FileAccess.GetFileAsString(path));
+                }
+                catch (FormatException)
+                {
+                    return null;
+                }
+            }));
+        }
+
+        foreach (Node n in _deployList.GetChildren()) n.QueueFree();
+        foreach ((string name, Func<Blueprint> make) in _designs)
+        {
+            Func<Blueprint> mk = make;
+            Button b = Ui.Button(name, () =>
+            {
+                _placing = mk();
+                if (_placing == null) Say?.Invoke("That design couldn't be read.");
+            }, "Pick, then click the map to place");
+            b.FocusMode = FocusModeEnum.None;
+            b.Alignment = HorizontalAlignment.Left;
+            b.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+            _deployList.AddChild(b);
+        }
+    }
+
+    private void UpdatePanels()
+    {
+        List<VehicleBody> units = _selected.Where(Alive).ToList();
+        _info.Text = units.Count == 0 ? "No units picked" : units.Count == 1 ? units[0].ShortName : $"{units.Count} units picked";
+        if (units.Count == 0)
+        {
+            int yours = Vehicles().Count(Commandable), seen = _spotted.Count(s => s.Value.now);
+            _list.Text = $"[color={Ui.Hex(Ui.Dim)}]{yours} of your units, {seen} enemies in sight. Drag a box round some of yours to pick them.[/color]";
+            return;
+        }
+
+        string Order(VehicleBody v) => v.Order switch
+        {
+            OrderKind.Move => "moving",
+            OrderKind.Attack => Alive(v.OrderTarget) ? $"attacking {v.OrderTarget.ShortName}" : "attacking",
+            OrderKind.Escort => Alive(v.OrderTarget) ? $"escorting {v.OrderTarget.ShortName}" : "escorting",
+            OrderKind.Patrol => "patrolling",
+            OrderKind.Hold => "holding",
+            _ => "no orders",
+        };
+        string Roe(VehicleBody v) => v.Roe switch { Engagement.FireAtWill => "fire at will", Engagement.ReturnFire => "return fire", _ => "hold fire" };
+        var lines = new List<string>();
+        foreach (VehicleBody v in units.Take(12))
+        {
+            string range = InRange(v) ? "" : $"  [color={Ui.Hex(Ui.Warn)}]out of range[/color]";
+            lines.Add($"[b]{v.ShortName}[/b]  [color={Ui.Hex(Ui.Grade(v.Health, 0.35f, 0.7f))}]{v.Health * 100:0}%[/color]  " +
+                      $"[color={Ui.Hex(Ui.Dim)}]{Order(v)} · {Roe(v)}{(v.UnderFire ? " · under fire" : "")}[/color]{range}");
+        }
+
+        if (units.Count > 12) lines.Add($"[color={Ui.Hex(Ui.Dim)}]and {units.Count - 12} more[/color]");
+        _list.Text = string.Join("\n", lines);
+    }
+}

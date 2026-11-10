@@ -75,6 +75,18 @@ These three have to feel great, or the game fails:
 - **Copy and paste.** Ctrl+C (or the box tool's Copy mode) and drag out a box: everything in it goes on the clipboard. Then click to paste it anywhere; R, T and G turn it, H flips it left to right, Esc or a right click stops. Mirror mode pastes both sides. "Save part" keeps the clipboard as a part file; Load, Parts brings it back to paste into any design.
 - **Armor view** (O, or the ARMOR button): every block colored by its armor thickness, from grey (under 10 mm) through blue, green, yellow and orange to red (200 mm and up), with a legend. Parts that aren't armor go dark.
 
+### Fleet command
+Command the units you aren't driving yourself, from a command ship, a command vehicle, or a ground post.
+- **The command console** (Control) is screens and radios. From a vehicle with a working one, or standing at a command post (one stands by the depot), M opens the **tactical map**. The Corsair, the Zephyr airship and the Colossus carry one.
+- **The tactical map** is a top-down view of the battle that keeps running while it's open. Your units are blue (yours gold); an enemy shows only while one of your units can see it: tanks see about 1 km, ships 2.5 km, aircraft 3 km, more with a **search radar** (Control) aboard, and hills block the view. One you've lost sight of stays faded where it was last seen, for a minute. Each unit has a health bar and a line showing what it's doing.
+- **Picking units**: click one, drag a box round several, Shift adds. Ctrl+1-9 saves the pick as a group, 1-9 picks it again (Shift+number also centers on it).
+- **Orders** come from a right click: on an enemy, **attack** it (they close in and keep every gun on it); on one of yours, **escort** it; on open ground or sea, **move** there in the chosen formation (line abreast, wedge, column or box; F cycles). Shift+right click **patrols** back and forth. H **holds**. Ships only go to water, land units only to land; aircraft circle over wherever they're sent.
+- **Rules of engagement**: fire at will, return fire (only at what's shooting at them, or what they were told to attack), or hold fire.
+- **Command range**: orders reach 4 km from the console. Units further out keep their last orders. If the console is destroyed, the map closes and everyone carries on with what they were last told.
+- **Jump in** (J) takes over the first unit picked: you move into its driver's seat. When you leave, it goes back to its orders.
+- **Deploy** calls in more units from the map: any example or your own saved design, on your side or the enemy's, placed where you click.
+- What's next for command: zones and objectives to fight over, enemy commanders that give their own orders, and supply.
+
 ### Style rules
 What every part should follow, so a design reads as one machine however odd it is:
 1. **Flat faces, chamfered edges.** Curves only where something turns or holds pressure: wheels, barrels, tanks, rotors, round hulls.
@@ -221,6 +233,7 @@ Each milestone is playable on its own.
    - **Air** *(built)*: wing panels and self-mapping control surfaces, air propellers, aero engines, jets, rotors, lift fans and gas cells; planes (mouse aim), helicopters, VTOL and drones (flown by remote), airships; bombs with a bombsight, guided missiles built from parts (optical or radar), a 40 mm autocannon with air-burst flak; an airstrip, a helipad, and enemy aircraft on the range.
    - **Scale** *(built)*: colossal machines, 300 m and up. Big multi-cell blocks, chunked drawing and merged collision, bricked buoyancy, a 320 m build area, box fill / hollow / clear tools, background analysis, the Colossus battleship and the fleet anchorage.
    - **Looks and firepower** *(built)*: merged hull surfaces with chamfers, shading and weathering; detailed block models; the Colossus armed with 84 guns, torpedoes and missiles; firing arcs, the anti-aircraft watch and a grouped weapons HUD.
+   - **Fleet command** *(built)*: the command console and search radar, the command post, the tactical map with fog of war, picking and groups, move / attack / escort / patrol / hold orders in formation, rules of engagement, command range, jumping into units, and deploying more.
    - **Looks and building** *(built)*: the shape kit, paint jobs with ship rules, glazing and the pilot seat, detail parts, joints, copy and paste with saved parts, the armor view, and the examples rebuilt with them.
    - **Big battles** *(built)*: shells as data, two-batch tracers, ground and vehicle checks in C#, parking, far models, shared meshes, effect budgets, the F3 performance readout and the F8 battle drill.
    - Not yet: giant aircraft and land battleships. They can be built from the same blocks, but their wings and tracks are still worked out panel by panel, so a giant one costs more to fly than it needs to.

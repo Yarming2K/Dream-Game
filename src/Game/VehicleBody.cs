@@ -264,6 +264,7 @@ public partial class VehicleBody : RigidBody3D, IGridHost
     /// <summary>Recomputes everything that depends on which blocks are left.</summary>
     public void RefreshStats()
     {
+        RefreshCommandParts();
         float mass = Mathf.Max(Model.TotalMassKg(), 50f);
         Mass = mass;
         CenterOfMass = Model.CenterOfMass().G();
@@ -383,6 +384,7 @@ public partial class VehicleBody : RigidBody3D, IGridHost
         _crewStamp++;
         _tick++;
         long t0 = Perf.Now;
+        OrdersTick();
         SeatRt driver = DriverSeat();
         bool playerDrives = driver != null && driver.Occupant == Occupant.Player;
         if (playerDrives)

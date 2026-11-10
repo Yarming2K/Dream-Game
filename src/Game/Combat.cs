@@ -287,6 +287,7 @@ public partial class Combat : Node3D
                     OrderedHit first = damaged[0].Item1;
                     Vector3 at = _hitPoints[first];
                     var firstHost = (IGridHost)first.Owner;
+                    if (firstHost is VehicleBody victim) victim.NoteAttack(p.Owner as VehicleBody);
                     Node3D surface = IsInstanceValid(firstHost.Body) ? firstHost.View.SectionNode(first.Block.Section) : null;
                     if (p.Small) Effects.BulletImpact(this, at, _hitNormals[first], dir, true, surface);
                     else Effects.Impact(this, at, _hitNormals[first], dir, reports[0].Kind, p.Shell.CaliberMm, surface);
@@ -327,6 +328,7 @@ public partial class Combat : Node3D
         if (_hits.Count > 0)
         {
             OrderedHit first = _hits[0];
+            if (first.Owner is VehicleBody victim) victim.NoteAttack(p.Owner as VehicleBody);
             Vector3 at = _hitPoints[first];
             float eff = DamageModel.EffectiveArmor(first.Block.Def.ArmorMm, first.AngleDeg);
             Vector3 center = p.Shell.HePenMm >= eff ? at + dir * Conv.CS * 0.7f : at - dir * 0.05f;

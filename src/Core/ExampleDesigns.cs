@@ -412,6 +412,9 @@ public static class ExampleDesigns
         // Bridge amidships, with windows all round.
         d.Set(0, deck + 1, -1, "driver_seat");
         d.Set(0, deck + 2, -1, "commander_seat");
+        // A command console: she can lead a flotilla (M for the tactical map).
+        d.Set(1, deck + 1, 0, "command_console");
+        d.Set(0, deck + 4, 2, "radar");
         d.Fill(-1, 1, deck + 2, deck + 2, -2, -2, "glazing");
         d.Fill(-2, -2, deck + 2, deck + 2, -1, 2, "glazing");
         d.Fill(2, 2, deck + 2, deck + 2, -1, 2, "glazing");
@@ -697,6 +700,9 @@ public static class ExampleDesigns
         // Gondola: crew, engine and gun.
         d.Set(0, 1, -3, "driver_seat");
         d.Set(0, 1, -2, "gunner_seat");
+        // A flying command post: command console and radar in the gondola.
+        d.Set(0, 1, 0, "command_console");
+        d.Set(0, 0, 1, "radar", Orient(new Int3(0, 1, 0), new Int3(0, 0, -1)));
         d.Set(0, 1, 2, "engine_large");
         d.Set(-1, 1, 2, "fuel_tank");
         d.Set(1, 1, 2, "fuel_tank");
@@ -909,6 +915,9 @@ public static class ExampleDesigns
         // Bridge tower amidships-forward, stepped in two tiers, with the helm and the commander up top.
         d.Set(0, deck + 19, -107, "driver_seat");
         d.Set(1, deck + 19, -107, "commander_seat");
+        // The flagship: a command console on the bridge and a search radar on the tower roof.
+        d.Set(-1, deck + 19, -106, "command_console");
+        d.Set(0, deck + 21, -101, "radar");
         void Box(int x, int y0, int y1, int z0, int z1)
         {
             d.Tile(-x, x, y0, y1, z0, z0, "hull_plate", endWall, "armor_light");
@@ -1004,6 +1013,36 @@ public static class ExampleDesigns
     }
 
     /// <summary>A small bunker with an ammo store inside. Get a shell into it and watch.</summary>
+    /// <summary>
+    /// A command post: a heavy concrete-and-steel hut with a command console inside, slit windows, a search
+    /// radar and an antenna on the roof. Stand next to it and press M to command your units.
+    /// </summary>
+    public static Blueprint CommandPost()
+    {
+        var d = new Draft();
+        d.Set(0, 1, 0, "command_console");
+        d.Set(-1, 1, 0, "frame");
+        d.Set(1, 1, 0, "frame");
+        d.Fill(-2, 2, 0, 0, -2, 2, "armor_heavy");
+        foreach ((int x, int z) in new[] { (-2, 0), (2, 0), (0, -2), (0, 2) }) d.Set(x, 2, z, "glazing");
+        d.Fill(-2, 2, 1, 2, -2, 2, "armor_heavy");
+        for (int x = -1; x <= 1; x++)
+        for (int z = -1; z <= 1; z++)
+        {
+            if (x == 0 && z == 0) continue;
+            if (Math.Abs(x) == 1 && z == 0) continue;
+            d.Remove(x, 1, z);
+            d.Remove(x, 2, z);
+        }
+
+        d.Remove(0, 2, 0);
+        d.Fill(-2, 2, 3, 3, -2, 2, "armor_heavy");
+        d.Set(0, 4, 0, "radar");
+        d.Set(2, 4, 2, "antenna");
+        d.Set(-2, 4, -2, "searchlight");
+        return d.Build("Command post", "olive");
+    }
+
     public static Blueprint Bunker()
     {
         var d = new Draft();
