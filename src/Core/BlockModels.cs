@@ -507,6 +507,11 @@ public static class BlockModels
                 k.Cyl(0.06f, 0.08f, Paint.Steel, new Vector3(0, 0, -0.24f), NoseZ, 0.01f, 12);
                 k.Cyl(0.19f, 0.12f, Paint.Dark, new Vector3(0, 0, 0.29f), TailZ, 0.15f, 20);
                 k.GlowCyl(0.12f, 0.02f, new Vector3(1f, 0.55f, 0.2f), 2.5f, new Vector3(0, 0, 0.33f), AlongZ);
+                // The exhaust flame, a meter long at full throttle (stretched further on afterburner).
+                k.Node = k.AddNode("Flame", new Vector3(0, 0, 0.34f));
+                k.GlowCyl(0.13f, 1f, new Vector3(1f, 0.5f, 0.18f), 2.2f, new Vector3(0, 0, 0.5f), TailZ, 0.015f);
+                k.GlowCyl(0.075f, 0.55f, new Vector3(0.65f, 0.8f, 1f), 3f, new Vector3(0, 0, 0.275f), TailZ, 0.01f);
+                k.Node = -1;
                 break;
 
             case BlockKind.Rotor:

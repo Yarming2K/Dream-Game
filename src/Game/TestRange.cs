@@ -1432,7 +1432,7 @@ public partial class TestRange : Node3D
         switch (v.FlightMode)
         {
             case MobilityMode.Plane:
-                sb.Append($"Throttle [b]{v.AirThrottle * 100f:0}%[/b]   [color={dim}]W / S throttle · mouse steers · A / D roll{(v.OnGround ? " · Space brakes" : "")}[/color]\n");
+                sb.Append($"Throttle [b]{v.AirThrottle * 100f:0}%[/b]{(v.Afterburning ? "  [color=#ffb050][b]AFTERBURNER[/b][/color]" : "")}   [color={dim}]W / S throttle · mouse steers · A / D roll{(v.OnGround ? " · Space brakes" : "")}[/color]\n");
                 if (v.Stalled) sb.Append($"[color={Ui.Hex(Ui.Bad)}][b]STALL[/b]: push the nose down and open the throttle.[/color]\n");
                 else if (!v.OnGround && v.AirspeedKmh < v.Analysis.Air.StallSpeedMs * 3.6f * 1.1f)
                     sb.Append($"[color={Ui.Hex(Ui.Warn)}]Slow: it stalls below about {v.Analysis.Air.StallSpeedMs * 3.6f:0} km/h.[/color]\n");

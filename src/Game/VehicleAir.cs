@@ -29,11 +29,12 @@ public partial class VehicleBody
     {
         public ThrusterInfo Info;
         public BlockInstance Block;
-        public Node3D Spinner;
+        public Node3D Spinner, Flame;
         public Vector3 Local, Dir;
         public bool Alive = true;
         public float Output;
         public float Spin;
+        public bool Afterburner;
     }
 
     public readonly List<SurfaceRt> AirSurfaces = new();
@@ -46,6 +47,9 @@ public partial class VehicleBody
 
     /// <summary>The throttle lever for planes (0 to 1). It stays where you leave it.</summary>
     public float AirThrottle { get; private set; }
+
+    /// <summary>True while a plane's jets have their afterburners lit (throttle all the way open).</summary>
+    public bool Afterburning { get; private set; }
 
     public float AirspeedKmh { get; private set; }
     public float AltitudeM { get; private set; }
@@ -104,6 +108,7 @@ public partial class VehicleBody
             {
                 Info = t, Block = b, Local = Conv.CellPos(t.Cell), Dir = t.Direction.G(),
                 Spinner = View.VisualOf(b)?.GetNodeOrNull<Node3D>("Spinner"),
+                Flame = View.VisualOf(b)?.GetNodeOrNull<Node3D>("Flame"),
             });
         }
 
@@ -313,21 +318,30 @@ public partial class VehicleBody
         float cmd = canRun ? AirThrottle : 0f;
         var pushers = Pushers.ToList();
         int props = pushers.Count(t => t.Info.Kind == BlockKind.AirPropeller);
+        int jets = pushers.Count - props;
         float share = PowerShare(props);
         float disk = Aero.DiskArea(Aero.PropRadiusM);
+        bool burner = cmd >= Aero.AfterburnerThrottle && jets > 0;
         foreach (ThrusterRt t in pushers)
         {
             Vector3 dir = (basis * t.Dir).Normalized();
-            float thrust = t.Info.Kind == BlockKind.JetEngine
-                ? Aero.JetThrustN * cmd
-                : Aero.PropThrust(share * cmd, Mathf.Max(vel.Dot(dir), 0), disk);
+            bool jet = t.Info.Kind == BlockKind.JetEngine;
+            float thrust = jet ? Aero.JetThrust(cmd) : Aero.PropThrust(share * cmd, Mathf.Max(vel.Dot(dir), 0), disk);
             t.Output = cmd;
+            t.Afterburner = jet && burner;
             ApplyForce(dir * thrust, xf * t.Local - xf.Origin);
         }
 
-        foreach (ThrusterRt t in Lifters) t.Output = 0;
-        BurnFuel(dt, cmd, pushers.Count(t => t.Info.Kind == BlockKind.JetEngine) * cmd);
-        _soundLoad = cmd;
+        foreach (ThrusterRt t in Lifters)
+        {
+            t.Output = 0;
+            t.Afterburner = false;
+        }
+
+        // Afterburners drink fuel several times faster.
+        BurnFuel(dt, cmd, jets * cmd * (burner ? Aero.AfterburnerFuel : 1f));
+        Afterburning = burner;
+        _soundLoad = burner ? 1.12f : cmd;
     }
 
     private void BurnFuel(float dt, float engineLoad, float jetLoad)
@@ -572,6 +586,20 @@ public partial class VehicleBody
     {
         foreach (ThrusterRt t in AirThrusters)
         {
+            if (t.Flame != null && IsInstanceValid(t.Flame))
+            {
+                // A jet's flame grows with its output, flickers, and stretches out long and bright on afterburner.
+                float o = t.Alive && CanDrive ? Mathf.Clamp(t.Output, 0, 1) : 0f;
+                t.Flame.Visible = o > 0.03f;
+                if (t.Flame.Visible)
+                {
+                    float flicker = 0.92f + 0.16f * GD.Randf();
+                    float len = (0.3f + 0.7f * o) * (t.Afterburner ? 2.2f : 1f) * flicker;
+                    float wide = (0.6f + 0.4f * o) * (t.Afterburner ? 1.25f : 1f);
+                    t.Flame.Scale = new Vector3(wide, wide, len);
+                }
+            }
+
             if (t.Spinner == null || !IsInstanceValid(t.Spinner)) continue;
             float rate = t.Alive && CanDrive ? (t.Info.Kind == BlockKind.Rotor ? 22f : 55f) * Mathf.Max(t.Output, 0.25f) : 0f;
             t.Spin = Mathf.Wrap(t.Spin + rate * dt, 0, Mathf.Tau);

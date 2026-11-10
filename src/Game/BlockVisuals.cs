@@ -112,6 +112,25 @@ public static class BlockVisuals
         return m;
     }
 
+    /// <summary>Flame and plasma: light added on top of what's behind it, see-through, casting no shadow.</summary>
+    public static StandardMaterial3D Flame(Color c, float energy)
+    {
+        string key = $"flame:{c.ToHtml()}:{energy}";
+        if (Materials.TryGetValue(key, out StandardMaterial3D m)) return m;
+        m = new StandardMaterial3D
+        {
+            AlbedoColor = new Color(c.R * energy, c.G * energy, c.B * energy, 0.7f),
+            ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+            Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
+            BlendMode = BaseMaterial3D.BlendModeEnum.Add,
+            CullMode = BaseMaterial3D.CullModeEnum.Disabled,
+            NoDepthTest = false,
+            DepthDrawMode = BaseMaterial3D.DepthDrawModeEnum.Disabled,
+        };
+        Materials[key] = m;
+        return m;
+    }
+
     private static readonly Dictionary<BlockShape, Shape3D> ShapeColliders = new();
 
     /// <summary>The collision shape of a one-cell block: a box, or for shaped armor the outline of its pieces.</summary>
@@ -394,7 +413,9 @@ public static class BlockVisuals
 
         foreach (ModelPart p in model.Parts)
         {
-            Material mat = painted && Liveries.Paints(def, p.Paint) ? Repainted(def, livery, p.Paint == Paint.SelfDark) : PaintOf(def, p);
+            bool flame = p.Node >= 0 && model.Nodes[p.Node].Name == "Flame" && p.Paint == Paint.Glow;
+            Material mat = flame ? Flame(new Color(p.GlowColor.X, p.GlowColor.Y, p.GlowColor.Z), p.GlowEnergy * 0.5f)
+                : painted && Liveries.Paints(def, p.Paint) ? Repainted(def, livery, p.Paint == Paint.SelfDark) : PaintOf(def, p);
             var mi = new MeshInstance3D { Mesh = MeshOf(p), MaterialOverride = mat, Transform = ToTransform(p.Transform) };
             if (p.Paint == Paint.Glow) mi.CastShadow = GeometryInstance3D.ShadowCastingSetting.Off;
             (p.Node < 0 ? root : nodes[p.Node]).AddChild(mi);
@@ -462,7 +483,8 @@ public static class BlockVisuals
 
     /// <summary>Blocks that move on their own (spinning, swinging, rolling, dropping their load): drawn one by one.</summary>
     public static bool IsAnimated(BlockDef def) =>
-        def.IsWheelLike || def.Kind is BlockKind.AirPropeller or BlockKind.Rotor or BlockKind.LiftFan or BlockKind.ControlSurface or BlockKind.BombRack;
+        def.IsWheelLike || def.Kind is BlockKind.AirPropeller or BlockKind.Rotor or BlockKind.LiftFan or BlockKind.ControlSurface or BlockKind.BombRack
+            or BlockKind.JetEngine;
 
     private static readonly Dictionary<string, List<(Mesh, Material, Transform3D)>> PartsCache = new();
     private static readonly Dictionary<string, List<(Mesh, Material, Transform3D, Paint)>> PaintedPartsCache = new();

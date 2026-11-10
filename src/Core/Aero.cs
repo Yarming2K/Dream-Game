@@ -127,6 +127,15 @@ public static class Aero
     public const float JetThrustN = 16000f;
     public const float JetFuelPerSecond = 0.9f;
 
+    /// <summary>Afterburner (throttle all the way open): this much more thrust from every jet, for this much more fuel.</summary>
+    public const float AfterburnerThrust = 1.6f, AfterburnerFuel = 3.5f;
+
+    /// <summary>The throttle at and above which jets light their afterburners.</summary>
+    public const float AfterburnerThrottle = 0.98f;
+
+    /// <summary>A jet's thrust at a throttle setting (afterburner at full).</summary>
+    public static float JetThrust(float throttle) => JetThrustN * throttle * (throttle >= AfterburnerThrottle ? AfterburnerThrust : 1f);
+
     /// <summary>
     /// What one gas cell holds up. Far more than real gas would at this size (a real half-meter cell of
     /// helium lifts about 0.15 kg), so airships stay a buildable size.

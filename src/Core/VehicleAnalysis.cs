@@ -873,7 +873,8 @@ public sealed class VehicleAnalysis
         air.HoverThrustN = upJets + lifters.Sum(t =>
             Aero.RotorThrust(liftShare, Aero.DiskArea(t.Kind == BlockKind.Rotor ? Aero.RotorRadiusM : Aero.FanRadiusM)));
         float diskProp = Aero.DiskArea(Aero.PropRadiusM);
-        float ThrustAt(float v) => fwdJets + pushers.Count * Aero.PropThrust(pushShare, v, diskProp);
+        // (Jets at full throttle, with their afterburners lit.)
+        float ThrustAt(float v) => fwdJets * Aero.AfterburnerThrust + pushers.Count * Aero.PropThrust(pushShare, v, diskProp);
         air.StaticThrustN = ThrustAt(0);
 
         // Drag of the body: what it shows end-on, not counting wing panels (they have their own).
