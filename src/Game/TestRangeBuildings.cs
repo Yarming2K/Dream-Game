@@ -30,12 +30,12 @@ public partial class TestRange
         VehicleBody outpost = AddDummy(ExampleDesigns.Outpost(), OutpostAt, 90f);
         outpost.Faction = 0;
         outpost.AddChild(Sign("OUTPOST\nsupplies, repairs, bunks", new Vector3(0, 5.2f, 0), 60));
-        VehicleBody battery = AddDummy(ExampleDesigns.SiegeBattery(), OutpostAt + new Vector3(4, 0, 36), 180f);
-        battery.Faction = 0;
-        battery.AddChild(Sign("SIEGE BATTERY\n420 mm: E at the gunner seat", new Vector3(0, 4.2f, 0), 60));
-        VehicleBody fort = AddDummy(ExampleDesigns.CoastalFort(), new Vector3(Terrain.CoastX - 28f, Ground, 60), -90f);
-        fort.Faction = 0;
-        fort.AddChild(Sign("COASTAL FORT\nheavy railgun, laser battery", new Vector3(0, 7f, 0), 60));
+        VehicleBody fortress = AddDummy(ExampleDesigns.SiegeFortress(), OutpostAt + new Vector3(8, 0, 48), 180f);
+        fortress.Faction = 0;
+        fortress.AddChild(Sign("SIEGE FORTRESS\n420 mm mortar on the roof", new Vector3(0, 10.5f, 0), 70));
+        VehicleBody citadel = AddDummy(ExampleDesigns.CoastalCitadel(), new Vector3(Terrain.CoastX - 32f, Ground, 60), -90f);
+        citadel.Faction = 0;
+        citadel.AddChild(Sign("COASTAL CITADEL\nheavy railguns, laser tower", new Vector3(0, 19f, 0), 80));
         AddDummy(ExampleDesigns.Pillbox(), new Vector3(-44, Ground, SpawnPoint.Z - 190f), 0f);
         AddDummy(ExampleDesigns.FlakNest(), new Vector3(48, Ground, SpawnPoint.Z - 230f), 30f);
     }

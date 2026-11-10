@@ -1366,88 +1366,246 @@ public static class ExampleDesigns
     /// radar and an antenna on the roof. Stand next to it and press M to command your units.
     /// </summary>
     /// <summary>Example buildings: stationary ground units with crews and guns.</summary>
-    public static IReadOnlyList<Blueprint> Buildings => new[] { Pillbox(), FlakNest(), Outpost(), SiegeBattery(), CoastalFort() };
+    public static IReadOnlyList<Blueprint> Buildings => new[] { Pillbox(), FlakNest(), Outpost(), SiegeFortress(), CoastalCitadel() };
 
     /// <summary>
-    /// Siege battery: a 420 mm siege mortar on a turntable in an open concrete pit, with its shell magazine
-    /// turning with it. A heavy weapon at full rate, as only a building can fire it. A bunk, a weapon locker,
-    /// first aid, supply crates, and a radar on a post.
+    /// Siege fortress: a two-storey concrete bastion, 12 m square on a sloped glacis, with battlements round
+    /// its terrace. The 420 mm siege mortar stands on the top roof behind a parapet, fed by a hoist from the
+    /// magazine hall on the ground floor. A flak gun on each corner of the terrace. Inside: crew quarters with
+    /// bunks, lockers and first aid, a workbench, stairs up to the command room (console, windows all round),
+    /// lamps throughout, and a ladder from the terrace to the mortar.
     /// </summary>
-    public static Blueprint SiegeBattery()
+    public static Blueprint SiegeFortress()
     {
         var d = new Draft();
-        d.Fill(-5, 5, 0, 0, -5, 5, "foundation");
-        d.Set(0, 1, 0, "turret_ring");
-        d.Set(0, 3, 0, "siege_mortar");
-        for (int z = -2; z >= -4; z--) d.Set(0, 3, z, "heavy_barrel");
-        d.Set(2, 2, 0, "magazine_he");
-        d.Set(0, 2, 2, "gunner_seat");
+        const int l2 = 7, top = 13; // the terrace (the first floor's roof) and the top roof
+        d.Fill(-13, 13, 0, 0, -13, 13, "foundation");
 
-        d.Set(-4, 1, 0, "bunk");
-        d.Set(-4, 2, -4, "weapon_locker");
-        d.Set(4, 2, -3, "first_aid", Orient(new Int3(0, -1, 0), new Int3(-1, 0, 0)));
-        d.Set(3, 1, 3, "supply_crate");
-        d.Fill(-4, -4, 1, 2, 4, 4, "concrete");
-        d.Set(-4, 3, 4, "radar");
-        d.Fill(-5, 5, 1, 2, -5, -5, "concrete");
-        d.Fill(-5, 5, 1, 2, 5, 5, "concrete");
-        d.Fill(-5, -5, 1, 2, -4, 4, "concrete");
-        d.Fill(5, 5, 1, 2, -4, 4, "concrete");
-        foreach (int x in new[] { -1, 0 })
-        foreach (int y in new[] { 1, 2 })
-            d.Remove(x, y, 5);
-        d.Set(4, 3, 4, "antenna");
-        return d.Build("Siege battery (420 mm)", "olive");
+        // The mortar on the top roof, and the hoist down to the magazine hall.
+        d.Set(0, top + 1, 0, "turret_ring");
+        d.Set(0, top + 3, 0, "siege_mortar");
+        for (int z = -2; z >= -4; z--) d.Set(0, top + 3, z, "heavy_barrel");
+        d.Set(0, top + 2, 2, "gunner_seat");
+        for (int y = 1; y <= top; y++) d.Set(0, y, 0, "ammo_feed");
+        foreach (int y in new[] { 1, 3 })
+        {
+            d.Set(1, y, -1, "magazine_he");
+            d.Set(-2, y, -1, "magazine_he");
+        }
+
+        // Ground floor: the door, crew quarters, lockers, first aid, the workbench, lamps, and the stairs up.
+        d.Set(-1, 2, -12, "door");
+        foreach (int z in new[] { -8, -3, 2 }) d.Set(-11, 1, z, "bunk");
+        d.Set(-6, 2, 11, "weapon_locker");
+        d.Set(-3, 2, 11, "weapon_locker");
+        d.Set(-11, 3, 8, "first_aid", Orient(new Int3(0, -1, 0), new Int3(1, 0, 0)));
+        d.Set(6, 1, 10, "workbench");
+        foreach ((int x, int z) in new[] { (-6, -6), (9, -8), (-6, 6), (6, 6), (-6, 0), (9, 3) }) d.Set(x, l2 - 1, z, "lamp");
+        for (int i = 0; i <= l2 - 1; i++)
+            foreach (int x in new[] { 5, 6 })
+                d.Set(x, 1 + i, -6 + i, "stairs");
+        // A solid masonry base under the flight.
+        for (int i = 1; i <= l2 - 1; i++) d.Fill(5, 6, 1, i, -6 + i, -6 + i, "concrete");
+
+        // Command room upstairs: the console at the front windows, doors out onto the terrace, lamps.
+        d.Set(2, l2 + 1, -7, "command_console");
+        d.Set(3, l2 + 2, -8, "door");
+        d.Set(-4, l2 + 2, 8, "door");
+        foreach ((int x, int z) in new[] { (-4, -4), (-4, 4), (3, 4), (3, -4) }) d.Set(x, top - 1, z, "lamp");
+        for (int i = -6; i <= 6; i += 2)
+        {
+            if (i < 2 || i > 4) d.Fill(i, i + 1, l2 + 3, l2 + 4, -8, -8, "glazing");
+            if (i < -5 || i > -3) d.Fill(i, i + 1, l2 + 3, l2 + 4, 8, 8, "glazing");
+            d.Fill(-8, -8, l2 + 3, l2 + 4, i, i + 1, "glazing");
+            d.Fill(8, 8, l2 + 3, l2 + 4, i, i + 1, "glazing");
+        }
+
+        // A flak gun on each corner of the terrace.
+        foreach (int x in new[] { -10, 10 })
+        {
+            FlakMount(d, x, l2 + 1, -10, Int3.Forward);
+            FlakMount(d, x, l2 + 1, 10, Int3.Back);
+        }
+
+        // The ladder from the terrace to the top roof.
+        for (int y = l2 + 1; y <= top + 1; y++) d.Set(-9, y, 0, "ladder", Orient(new Int3(0, -1, 0), new Int3(-1, 0, 0)));
+
+        // Walls, floors and roofs.
+        d.Fill(-12, 12, 1, l2 - 1, -12, -12, "concrete");
+        d.Fill(-12, 12, 1, l2 - 1, 12, 12, "concrete");
+        d.Fill(-12, -12, 1, l2 - 1, -11, 11, "concrete");
+        d.Fill(12, 12, 1, l2 - 1, -11, 11, "concrete");
+        d.Fill(-12, 12, l2, l2, -12, 12, "concrete");
+        d.Fill(-8, 8, l2 + 1, top - 1, -8, -8, "concrete");
+        d.Fill(-8, 8, l2 + 1, top - 1, 8, 8, "concrete");
+        d.Fill(-8, -8, l2 + 1, top - 1, -7, 7, "concrete");
+        d.Fill(8, 8, l2 + 1, top - 1, -7, 7, "concrete");
+        d.Fill(-8, 8, top, top, -8, 8, "concrete");
+        // The stairwell up through the terrace floor.
+        foreach (int x in new[] { 5, 6 })
+            for (int z = -6; z <= -1; z++)
+                d.Remove(x, l2, z);
+
+        // The glacis sloping up to the walls (not in front of the door), and battlements round the terrace.
+        d.FillSlope(-13, -13, 1, 1, -13, 13, "concrete_slope", new Int3(-1, 1, 0));
+        d.FillSlope(13, 13, 1, 1, -13, 13, "concrete_slope", new Int3(1, 1, 0));
+        d.FillSlope(-12, 12, 1, 1, -13, -13, "concrete_slope", new Int3(0, 1, -1));
+        d.FillSlope(-12, 12, 1, 1, 13, 13, "concrete_slope", new Int3(0, 1, 1));
+        foreach (int x in new[] { -1, 0 }) d.Remove(x, 1, -13);
+        for (int i = -12; i <= 12; i++)
+            foreach ((int x, int z) in new[] { (i, -12), (i, 12), (-12, i), (12, i) })
+            {
+                d.Fill(x, x, l2 + 1, l2 + 1, z, z, "concrete");
+                if ((i & 1) == 0) d.Fill(x, x, l2 + 2, l2 + 2, z, z, "concrete");
+            }
+
+        // A parapet round the mortar, a radar, searchlights and antennas on the top roof.
+        for (int i = -6; i <= 6; i++)
+            foreach ((int x, int z) in new[] { (i, -6), (i, 6), (-6, i), (6, i) })
+                d.Fill(x, x, top + 1, top + 1, z, z, "concrete");
+        d.Remove(-6, top + 1, 0);
+        d.Set(7, top + 1, 7, "radar");
+        d.Set(-7, top + 1, -7, "searchlight");
+        d.Set(7, top + 1, -7, "searchlight");
+        d.Set(-7, top + 1, 7, "antenna");
+        d.Set(7, top + 1, 6, "antenna");
+        return d.Build("Siege fortress (420 mm)", "olive");
+    }
+
+    /// <summary>A 40 mm flak gun on its own turntable: flak and HE racks beside the breech and the gunner behind.</summary>
+    private static void FlakMount(Draft d, int x, int y, int z, Int3 facing)
+    {
+        d.Set(x, y, z, "turret_ring");
+        d.Set(x, y + 1, z, "breech_40ac", Pointing(facing));
+        for (int i = 1; i <= 3; i++) d.Set(x, y + 1, z + facing.Z * i, "barrel", Pointing(facing));
+        d.Set(x - 1, y + 1, z, "ammo_flak");
+        d.Set(x + 1, y + 1, z, "ammo_he");
+        d.Set(x, y + 1, z - facing.Z, "gunner_seat");
     }
 
     /// <summary>
-    /// Coastal fort: a concrete casemate with a fusion reactor and a bank of capacitors inside, a heavy
-    /// railgun on the roof facing the sea, and a laser battery behind it that burns missiles and aircraft
-    /// out of the sky for kilometers around. Stairs to the roof, a command console, bunks and first aid.
+    /// Coastal citadel: a sea fort 17 m long. Two heavy railguns in armored turret houses on its battlemented
+    /// deck face the sea; behind them a 16 m tower carries the laser battery, which burns missiles and
+    /// aircraft out of the sky for kilometers around. A close-in gatling on each corner and a block of missile
+    /// cells in the deck. Below: two fusion reactors, a gallery of capacitors, the command bunker, crew
+    /// quarters, a workbench and supply crates, and stairs up to the deck. A ladder climbs the tower inside.
     /// </summary>
-    public static Blueprint CoastalFort()
+    public static Blueprint CoastalCitadel()
     {
         var d = new Draft();
-        const int roof = 6;
-        d.Fill(-7, 7, 0, 0, -7, 7, "foundation");
+        const int deck = 7, tower = 31;
+        d.Fill(-17, 17, 0, 0, -13, 13, "foundation");
 
-        // Inside: the reactor and its capacitors, the console, bunks, first aid, lamps, the door.
-        d.Set(-4, 2, 3, "reactor");
-        for (int z = -5; z <= 4; z++) d.Set(-6, 1, z, "capacitor");
-        d.Set(3, 1, 4, "command_console", Pointing(Int3.Back));
-        d.Set(5, 1, 0, "bunk");
-        d.Set(6, 3, -4, "first_aid", Orient(new Int3(0, -1, 0), new Int3(-1, 0, 0)));
-        d.Set(2, 2, 6, "weapon_locker");
-        d.Set(-1, 2, -7, "door");
-        foreach ((int x, int z) in new[] { (-3, -3), (2, -3), (2, 2), (-1, 5) }) d.Set(x, roof - 1, z, "lamp");
+        // Below decks: the reactors and capacitors, the command bunker and quarters, the doors and lamps.
+        d.Set(-10, 2, 6, "reactor");
+        d.Set(10, 2, 6, "reactor");
+        for (int x = -6; x <= 5; x++) d.Set(x, 1, 11, "capacitor");
+        d.Set(0, 1, 5, "command_console");
+        foreach (int z in new[] { -8, -3 }) d.Set(-14, 1, z, "bunk");
+        d.Set(12, 2, -11, "weapon_locker");
+        d.Set(15, 3, 0, "first_aid", Orient(new Int3(0, -1, 0), new Int3(-1, 0, 0)));
+        d.Set(-6, 1, 9, "workbench");
+        d.Set(13, 1, -3, "supply_crate");
+        d.Set(-1, 2, -12, "door");
+        d.Set(8, 2, 12, "door");
+        foreach ((int x, int z) in new[] { (-10, -6), (-3, -6), (4, -6), (-6, 2), (6, 1), (0, 8), (-12, 10) }) d.Set(x, deck - 1, z, "lamp");
+        for (int i = 0; i <= deck - 1; i++)
+            foreach (int x in new[] { 12, 13 })
+                d.Set(x, 1 + i, 4 + i, "stairs");
+        for (int i = 1; i <= deck - 1; i++) d.Fill(12, 13, 1, i, 4 + i, 4 + i, "concrete");
 
-        d.Fill(-7, 7, 1, roof - 1, -7, -7, "concrete");
-        d.Fill(-7, 7, 1, roof - 1, 7, 7, "concrete");
-        d.Fill(-7, -7, 1, roof - 1, -6, 6, "concrete");
-        d.Fill(7, 7, 1, roof - 1, -6, 6, "concrete");
-        d.Fill(-7, 7, roof, roof, -7, 7, "concrete");
+        // The two heavy railguns, each in its own armored house that turns with it.
+        foreach (int x in new[] { -7, 7 }) RailHouse(d, x, deck + 1, -4);
 
-        // The heavy railgun on the roof, its slugs turning with it.
-        d.Set(0, roof + 1, -2, "turret_ring");
-        d.Set(0, roof + 3, -2, "heavy_rail_breech");
-        for (int z = -4; z >= -11; z--) d.Set(0, roof + 3, z, "rail");
-        d.Set(2, roof + 2, -2, "magazine_ap");
-        d.Set(0, roof + 2, 0, "gunner_seat");
+        // The laser tower: a door at its foot, a ladder up inside, the battery on a railed platform at the top.
+        d.Set(-1, deck + 2, 6, "door");
+        for (int y = deck + 1; y <= tower + 1; y++) d.Set(0, y, 9, "ladder", Orient(new Int3(0, -1, 0), new Int3(0, 0, -1)));
+        d.Set(0, tower + 1, 8, "turret_ring");
+        d.Set(0, tower + 3, 8, "laser_battery");
+        foreach (int z in new[] { 7, 6 }) d.Set(0, tower + 3, z, "laser_lens");
+        d.Set(0, tower + 2, 10, "gunner_seat");
+        foreach (int y in new[] { 14, 20, 26 }) d.Fill(-2, 2, y, y + 1, 6, 6, "glazing");
+        d.Fill(-2, 2, deck + 1, tower - 1, 6, 6, "concrete");
+        d.Fill(-2, 2, deck + 1, tower - 1, 10, 10, "concrete");
+        d.Fill(-2, -2, deck + 1, tower - 1, 7, 9, "concrete");
+        d.Fill(2, 2, deck + 1, tower - 1, 7, 9, "concrete");
+        d.Fill(-3, 3, tower, tower, 5, 11, "concrete");
+        d.Remove(0, tower, 9);
+        for (int i = -3; i <= 3; i++)
+            foreach ((int x, int z) in new[] { (i, 5), (i, 11) })
+                if (x != 0) d.Set(x, tower + 1, z, "railing", Orient(new Int3(0, -1, 0), new Int3(0, 0, z == 5 ? 1 : -1)));
+        d.Set(-3, tower + 1, 8, "radar");
+        d.Set(3, tower + 1, 7, "searchlight");
+        d.Set(3, tower + 1, 9, "antenna");
 
-        // The laser battery behind it, facing inland (it turns to meet whatever comes).
-        d.Set(0, roof + 1, 4, "turret_ring");
-        d.Set(0, roof + 3, 4, "laser_battery", Pointing(Int3.Back));
-        foreach (int z in new[] { 5, 6 }) d.Set(0, roof + 3, z, "laser_lens", Pointing(Int3.Back));
-        d.Set(0, roof + 2, 2, "gunner_seat");
+        // Missile cells in the deck between the guns, and a close-in gatling on each corner.
+        for (int x = -3; x <= 2; x++)
+        {
+            d.Set(x, deck, 1, "vls_strike");
+            d.Set(x, deck, 2, "vls_sam");
+        }
 
-        // Stairs up the right-hand side, a radar and antennas on the roof.
-        for (int i = 0; i < roof; i++)
-            foreach (int x in new[] { 8, 9 })
-                d.Set(x, 1 + i, -6 + i, "stairs");
-        d.Set(-6, roof + 1, -6, "radar");
-        d.Set(6, roof + 1, 6, "antenna");
-        d.Set(-6, roof + 1, 6, "antenna");
-        return d.Build("Coastal fort", "urban");
+        foreach (int x in new[] { -14, 14 })
+        {
+            CiwsAt(d, x, deck + 1, -10, Int3.Forward);
+            CiwsAt(d, x, deck + 1, 10, Int3.Back);
+        }
+
+        // Walls and the deck, the stairwell through it, the glacis, and battlements round the deck.
+        d.Fill(-16, 16, 1, deck - 1, -12, -12, "concrete");
+        d.Fill(-16, 16, 1, deck - 1, 12, 12, "concrete");
+        d.Fill(-16, -16, 1, deck - 1, -11, 11, "concrete");
+        d.Fill(16, 16, 1, deck - 1, -11, 11, "concrete");
+        d.Fill(-16, 16, deck, deck, -12, 12, "concrete");
+        foreach (int x in new[] { 12, 13 })
+            for (int z = 4; z <= 9; z++)
+                d.Remove(x, deck, z);
+        d.FillSlope(-17, -17, 1, 1, -13, 13, "concrete_slope", new Int3(-1, 1, 0));
+        d.FillSlope(17, 17, 1, 1, -13, 13, "concrete_slope", new Int3(1, 1, 0));
+        d.FillSlope(-16, 16, 1, 1, -13, -13, "concrete_slope", new Int3(0, 1, -1));
+        d.FillSlope(-16, 16, 1, 1, 13, 13, "concrete_slope", new Int3(0, 1, 1));
+        foreach (int x in new[] { -1, 0 }) d.Remove(x, 1, -13);
+        foreach (int x in new[] { 8, 9 }) d.Remove(x, 1, 13);
+        for (int x = -16; x <= 16; x++)
+            foreach (int z in new[] { -12, 12 })
+                Battlement(d, x, deck + 1, z, x);
+        for (int z = -11; z <= 11; z++)
+            foreach (int x in new[] { -16, 16 })
+                Battlement(d, x, deck + 1, z, z);
+        return d.Build("Coastal citadel", "urban");
+    }
+
+    /// <summary>A heavy railgun on a turntable in an armored house that turns with it, its slugs inside, open at the back for the gunner.</summary>
+    private static void RailHouse(Draft d, int x, int y, int z)
+    {
+        d.Set(x, y, z, "turret_ring");
+        d.Set(x, y + 2, z, "heavy_rail_breech");
+        for (int i = 2; i <= 9; i++) d.Set(x, y + 2, z - i, "rail");
+        d.Set(x + 2, y + 1, z, "magazine_ap");
+        d.Set(x, y + 1, z + 2, "gunner_seat");
+        d.Fill(x - 2, x + 4, y + 4, y + 4, z - 2, z + 3, "armor_heavy");
+        d.Fill(x - 2, x - 2, y + 1, y + 3, z - 2, z + 3, "armor_heavy");
+        d.Fill(x + 4, x + 4, y + 1, y + 3, z - 2, z + 3, "armor_heavy");
+        d.Fill(x - 1, x + 3, y + 1, y + 3, z - 2, z - 2, "armor_heavy");
+        foreach (int xx in new[] { x + 2, x + 3 }) d.Fill(xx, xx, y + 1, y + 3, z + 3, z + 3, "armor_heavy");
+        d.FillSlope(x - 2, x + 4, y + 4, y + 4, z - 3, z - 3, "armor_heavy_slope", new Int3(0, 1, -1));
+    }
+
+    /// <summary>A close-in gatling on its own turntable, with its ready racks.</summary>
+    private static void CiwsAt(Draft d, int x, int y, int z, Int3 facing)
+    {
+        d.Set(x, y, z, "turret_ring");
+        d.Set(x, y + 1, z, "breech_20gat", Pointing(facing));
+        for (int i = 1; i <= 3; i++) d.Set(x, y + 1, z + facing.Z * i, "barrel", Pointing(facing));
+        d.Set(x, y + 1, z - facing.Z, "ammo_he");
+        d.Set(x, y + 2, z - facing.Z, "ammo_he");
+    }
+
+    /// <summary>A stretch of parapet with a merlon on every other cell.</summary>
+    private static void Battlement(Draft d, int x, int y, int z, int along)
+    {
+        d.Fill(x, x, y, y, z, z, "concrete");
+        if ((along & 1) == 0) d.Fill(x, x, y + 1, y + 1, z, z, "concrete");
     }
 
     /// <summary>

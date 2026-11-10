@@ -1051,6 +1051,65 @@ public static class BlockModels
                 k.Cyl(0.14f, 0.08f, Paint.Steel, new Vector3(0, ext.Y * 0.48f, -ext.Z * 0.4f), sides: 16);
                 break;
 
+            case BlockKind.Breech when def.Breech.HighArc:
+            {
+                // A siege mortar: a squat, ribbed breech in a massive trunnion cradle, with recoil cylinders
+                // either side and a loading tray behind.
+                float r = ext.X * 0.3f;
+                k.Bevel(new Vector3(ext.X, ext.Y * 0.3f, ext.Z), Paint.SelfDark, new Vector3(0, -ext.Y * 0.35f, 0), bevel);
+                foreach (float x in new[] { -ext.X * 0.42f, ext.X * 0.42f })
+                {
+                    k.Bevel(new Vector3(ext.X * 0.14f, ext.Y * 0.7f, ext.Z * 0.8f), Paint.Self, new Vector3(x, -ext.Y * 0.05f, 0), bevel * 0.6f);
+                    k.Cyl(ext.Y * 0.14f, ext.X * 0.12f, Paint.Steel, new Vector3(x, ext.Y * 0.08f, 0), AlongX, sides: 20);
+                    k.Cyl(0.09f, ext.Z * 0.85f, Paint.Steel, new Vector3(x * 0.7f, ext.Y * 0.28f, 0), AlongZ, sides: 12);
+                }
+
+                k.Cyl(r, ext.Z * 0.9f, Paint.Self, new Vector3(0, ext.Y * 0.08f, 0), AlongZ, sides: 28);
+                for (int i = 0; i < 5; i++) k.Cyl(r * 1.08f, 0.07f, Paint.SelfDark, new Vector3(0, ext.Y * 0.08f, -ext.Z * 0.36f + i * ext.Z * 0.18f), AlongZ, sides: 28);
+                k.Cyl(r * 0.8f, 0.2f, Paint.Steel, new Vector3(0, ext.Y * 0.08f, ext.Z * 0.5f + 0.05f), AlongZ, sides: 24);
+                k.Box(new Vector3(ext.X * 0.4f, 0.06f, 0.5f), Paint.Steel, new Vector3(0, -ext.Y * 0.12f, ext.Z * 0.5f + 0.25f));
+                break;
+            }
+
+            case BlockKind.Breech when def.Breech.Rail:
+            {
+                // A heavy railgun: a long armored magnet housing banded with glowing coils, power trunks along
+                // its sides, and the two great rails leaving its face.
+                k.Bevel(ext * new Vector3(0.95f, 0.8f, 1f), Paint.Self, new Vector3(0, -ext.Y * 0.05f, 0), bevel);
+                for (int i = 0; i < 4; i++)
+                {
+                    float z = -ext.Z * 0.36f + i * ext.Z * 0.24f;
+                    k.Box(new Vector3(ext.X * 0.98f, ext.Y * 0.84f, 0.06f), Paint.SelfDark, new Vector3(0, -ext.Y * 0.05f, z));
+                    k.Glow(new Vector3(ext.X * 0.7f, 0.04f, 0.07f), Cyan, 1.6f, new Vector3(0, ext.Y * 0.36f, z));
+                }
+
+                foreach (float x in new[] { -ext.X * 0.5f, ext.X * 0.5f })
+                    k.Cyl(0.12f, ext.Z * 0.9f, Paint.Dark, new Vector3(x, -ext.Y * 0.2f, 0), AlongZ, sides: 14);
+                foreach (float x in new[] { -0.2f, 0.2f })
+                    k.Box(new Vector3(0.12f, ext.Y * 0.45f, 0.3f), Paint.Steel, new Vector3(x, 0, -ext.Z * 0.5f - 0.12f));
+                break;
+            }
+
+            case BlockKind.Breech when def.Breech.Beam:
+            {
+                // A laser battery: a turret drum with deep cooling fins, a ring of heat exchangers, and a great
+                // red aperture at its face.
+                float r = MathF.Min(ext.X, ext.Y) * 0.45f;
+                k.Bevel(new Vector3(ext.X, ext.Y * 0.25f, ext.Z), Paint.SelfDark, new Vector3(0, -ext.Y * 0.38f, 0), bevel);
+                k.Cyl(r, ext.Z * 0.95f, Paint.Self, new Vector3(0, ext.Y * 0.05f, 0), AlongZ, sides: 28);
+                for (int i = 0; i < 6; i++)
+                    k.Cyl(r * 1.12f, 0.035f, Paint.Steel, new Vector3(0, ext.Y * 0.05f, -ext.Z * 0.38f + i * ext.Z * 0.15f), AlongZ, sides: 28);
+                for (int i = 0; i < 8; i++)
+                {
+                    float a = i * MathF.Tau / 8;
+                    k.Cyl(0.06f, ext.Z * 0.8f, Paint.Dark, new Vector3(MathF.Cos(a) * r * 1.2f, ext.Y * 0.05f + MathF.Sin(a) * r * 1.2f, 0), AlongZ, sides: 10);
+                }
+
+                k.Cyl(r * 0.75f, 0.06f, Paint.Dark, new Vector3(0, ext.Y * 0.05f, -ext.Z * 0.5f), AlongZ, sides: 28);
+                k.GlowCyl(r * 0.5f, 0.03f, new Vector3(1f, 0.25f, 0.2f), 2.6f, new Vector3(0, ext.Y * 0.05f, -ext.Z * 0.5f - 0.02f), AlongZ);
+                break;
+            }
+
             case BlockKind.Breech:
             {
                 float r = BarrelRadius(def.Breech.CaliberMm);
