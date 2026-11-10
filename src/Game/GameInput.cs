@@ -31,6 +31,8 @@ public static class GameInput
         AddKeys("perf_overlay", Key.F3);
         AddKeys("battle_drill", Key.F8);
         AddKeys("tactical_map", Key.M);
+        AddKeys("lights", Key.H);
+        AddKeys("smoke", Key.Z);
     }
 
     private static void AddKeys(string action, params Key[] keys)

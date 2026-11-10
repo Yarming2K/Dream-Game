@@ -999,50 +999,50 @@ public static class BlockCatalog
         new BlockDef
         {
             Id = "hatch", Name = "Hatch", Category = "Details", Kind = BlockKind.Detail,
-            Description = "A crew hatch with a hinged lid. Purely for looks: put them where the crew would climb in.",
+            Description = "A crew hatch. Look at it from outside and press E to climb in to the nearest seat; getting out, you come out through it.",
             MassKg = 25, Hp = 25, ArmorMm = 3, HasCollider = false, Watertight = false, Displacement = 0f,
             ColorR = 0.3f, ColorG = 0.32f, ColorB = 0.27f, Metallic = 0.5f, Roughness = 0.6f,
         },
         new BlockDef
         {
             Id = "periscope", Name = "Periscope", Category = "Details", Kind = BlockKind.Detail,
-            Description = "A vision block for the crew to see out of. For looks.",
+            Description = "A vision block. Each periscope (up to two) lets the crew spot enemies 15% further away.",
             MassKg = 12, Hp = 25, ArmorMm = 3, HasCollider = false, Watertight = false, Displacement = 0f,
             ColorR = 0.25f, ColorG = 0.27f, ColorB = 0.24f, Metallic = 0.5f, Roughness = 0.6f,
         },
         new BlockDef
         {
             Id = "headlight", Name = "Headlight", Category = "Details", Kind = BlockKind.Detail,
-            Description = "A lamp in a wire guard, facing forward. For looks.",
+            Description = "A lamp in a wire guard, facing forward. H turns the lights on and off.",
             MassKg = 6, Hp = 25, ArmorMm = 3, HasCollider = false, Watertight = false, Displacement = 0f,
             ColorR = 0.3f, ColorG = 0.3f, ColorB = 0.3f, Metallic = 0.5f, Roughness = 0.6f,
         },
         new BlockDef
         {
             Id = "toolbox", Name = "Stowage Box", Category = "Details", Kind = BlockKind.Detail,
-            Description = "A box for tools and kit, bolted to the outside. For looks.",
+            Description = "A box of tools. With crew aboard and no one shooting at it for a few seconds, each box (up to three) lets them patch damaged blocks back up. They can't rebuild what's been shot away.",
             MassKg = 30, Hp = 25, ArmorMm = 3, HasCollider = false, Watertight = false, Displacement = 0f,
             ColorR = 0.33f, ColorG = 0.36f, ColorB = 0.27f, Metallic = 0.5f, Roughness = 0.6f,
         },
         new BlockDef
         {
             Id = "spare_tracks", Name = "Spare Track Links", Category = "Details", Kind = BlockKind.Detail,
-            Description = "Spare links hung on the armor. For looks (real crews hoped they'd stop a shell).",
+            Description = "Spare links hung on the armor. With crew aboard and out of the fight, they refit a lost track or wheel every 20 seconds (faster with two sets).",
             MassKg = 40, Hp = 25, ArmorMm = 3, HasCollider = false, Watertight = false, Displacement = 0f,
             ColorR = 0.2f, ColorG = 0.2f, ColorB = 0.2f, Metallic = 0.5f, Roughness = 0.6f,
         },
         new BlockDef
         {
             Id = "antenna", Name = "Antenna", Category = "Details", Kind = BlockKind.Detail,
-            Description = "A whip antenna on an insulated base. For looks.",
+            Description = "A radio antenna. Each one (up to three) on a vehicle with a command console reaches 1 km further with orders.",
             MassKg = 4, Hp = 25, ArmorMm = 3, HasCollider = false, Watertight = false, Displacement = 0f,
             ColorR = 0.2f, ColorG = 0.2f, ColorB = 0.2f, Metallic = 0.5f, Roughness = 0.6f,
         },
         new BlockDef
         {
             Id = "railing", Name = "Railing", Category = "Details", Kind = BlockKind.Detail,
-            Description = "A guard rail along the back edge of the cell: decks, walkways, bridges. For looks.",
-            MassKg = 8, Hp = 25, ArmorMm = 3, HasCollider = false, Watertight = false, Displacement = 0f,
+            Description = "A guard rail along the back edge of the cell: decks, walkways, roofs. It keeps people from walking off the edge.",
+            MassKg = 8, Hp = 25, ArmorMm = 3, HasCollider = true, Watertight = false, Displacement = 0f,
             ColorR = 0.55f, ColorG = 0.57f, ColorB = 0.58f, Metallic = 0.5f, Roughness = 0.6f,
         },
         new BlockDef
@@ -1055,42 +1055,42 @@ public static class BlockCatalog
         new BlockDef
         {
             Id = "smoke_launcher", Name = "Smoke Launchers", Category = "Details", Kind = BlockKind.Detail,
-            Description = "A rack of three smoke dischargers. For looks.",
-            MassKg = 18, Hp = 25, ArmorMm = 3, HasCollider = false, Watertight = false, Displacement = 0f,
+            Description = "A rack of three smoke dischargers. Z fires every rack, throwing a wall of smoke ahead that gunners can't see through. AI crews fire them when they're hit hard. Reloaded at supply points.",
+            AmmoUnits = 1, MassKg = 18, Hp = 25, ArmorMm = 3, HasCollider = false, Watertight = false, Displacement = 0f,
             ColorR = 0.3f, ColorG = 0.32f, ColorB = 0.27f, Metallic = 0.5f, Roughness = 0.6f,
         },
         new BlockDef
         {
             Id = "exhaust", Name = "Exhaust", Category = "Details", Kind = BlockKind.Detail,
-            Description = "A muffler with a heat shield and a pipe. For looks.",
+            Description = "A muffler and pipe: it puffs smoke when the engine works hard.",
             MassKg = 15, Hp = 25, ArmorMm = 3, HasCollider = false, Watertight = false, Displacement = 0f,
             ColorR = 0.25f, ColorG = 0.24f, ColorB = 0.22f, Metallic = 0.5f, Roughness = 0.6f,
         },
         new BlockDef
         {
             Id = "searchlight", Name = "Searchlight", Category = "Details", Kind = BlockKind.Detail,
-            Description = "A big lamp on a turning yoke: ships, towers, airfields. For looks.",
+            Description = "A big lamp on a turning yoke. With the lights on (H) it follows wherever the crew are aiming.",
             MassKg = 30, Hp = 25, ArmorMm = 3, HasCollider = false, Watertight = false, Displacement = 0f,
             ColorR = 0.45f, ColorG = 0.47f, ColorB = 0.48f, Metallic = 0.5f, Roughness = 0.6f,
         },
         new BlockDef
         {
             Id = "vent", Name = "Vent Grille", Category = "Details", Kind = BlockKind.Detail,
-            Description = "Louvers over an engine or a compartment. For looks.",
+            Description = "Louvers that let smoke out: each vent (up to three) makes fires aboard burn out sooner.",
             MassKg = 8, Hp = 25, ArmorMm = 3, HasCollider = false, Watertight = false, Displacement = 0f,
             ColorR = 0.22f, ColorG = 0.22f, ColorB = 0.22f, Metallic = 0.5f, Roughness = 0.6f,
         },
         new BlockDef
         {
             Id = "grab_handles", Name = "Grab Handles", Category = "Details", Kind = BlockKind.Detail,
-            Description = "Handles for the crew to hang on to. For looks.",
+            Description = "Handles to climb by: walk up and push toward them to climb onto the vehicle, like a ladder.",
             MassKg = 3, Hp = 25, ArmorMm = 3, HasCollider = false, Watertight = false, Displacement = 0f,
             ColorR = 0.5f, ColorG = 0.5f, ColorB = 0.5f, Metallic = 0.5f, Roughness = 0.6f,
         },
         new BlockDef
         {
             Id = "stowage_rack", Name = "Stowage Rack", Category = "Details", Kind = BlockKind.Detail,
-            Description = "A rack with bedrolls and kit bags. For looks.",
+            Description = "A rack of kit. Counts as a toolbox for field repairs.",
             MassKg = 25, Hp = 25, ArmorMm = 3, HasCollider = false, Watertight = false, Displacement = 0f,
             ColorR = 0.28f, ColorG = 0.3f, ColorB = 0.22f, Metallic = 0.5f, Roughness = 0.6f,
         },

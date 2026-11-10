@@ -124,7 +124,7 @@ public partial class PlayerCharacter
                 for (int dx = -1; dx <= 1; dx++)
                 for (int dz = -1; dz <= 1; dz++)
                 {
-                    if (!s.Cells.TryGetValue(c + new Int3(dx, 0, dz), out BlockInstance b) || !b.Alive || b.Def.Id != "ladder") continue;
+                    if (!s.Cells.TryGetValue(c + new Int3(dx, 0, dz), out BlockInstance b) || !b.Alive || b.Def.Id is not ("ladder" or "grab_handles")) continue;
                     host = h;
                     return true;
                 }

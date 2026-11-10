@@ -60,7 +60,7 @@ public partial class TestRange : Node3D
     private bool _liveFire;
     private float _deadTime = -1f;
     private bool _resupplying;
-    private bool _interactQueued;
+    private bool _interactQueued, _smokeQueued;
     private VehicleBody _lookedAt;
 
     // Vehicle camera
@@ -548,7 +548,7 @@ public partial class TestRange : Node3D
             return;
         }
 
-        Vector3 spot = StandBySeat(v) ?? FindExitSpot(v);
+        Vector3 spot = StandBySeat(v) ?? OutThroughHatch(v) ?? FindExitSpot(v);
         v.Exit();
         _mount = null;
         _me.GlobalPosition = spot;
@@ -723,6 +723,17 @@ public partial class TestRange : Node3D
             {
                 _missileQueued = false;
                 LaunchMissile();
+            }
+
+            if (_smokeQueued)
+            {
+                _smokeQueued = false;
+                if (_mount.FireSmoke()) AddFeed($"[color={Ui.Hex(Ui.Info)}]SMOKE  ·  a screen goes up ahead: nobody can see through it for a while[/color]", true);
+                else
+                {
+                    Big(_mount.Model.Instances.Any(b => b.Alive && b.Def.Id == "smoke_launcher") ? "Smoke launchers empty: reload at a supply point" : "No smoke launchers");
+                    Sfx.Play2D(this, SoundId.Error, -10f);
+                }
             }
 
             if (_bombQueued)
@@ -977,6 +988,16 @@ public partial class TestRange : Node3D
         else if (e.IsActionPressed("missile") && Mounted) _missileQueued = true;
         else if (e.IsActionPressed("bomb") && Mounted) _bombQueued = true;
         else if (e.IsActionPressed("vtol") && Mounted) _vtolQueued = true;
+        else if (e.IsActionPressed("smoke") && Mounted) _smokeQueued = true;
+        else if (e.IsActionPressed("lights") && Mounted)
+        {
+            if (!_mount.HasLights) Big("No lights on this design");
+            else
+            {
+                _mount.ToggleLights();
+                Big(_mount.LightsOn ? "Lights on" : "Lights off");
+            }
+        }
         else if (e.IsActionPressed("respawn")) RespawnAll();
         else if (e.IsActionPressed("reset_targets"))
         {
@@ -1052,7 +1073,41 @@ public partial class TestRange : Node3D
             return;
         }
 
-        EnterVehicle(v, null);
+        // Climbing in through a hatch takes the seat nearest it.
+        BlockInstance hatch = HatchNear(v, _me.GlobalPosition + Vector3.Up * 0.9f, 2.4f);
+        EnterVehicle(v, null, hatch != null ? v.SeatNear(v.View.BlockWorldPos(hatch), 50f) : null);
+    }
+
+    /// <summary>A hatch on a vehicle within <paramref name="range"/> m of a point.</summary>
+    private static BlockInstance HatchNear(VehicleBody v, Vector3 point, float range)
+    {
+        BlockInstance best = null;
+        float bestD = range;
+        foreach (BlockInstance b in v.Model.Instances)
+        {
+            if (!b.Alive || b.Def.Id != "hatch") continue;
+            float d = v.View.BlockWorldPos(b).DistanceTo(point);
+            if (d >= bestD) continue;
+            bestD = d;
+            best = b;
+        }
+
+        return best;
+    }
+
+    /// <summary>Getting out through the hatch nearest your seat: you come up standing on top of it.</summary>
+    private Vector3? OutThroughHatch(VehicleBody v)
+    {
+        if (v.PlayerSeat == null) return null;
+        BlockInstance hatch = HatchNear(v, v.SeatWorldPos(v.PlayerSeat), 4f);
+        if (hatch == null) return null;
+        Vector3 top = v.View.BlockWorldPos(hatch) + Vector3.Up * 0.2f;
+        var q = new PhysicsShapeQueryParameters3D
+        {
+            Shape = new CapsuleShape3D { Radius = 0.32f, Height = 1.8f }, Transform = new Transform3D(Basis.Identity, top + Vector3.Up * 0.96f),
+            CollisionMask = GridRegistry.Layers.All,
+        };
+        return GetWorld3D().DirectSpaceState.IntersectShape(q, 1).Count == 0 ? top : null;
     }
 
     /// <summary>A crew station of one of your vehicles within arm's reach.</summary>
@@ -1420,6 +1475,13 @@ public partial class TestRange : Node3D
         if (!v.IsNaval && v.Submerged > 0.25f) sb.Append($"[color={Ui.Hex(Ui.Warn)}]Deep water: land vehicles sink. Back out while the engine still runs.[/color]\n");
         if (v.IsUpsideDownOrStuck && (!v.IsAir || v.OnGround)) sb.Append($"[color={Ui.Hex(Ui.Warn)}]Tipped over: press R to get back up.[/color]\n");
         if (_resupplying) sb.Append($"[color={Ui.Hex(Ui.Good)}]Resupplying...[/color]\n");
+        {
+            int racks = v.Model.Instances.Count(b => b.Alive && b.Def.Id == "smoke_launcher");
+            string kit = (racks > 0 ? $"Smoke [b]{v.SmokeReady}[/b]/{racks} [color={Ui.Hex(Ui.Dim)}]Z[/color]   " : "") +
+                         (v.HasLights ? $"Lights [b]{(v.LightsOn ? "on" : "off")}[/b] [color={Ui.Hex(Ui.Dim)}]H[/color]" : "");
+            if (kit.Length > 0) sb.Append(kit.TrimEnd() + "\n");
+        }
+
         if (v.FiresBurning > 0)
             sb.Append($"[color={Ui.Hex(Ui.Bad)}][b]FIRE[/b]: {v.FiresBurning} block(s) burning. The crew are fighting it; get out with the welding torch (3) to put it out faster.[/color]\n");
         _missingTimer -= (float)GetProcessDeltaTime();

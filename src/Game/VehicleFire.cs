@@ -30,6 +30,7 @@ public partial class VehicleBody
     /// <summary>A block was hit and survived: it may catch fire.</summary>
     public void HitBy(BlockInstance b, float damage)
     {
+        _lastHitAt = Time.GetTicksMsec() / 1000.0;
         if (b == null || !b.Alive || !Fire.Burns(b.Def)) return;
         BlockInstance anchor = Model.Blocks.TryGetValue(b.Cell, out BlockInstance a) ? a : b;
         if (!_fires.MaybeIgnite(anchor.Cell, anchor.Def, damage, CrewAboard)) return;

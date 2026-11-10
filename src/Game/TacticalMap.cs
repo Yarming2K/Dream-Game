@@ -104,8 +104,17 @@ public partial class TacticalMap : Control
         return h?.Body != null && IsInstanceValid(h.Body) ? h.Body.GlobalPosition : Vector3.Zero;
     }
 
+    /// <summary>How far the console's orders reach: further with antennas aboard.</summary>
+    private float CommandRange()
+    {
+        IGridHost h = ConsoleHost?.Invoke();
+        if (h == null || h.Model == null) return Sensors.CommandRangeM;
+        int antennas = h.Model.Instances.Count(b => b.Alive && b.Def.Id == "antenna");
+        return Fittings.CommandRange(antennas);
+    }
+
     /// <summary>One of your AI units that the console's orders reach.</summary>
-    private bool InRange(VehicleBody v) => v.GlobalPosition.DistanceTo(ConsolePos()) <= Sensors.CommandRangeM;
+    private bool InRange(VehicleBody v) => v.GlobalPosition.DistanceTo(ConsolePos()) <= CommandRange();
 
     private bool Commandable(VehicleBody v) => Alive(v) && v.Faction == 0 && v != PlayerVehicle?.Invoke();
 
@@ -254,7 +263,7 @@ public partial class TacticalMap : Control
 
         // Command range round the console.
         Vector3 cp = ConsolePos();
-        DrawArc(ToScreen(cp), Sensors.CommandRangeM * _zoom, 0, Mathf.Tau, 128, new Color(Mine, 0.35f), 1.5f, true);
+        DrawArc(ToScreen(cp), CommandRange() * _zoom, 0, Mathf.Tau, 128, new Color(Mine, 0.35f), 1.5f, true);
         DrawCircle(ToScreen(cp), 5f, Mine);
 
         VehicleBody me = PlayerVehicle?.Invoke();

@@ -28,7 +28,7 @@ public partial class VehicleBody
     public bool RadarAlive { get; private set; }
 
     /// <summary>How far this unit spots enemies, in meters.</summary>
-    public float SightM => Sensors.SightM(Analysis.Mode, RadarAlive, ConsoleAlive);
+    public float SightM => Sensors.SightM(Analysis.Mode, RadarAlive, ConsoleAlive) * Fittings.SightFactor(_periscopes);
 
     /// <summary>A short name for the map: "Warden", "Corsair".</summary>
     public string ShortName => (Blueprint?.Name ?? "Vehicle").Split(" (")[0];

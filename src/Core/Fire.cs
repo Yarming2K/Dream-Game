@@ -66,10 +66,13 @@ public sealed class FireSim
     public bool IsBurning(Int3 anchor) => _left.ContainsKey(anchor);
 
     /// <summary>Sets a block alight (if it can burn and isn't already). Returns true if it caught.</summary>
+    /// <summary>Vents aboard shorten every fire by this factor (see <see cref="Fittings.FireScale"/>).</summary>
+    public float BurnScale = 1f;
+
     public bool Ignite(Int3 anchor, BlockDef def, bool crewed = false)
     {
         if (def == null || !Fire.Burns(def) || _left.ContainsKey(anchor)) return false;
-        _left[anchor] = crewed ? Fire.CrewedBurnS : Fire.BurnS;
+        _left[anchor] = (crewed ? Fire.CrewedBurnS : Fire.BurnS) * BurnScale;
         return true;
     }
 

@@ -203,12 +203,48 @@ public static class WorldQuery
         return best;
     }
 
+    private readonly struct SmokeCloud
+    {
+        public readonly Vector3 Center;
+        public readonly float Radius;
+        public readonly double Ends;
+        public SmokeCloud(Vector3 c, float r, double ends) { Center = c; Radius = r; Ends = ends; }
+    }
+
+    private static readonly List<SmokeCloud> Smoke = new();
+
+    /// <summary>A smoke screen: nobody can see through it until it thins out.</summary>
+    public static void AddSmoke(Vector3 center, float radius, float lifeS) =>
+        Smoke.Add(new SmokeCloud(center, radius, Time.GetTicksMsec() / 1000.0 + lifeS));
+
+    /// <summary>Does a line of sight pass through a smoke screen?</summary>
+    public static bool ThroughSmoke(Vector3 from, Vector3 to)
+    {
+        if (Smoke.Count == 0) return false;
+        double now = Time.GetTicksMsec() / 1000.0;
+        Smoke.RemoveAll(s => s.Ends < now);
+        Vector3 d = to - from;
+        float len = d.Length();
+        if (len < 1e-3f) return false;
+        d /= len;
+        foreach (SmokeCloud s in Smoke)
+        {
+            float t = Mathf.Clamp((s.Center - from).Dot(d), 0f, len);
+            // Only clouds between the two (not one you're standing in at the start or end) block the view.
+            if (t < 1f || t > len - 1f) continue;
+            if ((from + d * t).DistanceSquaredTo(s.Center) < s.Radius * s.Radius) return true;
+        }
+
+        return false;
+    }
+
     /// <summary>
     /// Whether one point can see another: no ground, scenery or other grid in between. Grids
     /// <paramref name="self"/> and <paramref name="target"/> are ignored.
     /// </summary>
     public static bool LineClear(Node3D context, Vector3 from, Vector3 to, IGridHost self, IGridHost target)
     {
+        if (ThroughSmoke(from, to)) return false;
         if (GroundRay(context, from, to, out _, out _)) return false;
         return !FirstBlock(from, to, self, target, out _, out _);
     }

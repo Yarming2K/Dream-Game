@@ -535,13 +535,19 @@ public static class ExampleDesigns
         var d = new Draft();
         const int bow = -30, stern = 27, deck = 7;
 
-        // Machinery: the reactor amidships with capacitor banks beside it, turbines and their fuel aft.
+        // Machinery: the reactor amidships with capacitor banks along the port side of its room (the
+        // starboard side is left clear to walk in through the door), turbines and their fuel aft.
         d.Set(0, 2, 2, "reactor");
-        foreach (int x in new[] { -3, 3 })
+        foreach (int x in new[] { -4, -3 })
         {
             d.Set(x, 1, 1, "capacitor");
             d.Set(x, 1, 3, "capacitor");
         }
+
+        // Inside: a door from the forward compartment through the bulkhead into the reactor room, and
+        // lamps along the deckhead below decks.
+        d.Set(2, 2, -2, "door");
+        foreach ((int x, int z) in new[] { (0, -9), (0, -5), (3, 1), (3, 4) }) d.Set(x, deck - 1, z, "lamp");
 
         // (A big block's anchor is the middle of its box, rounding toward +x: a 2-wide one at x = -3 spans -3..-2.)
         foreach (int x in new[] { -3, 2 })
@@ -597,21 +603,31 @@ public static class ExampleDesigns
             d.Set(x, deck, -15, "vls_sam");
         }
 
-        // Bridge, with the radar mast and a close-in gatling on its roof.
-        d.Set(0, deck + 1, -9, "driver_seat");
-        d.Set(0, deck + 2, -9, "commander_seat");
-        d.Set(1, deck + 1, -8, "command_console");
-        d.Fill(-2, 2, deck + 1, deck + 3, -10, -4, "armor_light");
-        d.Fill(-2, 2, deck + 2, deck + 2, -10, -10, "glazing");
-        d.Fill(-3, -3, deck + 2, deck + 2, -9, -6, "glazing");
-        d.Fill(3, 3, deck + 2, deck + 2, -9, -6, "glazing");
-        d.Fill(-3, -3, deck + 1, deck + 3, -10, -4, "armor_light");
-        d.Fill(3, 3, deck + 1, deck + 3, -10, -4, "armor_light");
-        d.FillSlope(-3, 3, deck + 3, deck + 3, -11, -11, "armor_light_slope", new Int3(0, 1, -1));
-        d.Fill(-1, 1, deck + 4, deck + 5, -5, -4, "armor_light");
-        d.Set(0, deck + 6, -5, "radar");
-        d.Set(0, deck + 6, -4, "antenna");
-        Ciws(d, deck + 4, -8, Int3.Forward);
+        // Bridge: a room you can walk into, 2 m high, windows all round, the wheel and the command console
+        // at the front window, the commander's seat beside them, lamps overhead, a door at the back, and a
+        // ladder down through the deck to the compartment below. The radar mast and a close-in gatling on
+        // the roof.
+        const int br = deck + 5; // the bridge roof
+        d.Set(0, deck + 1, -10, "driver_seat");
+        d.Set(-2, deck + 1, -10, "commander_seat");
+        d.Set(2, deck + 1, -10, "command_console");
+        d.Set(-1, deck + 2, -4, "door");
+        foreach ((int x, int z) in new[] { (0, -8), (-2, -6) }) d.Set(x, br - 1, z, "lamp");
+        d.Fill(-2, 2, deck + 3, deck + 4, -11, -11, "glazing");
+        d.Fill(-3, -3, deck + 3, deck + 4, -10, -6, "glazing");
+        d.Fill(3, 3, deck + 3, deck + 4, -10, -6, "glazing");
+        d.Fill(-3, 3, deck + 1, br - 1, -11, -11, "armor_light");
+        d.Fill(-3, -3, deck + 1, br - 1, -10, -4, "armor_light");
+        d.Fill(3, 3, deck + 1, br - 1, -10, -4, "armor_light");
+        d.Fill(-2, 2, deck + 1, br - 1, -4, -4, "armor_light");
+        d.Fill(-3, 3, br, br, -11, -4, "armor_light");
+        d.FillSlope(-3, 3, br, br, -12, -12, "armor_light_slope", new Int3(0, 1, -1));
+        d.Fill(-1, 1, br + 1, br + 2, -5, -4, "armor_light");
+        d.Set(0, br + 3, -5, "radar");
+        d.Set(0, br + 3, -4, "antenna");
+        d.Set(1, br + 3, -4, "antenna");
+        d.Set(-2, br + 1, -6, "searchlight");
+        Ciws(d, br + 1, -9, Int3.Forward);
 
         // A funnel-less deckhouse aft (a reactor needs no smoke stack), with the aft gatling on it.
         d.Fill(-2, 2, deck + 1, deck + 2, 6, 11, "armor_light");
@@ -626,9 +642,13 @@ public static class ExampleDesigns
         d.Fill(-1, 1, deck + 1, deck + 1, 16, 16, "armor_light");
         d.Set(-1, deck + 1, 17, "armor_light");
 
-        // Main deck.
+        // Main deck, with a hatchway in the bridge floor and a ladder down it to the deck below.
         d.Fill(-5, 5, deck, deck, bow + 1, stern, "armor_light");
         d.Fill(-4, 4, deck, deck, bow, bow, "armor_light");
+        foreach (int x in new[] { 1, 2 })
+            foreach (int z in new[] { -6, -5 })
+                d.Remove(x, deck, z);
+        for (int y = 1; y <= deck + 1; y++) d.Set(2, y, -7, "ladder", Orient(new Int3(0, -1, 0), new Int3(0, 0, 1)));
 
         // Two screws and two rudders under the stern.
         foreach (int x in new[] { -2, 2 })
@@ -640,7 +660,6 @@ public static class ExampleDesigns
         foreach (int s in new[] { -1, 1 })
             for (int z = bow + 3; z <= stern - 1; z++)
                 if (z < -11 || z > -3) d.Set(5 * s, deck + 1, z, "railing", Orient(new Int3(0, -1, 0), new Int3(-s, 0, 0)));
-        d.Set(-2, deck + 4, -6, "searchlight");
         return d.Build("Trident (missile destroyer)", "naval");
     }
 

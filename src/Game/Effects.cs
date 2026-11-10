@@ -736,6 +736,61 @@ public static class Effects
         });
     }
 
+    // ---------- Smoke screens and exhaust ----------
+
+    private static readonly Gradient ScreenSmoke = Ramp(
+        (0f, new Color(0.85f, 0.85f, 0.83f, 0f)), (0.08f, new Color(0.84f, 0.84f, 0.82f, 0.9f)),
+        (0.75f, new Color(0.8f, 0.8f, 0.79f, 0.75f)), (1f, new Color(0.78f, 0.78f, 0.77f, 0f)));
+
+    /// <summary>
+    /// A smoke grenade thrown from <paramref name="from"/> to <paramref name="land"/>: a quick streak of
+    /// smoke along the throw, then a thick cloud that keeps billowing for <paramref name="lifeS"/> seconds.
+    /// </summary>
+    public static void SmokeScreen(Node3D world, Vector3 from, Vector3 land, float radius, float lifeS)
+    {
+        if (world == null) return;
+        FxNode throwFx = Spawn(world, from, 3f);
+        for (int i = 1; i <= 6; i++)
+        {
+            Vector3 p = from.Lerp(land, i / 6f) + Vector3.Up * Mathf.Sin(i / 6f * Mathf.Pi) * 4f - from;
+            Emit(throwFx, new Burst
+            {
+                Mat = Smoke, Size = 0.9f, Amount = 2, Life = 1.6f, Dir = Vector3.Up, Spread = 60, VelMin = 0.2f, VelMax = 0.8f,
+                Gravity = new Vector3(0, 0.3f, 0), Colors = ScreenSmoke, ScaleFrom = 0.4f, ScaleTo = 1f, EmitRadius = 0.2f,
+            });
+            throwFx.GetChild<CpuParticles3D>(throwFx.GetChildCount() - 1).Position = p;
+        }
+
+        var cloud = new Node3D { Name = "SmokeScreen" };
+        world.AddChild(cloud);
+        cloud.GlobalPosition = land;
+        var p2 = Loop(Smoke, radius * 0.9f, 26, 7f, 70f, 0.4f, 1.6f, new Vector3(0, 0.15f, 0), ScreenSmoke, 0.35f, 1f);
+        p2.EmissionSphereRadius = radius * 0.55f;
+        p2.DampingMin = 0.6f;
+        p2.DampingMax = 1.2f;
+        cloud.AddChild(p2);
+        cloud.GetTree().CreateTimer(lifeS - 6f).Timeout += () =>
+        {
+            if (GodotObject.IsInstanceValid(p2)) p2.Emitting = false;
+        };
+        cloud.GetTree().CreateTimer(lifeS + 2f).Timeout += () =>
+        {
+            if (GodotObject.IsInstanceValid(cloud)) cloud.QueueFree();
+        };
+    }
+
+    /// <summary>A puff of exhaust from a working engine (darker and bigger the harder it works).</summary>
+    public static void ExhaustPuff(Node3D world, Vector3 pos, Vector3 dir, float load)
+    {
+        if (world == null || Detail(pos, 0.3f) < 2) return;
+        FxNode fx = Spawn(world, pos, 2.2f);
+        Emit(fx, new Burst
+        {
+            Mat = Smoke, Size = 0.35f + 0.3f * load, Amount = 2, Life = 1.6f, Dir = dir + Vector3.Up * 0.5f, Spread = 20, VelMin = 1f,
+            VelMax = 2.5f, DampMin = 1.5f, DampMax = 2.5f, Gravity = new Vector3(0, 0.7f, 0), Colors = BlastSmoke, ScaleFrom = 0.3f, ScaleTo = 1f,
+        });
+    }
+
     // ---------- Fires aboard ----------
 
     private static CpuParticles3D Loop(Material m, float size, int amount, float life, float spread, float vMin, float vMax, Vector3 gravity,

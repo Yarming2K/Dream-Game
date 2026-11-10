@@ -316,6 +316,7 @@ public partial class VehicleBody
 
         AirWatch(dt);
         PointDefenseWatch();
+        AiSmoke();
         if (!AiTargetValid())
         {
             _aiHasAim = false;
@@ -757,6 +758,7 @@ public partial class VehicleBody
             changed = true;
         }
 
+        ReloadSmoke(dt);
         return ResupplyOrdnance(dt) || changed;
     }
 }

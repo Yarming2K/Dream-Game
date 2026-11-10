@@ -161,6 +161,14 @@ Jets push on their own at any speed. Opening the throttle all the way lights the
 - **Fire.** Fuel, engines, generators, ammunition, propellant, missile motors and electronics can catch fire when hit and not destroyed. A fire burns its block down, spreads to flammable neighbors, and burns out after about 30 s (18 s with crew aboard fighting it). Water inside the hull puts it out, and so does the welding torch played on it. A block that burns away goes up as if it were shot: fuel bursts and ammunition cooks off. The HUD warns while anything's burning.
 - **Flooding you can see.** Each flooding compartment shows its water surface, rising as it fills.
 - **Hidden machinery.** Blocks walled in on every side by solid plate aren't drawn (they reappear as soon as a neighbor is shot away).
+- **Every fitting works** (nothing is just for looks):
+  - **Periscopes** spot 15% further each (up to two). **Antennas** carry a console's orders 1 km further each (up to three).
+  - **Toolboxes and stowage racks** let the crew patch damaged blocks once nothing has hit the vehicle for 8 s (3 HP/s each, up to three). **Spare track links** let them refit a lost track or wheel every 20 s (10 s with two sets). Neither rebuilds anything else: that's still the welder's job.
+  - **Vents** make fires burn out 15% sooner each (up to three).
+  - **Smoke launchers** (Z) throw a screen 22 m ahead that nobody can see through for 40 s; AI crews fire theirs when they've been hit hard. Reloaded at supply points.
+  - **Headlights** light the way and the **searchlight** follows the aim (H toggles both). **Exhausts** smoke under load.
+  - **Hatches** are ways in and out: E at a hatch takes the seat nearest it, and you get out through it. **Grab handles** climb like ladders. **Railings** stop people walking off an edge.
+- **The Trident** is walkable inside: in at the bridge door (the wheel, console and commander's seat are at the front window), down the ladder through the bridge floor, and through a watertight door into the reactor room.
 
 ### Mobility
 - Wheels and track segments both use raycast suspension. Wheels steer; tracks skid-steer.

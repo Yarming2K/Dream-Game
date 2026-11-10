@@ -337,6 +337,7 @@ public partial class VehicleBody : RigidBody3D, IGridHost
         RefreshNaval();
         RefreshAir();
         RefreshPower();
+        RefreshFittings();
     }
 
     private static List<Int3> RacksFor(GunRt g, AmmoType type) => type switch
@@ -448,6 +449,7 @@ public partial class VehicleBody : RigidBody3D, IGridHost
         FireTick(dt);
         InteriorTick(dt);
         FloodViewTick(dt);
+        FittingsTick(dt);
         foreach (GunRt g in Guns)
         {
             if (g.SalvoLeft > 0) SalvoTick(g, dt);
@@ -870,6 +872,7 @@ public partial class VehicleBody : RigidBody3D, IGridHost
 
     public void OnBlocksRemoved()
     {
+        _lastHitAt = Time.GetTicksMsec() / 1000.0;
         Unpark();
         if (Model.Blocks.Count == 0)
         {

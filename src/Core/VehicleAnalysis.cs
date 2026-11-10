@@ -162,6 +162,9 @@ public sealed class VehicleAnalysis
 
     /// <summary>Charge the vehicle can hold for energy weapons, in MJ (capacitors and the sources' own buffers).</summary>
     public float StorageMJ;
+
+    /// <summary>The working fittings aboard: periscopes, antennas, toolboxes and so on.</summary>
+    public FittingCounts Kit;
     public float TrackFraction;
     public float RollingResistance;
     public float DragArea;
@@ -245,6 +248,7 @@ public sealed class VehicleAnalysis
         a.FindGuns();
         a.FindMissiles();
         a.FindDisconnected();
+        a.Kit = Fittings.Count(a.Anchors.Where(c => !a.Disconnected.Contains(c)).Select(c => a.Defs[c]));
         a.ComputeMass();
         a.ComputeMobility();
         a.ComputeNaval();
