@@ -130,6 +130,11 @@ public partial class TestRange : Node3D
         AddChild(_combat);
         _combat.Event += OnCombatEvent;
         _combat.Blast += OnBlast;
+        _combat.ShotDown += (at, byPlayer) =>
+        {
+            if (_mount != null && at.DistanceTo(_mount.GlobalPosition) < 3000f)
+                AddFeed($"[color={Ui.Hex(Ui.Good)}]INTERCEPTED  ·  {(byPlayer ? "you" : "point defense")} shot it down[/color]", true);
+        };
 
         _pivot = new Node3D { Name = "CameraPivot" };
         AddChild(_pivot);
@@ -711,7 +716,7 @@ public partial class TestRange : Node3D
 
             _bombImpact = _mount.BombsLeft > 0 ? _mount.BombImpact(space) : null;
             bool radar = _mount.Analysis.Missiles.Any(m => m.Valid && m.Stats.Seeker == SeekerKind.Radar) && _mount.MissilesReady > 0;
-            _lock = radar ? VehicleBody.RadarLock(o, d, _mount.Faction, 25f, 4000f) : null;
+            _lock = radar ? VehicleBody.RadarLock(o, d, _mount.Faction, 25f, _mount.HasSams ? 6000f : 4000f) : null;
 
             if (!_remote) _me.GlobalPosition = _mount.PlayerSeat != null ? _mount.SeatWorldPos(_mount.PlayerSeat) : _me.GlobalPosition;
             PredictImpacts(space, exclude);
@@ -967,6 +972,7 @@ public partial class TestRange : Node3D
             {
                 SeekerKind.Optical => "keep the crosshair on the target",
                 SeekerKind.Radar => _lock != null ? $"locked on {_lock.DisplayName}" : "no lock: it will look for one",
+                SeekerKind.Navigation => "cruise missile: it flies itself to where you aimed",
                 _ => "unguided",
             };
             AddFeed($"[color={Ui.Hex(Ui.Info)}]MISSILE AWAY  ·  {how}[/color]", true);
@@ -1333,6 +1339,20 @@ public partial class TestRange : Node3D
         else if (v.IsAir) AirStatus(v, sb);
         else sb.Append($"[font_size=22][b]{Mathf.Abs(v.SpeedKmh):0}[/b][/font_size] km/h   ");
         sb.Append($"Fuel {v.FuelL:0}/{v.FuelCapacityL:0} L   Engines {v.UsablePowerKw:0} kW\n");
+        if (v.HasElectric)
+        {
+            PowerBank e = v.Electric;
+            Color pc = e.Fraction > 0.5f ? Ui.Good : e.Fraction > 0.15f ? Ui.Warn : Ui.Bad;
+            sb.Append($"Power [color={Ui.Hex(pc)}][b]{e.StoredMJ:0}[/b]/{e.CapacityMJ:0} MJ[/color]   making {e.SupplyMW:0.#} MW" +
+                      $"{(e.SupplyMW <= 0 ? $"   [color={Ui.Hex(Ui.Bad)}]generators stopped[/color]" : "")}\n");
+        }
+
+        if (!v.IsAir && v.Analysis.Missiles.Count > 0)
+        {
+            sb.Append($"Missiles [b]{v.MissilesReady}[/b] [color={Ui.Hex(Ui.Dim)}]{(v.Tubes.Count > 0 ? "X" : "F or X")} fires · strike missiles fly to the crosshair, air-defense ones lock the nearest aircraft[/color]");
+            if (_lock != null) sb.Append($"   [color={Ui.Hex(Ui.Bad)}]LOCK {_lock.DisplayName}[/color]");
+            sb.Append('\n');
+        }
         if (!v.DriverAlive) sb.Append($"[color={Ui.Hex(Ui.Bad)}]Driver knocked out. Get out (E) and weld the seat back, or Backspace.[/color]\n");
         else if (v.PowerKw <= 0) sb.Append($"[color={Ui.Hex(Ui.Bad)}]Engines destroyed.[/color]\n");
         else if (v.EngineDrowned) sb.Append($"[color={Ui.Hex(Ui.Bad)}]{(v.IsNaval ? "Engine room flooded: pump it out or weld the holes." : "Engine flooded: it won't run under water. Backspace to respawn.")}[/color]\n");
@@ -1411,14 +1431,20 @@ public partial class TestRange : Node3D
             bool one = row.Guns.Count == 1;
             if (alive == 0) Paint(row.State, "DESTROYED", Ui.Bad);
             else if (crewed == 0) Paint(row.State, one ? "NO GUNNER" : "NO GUNNERS", Ui.Bad);
-            else if (apRounds + heRounds + flakRounds == 0) Paint(row.State, "OUT OF AMMO", Ui.Bad);
+            else if (apRounds + heRounds + flakRounds == 0 && !row.Guns[0].Info.BreechDef.Breech.Beam) Paint(row.State, "OUT OF AMMO", Ui.Bad);
+            else if (row.Guns.Any(g => g.Alive && g.Charging) && v.Electric.StoredMJ < row.Guns[0].Stats.ChargeMJ)
+                Paint(row.State, v.Electric.SupplyMW > 0 ? "CHARGING" : "NO POWER", v.Electric.SupplyMW > 0 ? Ui.Warn : Ui.Bad);
             else if (one && loaded == 0) Paint(row.State, $"RELOADING {nextReload:0.0}s", Ui.Warn);
             else if (one) Paint(row.State, masked > 0 ? "BLOCKED BY OWN HULL" : mine > 0 ? "READY" : "AI GUNNER", masked > 0 ? Ui.Warn : mine > 0 ? Ui.Good : Ui.Info);
             else if (loaded == 0) Paint(row.State, $"RELOADING {nextReload:0.0}s", Ui.Warn);
             else Paint(row.State, mine > 0 ? $"{ready} BEAR · {loaded} LOADED" : $"AI GUNNERS · {loaded} LOADED", mine > 0 ? (ready > 0 ? Ui.Good : Ui.Warn) : Ui.Info);
             row.Reload.Set(crewed > 0 ? progress / crewed : 0f, 1f, loaded == 0 ? Ui.Warn : Ui.Good);
             float pen = row.Guns[0].Stats.ApPenMm;
-            row.Ammo.Text = $"AP {apRounds}   HE {heRounds}{(hasFlak ? $"   FLAK {flakRounds}" : "")}   ·   {pen:0} mm pen";
+            BreechSpec spec = row.Guns[0].Info.BreechDef.Breech;
+            row.Ammo.Text = spec.Beam ? $"Beam   ·   full strength to {row.Guns[0].Stats.BeamRangeM:0} m   ·   {spec.ChargeMJ * 10f:0} MW while firing"
+                : spec.Rail ? $"Slugs {apRounds}   ·   {pen:0} mm pen   ·   {spec.ChargeMJ:0} MJ a shot"
+                : spec.Rocket ? $"Rockets {heRounds}   ·   salvo of {row.Guns[0].Stats.Burst}"
+                : $"AP {apRounds}   HE {heRounds}{(hasFlak ? $"   FLAK {flakRounds}" : "")}   ·   {pen:0} mm pen";
         }
     }
 
@@ -1561,7 +1587,16 @@ public partial class TestRange : Node3D
 
     private void OnFired(VehicleBody.GunRt g)
     {
-        float c = g.Stats.CaliberMm;
+        BreechSpec spec = g.Info.BreechDef.Breech;
+        if (spec.Beam) return;
+        if (spec.Burst > 1)
+        {
+            // A gatling buzzes rather than kicks.
+            _trauma = Mathf.Min(0.35f, _trauma + 0.04f);
+            return;
+        }
+
+        float c = spec.Rail ? 110f : g.Stats.CaliberMm;
         _trauma = Mathf.Min(1f, _trauma + 0.22f + c / 450f);
         // A whole broadside going off at once kicks no harder than its biggest gun twice over.
         _fovKick = Mathf.Min(_fovKick + 2f + c / 28f, Mathf.Max(_fovKick, 2f * (2f + c / 28f)));

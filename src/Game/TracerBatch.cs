@@ -157,6 +157,27 @@ public partial class TracerBatch : Node3D
             });
     }
 
+    /// <summary>
+    /// A laser beam for this step: the whole line with a hot core, drawn in pieces so each piece is thick
+    /// enough to see from where the camera is, and a glow where it lands.
+    /// </summary>
+    public void Beam(Vector3 from, Vector3 to, float width, Color tint, float glow)
+    {
+        float len = from.DistanceTo(to);
+        if (len < 0.01f) return;
+        int pieces = Math.Clamp((int)(len / 120f) + 1, 1, 8);
+        for (int i = 0; i < pieces; i++)
+        {
+            Vector3 a = from.Lerp(to, i / (float)pieces), b = from.Lerp(to, (i + 1) / (float)pieces);
+            float w = Mathf.Max(width, _viewer.DistanceTo((a + b) * 0.5f) * 0.0012f);
+            _lines.Put(Segment(a, b, w), tint);
+            _lines.Put(Segment(a, b, w * 0.35f), new Color(1f, 1f, 1f, tint.A));
+        }
+
+        float head = Mathf.Max(glow, _viewer.DistanceTo(to) * 0.004f);
+        _heads.Put(new Transform3D(Basis.FromScale(Vector3.One * head), to), tint);
+    }
+
     /// <summary>Adds the fading trails and sends everything to the GPU.</summary>
     public void End()
     {

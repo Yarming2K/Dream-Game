@@ -140,11 +140,21 @@ public static class ExampleDesigns
 
     public static IReadOnlyList<Blueprint> All => new[]
     {
-        Warden(), Jackal(), Bulwark(), Skyguard(), Corsair(), Barracuda(), Kestrel(), Falcon(), Hornet(), Wasp(), Zephyr(), Colossus(),
+        Warden(), Vanguard(), Jackal(), Hailstorm(), Bulwark(), Skyguard(), Corsair(), Trident(), Barracuda(), Kestrel(), Falcon(), Hornet(),
+        Wasp(), Zephyr(), Colossus(),
     };
 
     /// <summary>Medium tank: sloped front, 76 mm gun in a turret with a gunner and commander, ammo stored low in the hull.</summary>
-    public static Blueprint Warden()
+    public static Blueprint Warden() => MediumTank(railgun: false);
+
+    /// <summary>
+    /// Railgun tank: the Warden's hull and turret carrying a railgun on eight rails instead of the 76 mm gun.
+    /// Two generators in the engine bay and three capacitor banks under the turret power it; it fires slugs
+    /// from the AP racks.
+    /// </summary>
+    public static Blueprint Vanguard() => MediumTank(railgun: true);
+
+    private static Blueprint MediumTank(bool railgun)
     {
         var d = new Draft();
         for (int z = -5; z <= 4; z++)
@@ -160,13 +170,14 @@ public static class ExampleDesigns
         d.Set(1, 1, -1, "ammo_ap");
         d.Set(-1, 1, 0, "ammo_ap");
         d.Set(1, 1, 0, "ammo_ap");
-        d.Set(-1, 1, -2, "ammo_he");
-        d.Set(1, 1, -2, "ammo_he");
+        d.Set(-1, 1, -2, railgun ? "capacitor" : "ammo_he");
+        d.Set(1, 1, -2, railgun ? "capacitor" : "ammo_he");
+        if (railgun) d.Set(0, 1, -2, "capacitor");
         d.Set(-1, 1, 3, "engine_large");
         d.Set(1, 1, 3, "engine_small");
         d.Set(0, 1, 3, "fuel_tank");
-        d.Set(-2, 1, 3, "fuel_tank");
-        d.Set(2, 1, 3, "fuel_tank");
+        d.Set(-2, 1, 3, railgun ? "generator" : "fuel_tank");
+        d.Set(2, 1, 3, railgun ? "generator" : "fuel_tank");
         d.Set(0, 1, 4, "fuel_tank");
 
         // Front: a steep lower plate, then one long shallow upper glacis (two blocks deep), which counts as
@@ -185,13 +196,22 @@ public static class ExampleDesigns
         d.Fill(-3, 3, 2, 2, -4, 5, "armor_light");
         d.Fill(-2, 2, 0, 1, -5, 4, "frame");
 
-        // Turret: 76 mm, six barrel segments and a muzzle brake.
-        d.Set(0, 3, -1, "breech_76");
-        for (int z = -2; z >= -7; z--) d.Set(0, 3, z, "barrel");
-        d.Set(0, 3, -8, "muzzle_brake");
+        // Turret: 76 mm, six barrel segments and a muzzle brake; or the railgun on its rails.
+        if (railgun)
+        {
+            d.Set(0, 3, -1, "rail_breech");
+            for (int z = -2; z >= -9; z--) d.Set(0, 3, z, "rail");
+        }
+        else
+        {
+            d.Set(0, 3, -1, "breech_76");
+            for (int z = -2; z >= -7; z--) d.Set(0, 3, z, "barrel");
+            d.Set(0, 3, -8, "muzzle_brake");
+        }
+
         d.Set(-1, 3, -1, "loader");
         d.Set(1, 3, -1, "loader");
-        d.Set(0, 3, 0, "propellant");
+        d.Set(0, 3, 0, railgun ? "capacitor" : "propellant");
         d.Set(1, 3, 0, "gunner_seat");
         d.Set(-1, 3, 0, "commander_seat");
         d.Fill(-2, 2, 3, 3, -3, -2, "armor_heavy");
@@ -227,7 +247,7 @@ public static class ExampleDesigns
         }
 
         d.Set(-2, 5, 1, "antenna");
-        return d.Build("Warden (medium tank)", "woodland");
+        return railgun ? d.Build("Vanguard (railgun tank)", "urban") : d.Build("Warden (medium tank)", "woodland");
     }
 
     /// <summary>Fast wheeled scout with a small 37 mm turret. No gunner seat: the driver aims.</summary>
@@ -276,6 +296,59 @@ public static class ExampleDesigns
         d.Set(-2, 3, 3, "antenna");
         d.Set(-1, 5, -1, "hatch");
         return d.Build("Jackal (scout car)", "desert");
+    }
+
+    /// <summary>
+    /// Rocket artillery truck: a glazed cab up front and a launcher on a turntable over the bed, pointing aft,
+    /// with four packs of tubes (eight rockets a salvo) and reloads in racks around it. Park, turn the
+    /// launcher toward the target kilometers away, aim at the ground and fire.
+    /// </summary>
+    public static Blueprint Hailstorm()
+    {
+        var d = new Draft();
+        foreach (int x in new[] { -2, 2 })
+        {
+            d.Set(x, 0, -5, "wheel_steer");
+            foreach (int z in new[] { 0, 2, 4 }) d.Set(x, 0, z, "wheel");
+        }
+
+        // Cab: engine under the hood, the crew behind a windscreen.
+        d.Set(0, 1, -6, "engine_large");
+        d.Set(-1, 1, -6, "fuel_tank");
+        d.Set(1, 1, -6, "fuel_tank");
+        d.Set(-1, 1, -4, "driver_seat");
+        d.Set(1, 1, -4, "gunner_seat");
+        d.Fill(-1, 1, 2, 2, -5, -5, "glazing");
+        d.Fill(-2, -2, 2, 2, -4, -3, "glazing");
+        d.Fill(2, 2, 2, 2, -4, -3, "glazing");
+        d.Fill(-2, 2, 1, 1, -5, -3, "armor_light");
+        d.Fill(-2, 2, 2, 2, -5, -5, "armor_light");
+        d.Fill(-1, 1, 2, 2, -3, -3, "armor_light");
+        d.Fill(-2, 2, 3, 3, -5, -3, "armor_light");
+        d.FillSlope(-1, 1, 2, 2, -6, -6, "armor_light_slope", new Int3(0, 1, -1));
+        d.Fill(-2, 2, 1, 1, -7, -6, "armor_light");
+
+        // Reloads in the bed, fed up through the turntable; chassis rails along the bottom, and the bed itself.
+        d.Set(0, 1, 1, "ammo_feed");
+        foreach (int x in new[] { -1, 1 }) d.Set(x, 1, 1, "ammo_he");
+        d.Fill(-1, 1, 0, 0, -7, 5, "frame");
+        d.Fill(-2, 2, 1, 1, -2, 5, "armor_light");
+
+        // The launcher: a turntable on the bed, the pod on it facing aft, four packs of tubes behind it, and
+        // ready racks on the turntable beside it.
+        d.Set(0, 2, 1, "turret_ring");
+        d.Set(0, 3, 1, "rocket_pod", Pointing(Int3.Back));
+        for (int z = 2; z <= 5; z++) d.Set(0, 3, z, "rocket_tube", Pointing(Int3.Back));
+        foreach (int x in new[] { -1, 1 }) d.Set(x, 3, 1, "ammo_he");
+        d.Set(0, 3, 0, "ammo_he");
+        d.Fill(-2, 2, 2, 2, -2, -1, "armor_light");
+
+        // Lights, mirrors' worth of antenna, and a stowage rack on the cab roof.
+        d.Set(-2, 1, -8, "headlight");
+        d.Set(2, 1, -8, "headlight");
+        d.Set(0, 4, -4, "stowage_rack");
+        d.Set(-2, 4, -3, "antenna");
+        return d.Build("Hailstorm (rocket artillery)", "olive");
     }
 
     /// <summary>Tank destroyer: a long 120 mm gun fixed in a heavily armored casemate. Aim by turning the hull.</summary>
@@ -449,6 +522,136 @@ public static class ExampleDesigns
         d.Set(1, deck + 1, 4, "ladder", Orient(new Int3(0, -1, 0), new Int3(0, 0, 1)));
         d.Set(1, deck + 2, 4, "ladder", Orient(new Int3(0, -1, 0), new Int3(0, 0, 1)));
         return d.Build("Corsair (patrol boat)");
+    }
+
+    /// <summary>
+    /// Missile destroyer: a fusion reactor amidships powering a railgun forward and a laser aft, a block of
+    /// vertical launch cells (strike missiles for targets on land, air-defense missiles for aircraft), a
+    /// close-in gatling on the bridge and another aft for missiles coming the other way, a search radar and
+    /// a command console. Two marine turbines drive her.
+    /// </summary>
+    public static Blueprint Trident()
+    {
+        var d = new Draft();
+        const int bow = -30, stern = 27, deck = 7;
+
+        // Machinery: the reactor amidships with capacitor banks beside it, turbines and their fuel aft.
+        d.Set(0, 2, 2, "reactor");
+        foreach (int x in new[] { -3, 3 })
+        {
+            d.Set(x, 1, 1, "capacitor");
+            d.Set(x, 1, 3, "capacitor");
+        }
+
+        // (A big block's anchor is the middle of its box, rounding toward +x: a 2-wide one at x = -3 spans -3..-2.)
+        foreach (int x in new[] { -3, 2 })
+        {
+            d.Set(x, 1, 18, "turbine");
+            d.Set(x, 1, 22, "fuel_bunker");
+        }
+
+        foreach (int z in new[] { -24, -14, -4, 10, 24 }) d.Set(0, 1, z, "bilge_pump");
+        foreach (int z in new[] { -18, -8, 9, 12 })
+            foreach (int x in new[] { -2, -1, 1, 2 }) d.Set(x, 1, z, "lead_ballast");
+
+        // Hull: flat bottom, chamfered bilges, straight sides, a transom stern and a raked bow.
+        d.Fill(-4, 4, 0, 0, bow + 3, stern, "armor_light");
+        d.FillSlope(-5, -5, 0, 0, bow + 3, stern, "armor_light_slope", new Int3(-1, -1, 0));
+        d.FillSlope(5, 5, 0, 0, bow + 3, stern, "armor_light_slope", new Int3(1, -1, 0));
+        d.Fill(-5, -5, 1, deck, bow + 1, stern, "armor_light");
+        d.Fill(5, 5, 1, deck, bow + 1, stern, "armor_light");
+        d.Fill(-4, 4, 1, deck, stern, stern, "armor_light");
+        for (int y = 0; y <= 2; y++) d.FillSlope(-4, 4, y, y, bow + 2 - y, bow + 2 - y, "armor_light_slope", new Int3(0, -1, -1));
+        d.FillSlope(-5, -5, 1, 1, bow + 2, bow + 2, "armor_light_slope", new Int3(0, -1, -1));
+        d.FillSlope(5, 5, 1, 1, bow + 2, bow + 2, "armor_light_slope", new Int3(0, -1, -1));
+        d.Fill(-4, 4, 3, deck, bow, bow, "armor_light");
+        d.Fill(-5, 5, 2, deck, bow + 1, bow + 1, "armor_light");
+        d.Fill(-4, 4, 1, deck - 1, bow + 1, bow + 1, "armor_light");
+
+        // Watertight bulkheads: six compartments.
+        foreach (int z in new[] { -21, -12, -2, 6, 15 }) d.Fill(-4, 4, 1, deck - 1, z, z, "armor_light");
+
+        // Forward railgun turret, slugs fed from below deck.
+        const int rz = -22;
+        d.Set(0, deck, rz, "turret_ring");
+        d.Set(0, deck - 1, rz, "ammo_feed");
+        foreach (int x in new[] { -1, 1 })
+        {
+            d.Set(x, deck - 1, rz, "ammo_ap");
+            d.Set(x, deck - 1, rz + 1, "ammo_ap");
+        }
+
+        d.Set(0, deck + 1, rz, "rail_breech");
+        for (int z = rz - 1; z >= rz - 8; z--) d.Set(0, deck + 1, z, "rail");
+        d.Set(-1, deck + 1, rz, "loader");
+        d.Set(1, deck + 1, rz, "gunner_seat");
+        d.Fill(-1, 1, deck + 1, deck + 1, rz + 1, rz + 1, "armor_light");
+        d.Fill(-1, 1, deck + 2, deck + 2, rz - 1, rz + 1, "armor_light");
+        d.Fill(-1, 1, deck + 1, deck + 1, rz - 1, rz - 1, "armor_light");
+
+        // The missile block: two rows of strike missiles and a row of air-defense missiles, flush with the deck.
+        for (int x = -2; x <= 2; x++)
+        {
+            d.Set(x, deck, -17, "vls_strike");
+            d.Set(x, deck, -16, "vls_strike");
+            d.Set(x, deck, -15, "vls_sam");
+        }
+
+        // Bridge, with the radar mast and a close-in gatling on its roof.
+        d.Set(0, deck + 1, -9, "driver_seat");
+        d.Set(0, deck + 2, -9, "commander_seat");
+        d.Set(1, deck + 1, -8, "command_console");
+        d.Fill(-2, 2, deck + 1, deck + 3, -10, -4, "armor_light");
+        d.Fill(-2, 2, deck + 2, deck + 2, -10, -10, "glazing");
+        d.Fill(-3, -3, deck + 2, deck + 2, -9, -6, "glazing");
+        d.Fill(3, 3, deck + 2, deck + 2, -9, -6, "glazing");
+        d.Fill(-3, -3, deck + 1, deck + 3, -10, -4, "armor_light");
+        d.Fill(3, 3, deck + 1, deck + 3, -10, -4, "armor_light");
+        d.FillSlope(-3, 3, deck + 3, deck + 3, -11, -11, "armor_light_slope", new Int3(0, 1, -1));
+        d.Fill(-1, 1, deck + 4, deck + 5, -5, -4, "armor_light");
+        d.Set(0, deck + 6, -5, "radar");
+        d.Set(0, deck + 6, -4, "antenna");
+        Ciws(d, deck + 4, -8, Int3.Forward);
+
+        // A funnel-less deckhouse aft (a reactor needs no smoke stack), with the aft gatling on it.
+        d.Fill(-2, 2, deck + 1, deck + 2, 6, 11, "armor_light");
+        Ciws(d, deck + 3, 9, Int3.Back);
+
+        // Aft laser turret, facing astern.
+        d.Set(0, deck, 17, "turret_ring");
+        d.Set(0, deck + 1, 17, "laser_emitter", Pointing(Int3.Back));
+        foreach (int z in new[] { 18, 19 }) d.Set(0, deck + 1, z, "laser_lens", Pointing(Int3.Back));
+        d.Set(1, deck + 1, 17, "gunner_seat");
+        d.Fill(-1, 1, deck + 2, deck + 2, 16, 17, "armor_light");
+        d.Fill(-1, 1, deck + 1, deck + 1, 16, 16, "armor_light");
+        d.Set(-1, deck + 1, 17, "armor_light");
+
+        // Main deck.
+        d.Fill(-5, 5, deck, deck, bow + 1, stern, "armor_light");
+        d.Fill(-4, 4, deck, deck, bow, bow, "armor_light");
+
+        // Two screws and two rudders under the stern.
+        foreach (int x in new[] { -2, 2 })
+        {
+            d.Set(x, 0, stern + 1, "ship_propeller");
+            d.Set(x, 0, stern + 2, "rudder");
+        }
+
+        foreach (int s in new[] { -1, 1 })
+            for (int z = bow + 3; z <= stern - 1; z++)
+                if (z < -11 || z > -3) d.Set(5 * s, deck + 1, z, "railing", Orient(new Int3(0, -1, 0), new Int3(-s, 0, 0)));
+        d.Set(-2, deck + 4, -6, "searchlight");
+        return d.Build("Trident (missile destroyer)", "naval");
+    }
+
+    /// <summary>A close-in gatling on its own turntable, with a ready rack behind it (on top of a deckhouse at <paramref name="y"/>).</summary>
+    private static void Ciws(Draft d, int y, int z, Int3 facing)
+    {
+        d.Set(0, y, z, "turret_ring");
+        d.Set(0, y + 1, z, "breech_20gat", Pointing(facing));
+        for (int i = 1; i <= 3; i++) d.Set(0, y + 1, z + facing.Z * i, "barrel", Pointing(facing));
+        d.Set(0, y + 1, z - facing.Z, "ammo_he");
+        d.Set(0, y + 2, z - facing.Z, "ammo_he");
     }
 
     /// <summary>

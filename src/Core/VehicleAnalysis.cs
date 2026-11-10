@@ -65,7 +65,10 @@ public sealed class GunInfo
     public int FlakRounds;
     public bool MuzzleBlocked;
     public bool Valid;
-    public string Label => $"{BreechDef.Breech.CaliberMm:0} mm";
+    public string Label => BreechDef.Breech.Label ?? $"{BreechDef.Breech.CaliberMm:0} mm";
+
+    /// <summary>Railguns and lasers: they need the vehicle's electricity to fire.</summary>
+    public bool NeedsPower => BreechDef.Breech.ChargeMJ > 0;
 
     /// <summary>Distance from the breech center to the muzzle, in cells.</summary>
     public float MuzzleDistanceCells => Barrels.Count + (Brake.HasValue ? 1 : 0) + 0.5f;
@@ -152,6 +155,13 @@ public sealed class VehicleAnalysis
     public Vector3 CenterOfMass;
     public float PowerKw;
     public float FuelL;
+
+    /// <summary>Electricity made aboard (generators and reactors), in kW, and the part of it that burns fuel.</summary>
+    public float ElectricKw;
+    public float GeneratorKw;
+
+    /// <summary>Charge the vehicle can hold for energy weapons, in MJ (capacitors and the sources' own buffers).</summary>
+    public float StorageMJ;
     public float TrackFraction;
     public float RollingResistance;
     public float DragArea;
@@ -363,9 +373,12 @@ public sealed class VehicleAnalysis
                 continue;
             }
 
-            // Barrels start at the breech's front face (a big breech reaches further forward).
+            // Barrels start at the breech's front face (a big breech reaches further forward). Railguns take
+            // rails, lasers lenses and rocket launchers tubes, instead of ordinary barrels.
+            string tag = def.Breech.BarrelTag;
             Int3 c = b + gun.Forward * (Footprint.Reach(def, o, gun.Forward) + 1);
-            while (Is(c, BlockKind.Barrel) && !claimed.Contains(c))
+            Int3 first = c;
+            while (Is(c, BlockKind.Barrel) && Defs[c].BarrelTag == tag && !claimed.Contains(c))
             {
                 gun.Barrels.Add(c);
                 claimed.Add(c);
@@ -383,8 +396,15 @@ public sealed class VehicleAnalysis
 
             if (gun.Barrels.Count == 0)
             {
-                Warnings.Add(new DesignWarning(Severity.Error,
-                    $"The {gun.Label} breech at {b} has no barrel. Put Barrel Segments in a straight line in front of it (the arrow side)."));
+                string wrong = Is(first, BlockKind.Barrel) ? $" The {Defs[first].Name} in front of it doesn't fit." : "";
+                string need = tag switch
+                {
+                    "rail" => $"The railgun at {b} has no rails. Put Rail Segments in a straight line in front of it (the arrow side).",
+                    "lens" => $"The laser at {b} has no lens. Put a Focusing Lens or two in front of it (the arrow side).",
+                    "tube" => $"The rocket launcher at {b} has no tubes. Put Launch Tubes in a line in front of it (the arrow side).",
+                    _ => $"The {gun.Label} breech at {b} has no barrel. Put Barrel Segments in a straight line in front of it (the arrow side).",
+                };
+                Warnings.Add(new DesignWarning(Severity.Error, need + wrong));
             }
             else
             {
@@ -445,6 +465,10 @@ public sealed class VehicleAnalysis
             gun.ApRounds = gun.ApRacks.Sum(r => Defs[r].AmmoUnits) / units;
             gun.HeRounds = gun.HeRacks.Sum(r => Defs[r].AmmoUnits) / units;
             gun.FlakRounds = gun.FlakRacks.Sum(r => Defs[r].AmmoUnits) / units;
+            // Railguns fire solid slugs only, rockets are all high explosive, and lasers need no ammo at all.
+            if (def.Breech.Rail || def.Breech.Beam) gun.HeRounds = gun.FlakRounds = 0;
+            if (def.Breech.Rocket) gun.ApRounds = gun.FlakRounds = 0;
+            if (def.Breech.Beam) gun.ApRounds = 0;
             gun.Valid = gun.Barrels.Count > 0;
         }
     }
@@ -512,9 +536,13 @@ public sealed class VehicleAnalysis
             sum += kv.Key.ToVector3() * kv.Value.MassKg * share;
             PowerKw += kv.Value.PowerKw * share;
             FuelL += kv.Value.FuelL * share;
+            ElectricKw += kv.Value.ElectricKw * share;
+            if (kv.Value.Kind == BlockKind.Generator) GeneratorKw += kv.Value.ElectricKw * share;
+            StorageMJ += kv.Value.StoreMJ * share;
             if (kv.Value.Kind is BlockKind.DriverSeat or BlockKind.DroneCore) HasDriver = true;
         }
 
+        StorageMJ = Power.CapacityMJ(StorageMJ, ElectricKw);
         CenterOfMass = MassKg > 0 ? sum / MassKg * Blueprint.CellSize : Vector3.Zero;
         PowerToWeight = MassKg > 0 ? PowerKw / (MassKg / 1000f) : 0;
     }
@@ -790,6 +818,28 @@ public sealed class VehicleAnalysis
             if (m.Valid && m.Stats.Seeker != SeekerKind.None && defs.All(d => d.Kind != BlockKind.MissileFins))
                 m.Problem = $"The guided missile at {rail} has no fins, so it can't steer. Add Missile Fins.";
         }
+
+        // Vertical launch cells: the missile is inside, and it leaves through the hatch on top.
+        foreach (Int3 cell in AnchorsOf(BlockKind.VlsCell))
+        {
+            BlockDef d = Defs[cell];
+            Int3 up = Orientations.Up(Cells[cell].O);
+            var m = new MissileInfo
+            {
+                Rail = cell, Forward = up, Section = SectionOf[cell], Vls = d.Vls, Stats = Aero.VlsMissile(d.Vls), Valid = true,
+            };
+            Missiles.Add(m);
+            if (up != Int3.Up)
+            {
+                m.Valid = false;
+                m.Problem = $"The VLS cell at {cell} is on its side. It must stand upright, hatch on top (rotate it with T or G).";
+            }
+            else if (Cells.ContainsKey(cell + up))
+            {
+                m.Valid = false;
+                m.Problem = $"The VLS cell at {cell} has something on its hatch, so its missile can't get out.";
+            }
+        }
     }
 
     /// <summary>
@@ -1005,6 +1055,45 @@ public sealed class VehicleAnalysis
         }
     }
 
+    /// <summary>Railguns and lasers need electricity made aboard, and room to store a shot.</summary>
+    private void PowerWarnings()
+    {
+        bool fuelFlagged = Warnings.Any(w => w.Text.StartsWith("No fuel tank"));
+        if (GeneratorKw > 0 && FuelL <= 0 && !fuelFlagged)
+            Warnings.Add(new DesignWarning(Severity.Error, "The generators burn fuel: add a Fuel Tank."));
+
+        GunInfo hungriest = Guns.Where(g => g.NeedsPower).OrderByDescending(g => g.Stats.ChargeMJ).FirstOrDefault();
+        if (hungriest == null)
+        {
+            if (ElectricKw > 0)
+                Warnings.Add(new DesignWarning(Severity.Info, $"It makes {ElectricKw / 1000f:0.#} MW of electricity, but nothing aboard uses it. Railguns and lasers do."));
+            return;
+        }
+
+        if (ElectricKw <= 0)
+        {
+            Warnings.Add(new DesignWarning(Severity.Error,
+                $"The {hungriest.Label} at {hungriest.Breech} needs electricity. Add a Generator (Power), or a Fusion Reactor for big ships."));
+            return;
+        }
+
+        if (StorageMJ + 1e-3f < hungriest.Stats.ChargeMJ)
+        {
+            Warnings.Add(new DesignWarning(Severity.Error,
+                $"Each {hungriest.Label} shot takes {hungriest.Stats.ChargeMJ:0.#} MJ, but this can only store {StorageMJ:0.#} MJ. Add Capacitor Banks (Power)."));
+            return;
+        }
+
+        // How much the energy weapons want if they all fire as fast as they can, against what's made.
+        float wantMW = Guns.Where(g => g.NeedsPower && g.Valid).Sum(g => g.Stats.ChargeMJ / MathF.Max(g.Stats.ReloadS, 0.05f));
+        float madeMW = ElectricKw / 1000f;
+        string text = $"Power: {madeMW:0.#} MW made, {StorageMJ:0} MJ stored. Firing flat out, the energy weapons want {wantMW:0.#} MW";
+        text += wantMW > madeMW * 1.05f
+            ? $", so once the store runs dry they fire at {madeMW / wantMW * 100f:0}% of their rate."
+            : ", and get it.";
+        Warnings.Add(new DesignWarning(Severity.Info, text));
+    }
+
     private void CollectWarnings()
     {
         if (!HasDriver)
@@ -1019,6 +1108,7 @@ public sealed class VehicleAnalysis
                 "No wheels or tracks. Put them on the bottom row with nothing underneath (or Ship Propellers, to make it a boat)."));
         if (IsNaval) NavalWarnings();
         if (IsAir) AirWarnings();
+        PowerWarnings();
         foreach (MissileInfo m in Missiles.Where(m => m.Problem != null))
             Warnings.Add(new DesignWarning(m.Valid ? Severity.Info : Severity.Warning, m.Problem));
 
@@ -1035,9 +1125,14 @@ public sealed class VehicleAnalysis
 
         foreach (GunInfo g in Guns.Where(g => g.Valid))
         {
+            BreechSpec spec = g.BreechDef.Breech;
+            if (spec.Beam) continue;
             if (g.ApRounds + g.HeRounds + g.FlakRounds == 0)
-                Warnings.Add(new DesignWarning(Severity.Warning,
-                    $"The {g.Label} gun has no ammo. Put an AP, HE or Flak Rack touching the breech, or connect racks to it with Ammo Feeds."));
+                Warnings.Add(new DesignWarning(Severity.Warning, spec.Rail
+                    ? $"The {g.Label} has no slugs. Put an AP Rack touching the breech, or connect AP racks to it with Ammo Feeds."
+                    : spec.Rocket
+                        ? $"The {g.Label} have no rockets. Put an HE Rack touching the launcher, or connect HE racks to it with Ammo Feeds."
+                        : $"The {g.Label} gun has no ammo. Put an AP, HE or Flak Rack touching the breech, or connect racks to it with Ammo Feeds."));
             if (g.MuzzleBlocked)
                 Warnings.Add(new DesignWarning(Severity.Warning,
                     $"The {g.Label} gun's muzzle is blocked by a block right in front of it. It will shoot itself."));

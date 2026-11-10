@@ -111,6 +111,29 @@ A gun is a **breech** with **barrel** segments in a line in front of it. Parts a
 
 Guns inside a turret group traverse (turn left and right); every gun elevates.
 
+### Modern and future weapons
+The newer weapons are built the same way as guns: a breech with its own kind of barrel in a line in front of it. Ordinary barrels only fit ordinary breeches, so the builder says so if you mix them up.
+
+| Weapon | Breech + "barrel" | How it works |
+|---|---|---|
+| **Railgun** | Railgun Breech + Rail Segments | A 40 mm slug at about 2.4 km/s with eight rails: flat, fast, and harder-hitting than a 120 mm gun. Slugs come from AP racks. Every shot takes 20 MJ of electricity. |
+| **Laser** | Laser Emitter + Focusing Lenses | Ten pulses a second, each burning the first thing the beam touches. No drop, no lead, no ammo. Armor slows the burn but never stops it (heavy plate takes several seconds). Full strength out to about 1.3 km with two lenses, fading beyond. Takes 5 MW while it fires. |
+| **CIWS** | 20 mm Gatling + barrels | Bursts of five rounds, fifty a second, from HE racks. |
+| **Rocket artillery** | Rocket Launcher + Launch Tubes | Each tube pack adds two rockets to a salvo, rippled off five a second. Unguided, high explosive, reaching several kilometers. Rockets come from HE racks. |
+
+**Point defense.** The CIWS and the laser are point-defense weapons: their gunners shoot at missiles and bombs coming at their own vehicle before anything else, with no settling-in time (radar aims them). A missile or bomb takes a few hits to knock down, more for big ones. Point defense only follows the player's aim when the player sits in its own mount.
+
+**Vertical launch cells.** A VLS cell is a deck cell with a missile inside, fired straight up through its hatch (which must stand upright and be clear). The **strike missile** is a cruise missile: it climbs out, cruises at a height that clears the ground, and dives onto the spot under the crosshair when it was fired, up to about 12 km away, with a warhead the size of a bomb load. Fired at a vehicle, it keeps tracking it. The **air-defense missile** locks on to the enemy aircraft nearest the crosshair (out to 6 km) and runs it down. AI crews fire air-defense missiles at aircraft and strike missiles at targets from 400 m out. Supply points reload the cells. A loaded cell that's hit takes its warhead with it.
+
+### Power
+Energy weapons run on electricity. **Generators** (1.5 MW, burning fuel while they charge) and the **Fusion Reactor** (3×3×3, 40 MW, no fuel) make it; **Capacitor Banks** store it (12 MJ each), and each generator or reactor holds about a second of its own output too. Railguns and lasers take each shot's charge from the store; if it isn't there, they wait ("CHARGING" on the HUD). The builder shows what's made, what's stored, and whether the energy weapons can fire flat out on it. Losing a generator or capacitor to damage loses what it made or held. A destroyed reactor goes up in an enormous blast.
+
+### Big booms
+Blasts of 7 m and up (reactors, strike missiles, magazines) get the full treatment: a blinding flash, a fireball that swells and rises, a column of smoke climbing into a cap, a shock ring and a ring of dust racing out along the ground, burning debris, and a wide scorched crater that lasts. The shock wave shoves every body within two and a half times the blast radius, hurt or not, and the camera shakes with it.
+
+### Jets
+Jets push on their own at any speed. Opening the throttle all the way lights the **afterburners**: 60% more thrust for three and a half times the fuel, a long bright flame and a note on the HUD. Every jet shows a flame that grows with the throttle. The **Falcon** is the example jet fighter: swept wings with strakes along the nose, two jets in the tail, wing-root cannon and radar missiles.
+
 ### Damage
 - **AP rounds** trace through the block grid. Each block's armor is scaled by the impact angle (`thickness / cos(angle)`). If penetration is greater, the block takes damage and the shell keeps going with the remaining penetration. At steep angles, shells ricochet.
 - **HE rounds** explode on impact. Damage falls off with distance, and armor reduces it.
@@ -236,6 +259,7 @@ Each milestone is playable on its own.
    - **Fleet command** *(built)*: the command console and search radar, the command post, the tactical map with fog of war, picking and groups, move / attack / escort / patrol / hold orders in formation, rules of engagement, command range, jumping into units, and deploying more.
    - **Looks and building** *(built)*: the shape kit, paint jobs with ship rules, glazing and the pilot seat, detail parts, joints, copy and paste with saved parts, the armor view, and the examples rebuilt with them.
    - **Big battles** *(built)*: shells as data, two-batch tracers, ground and vehicle checks in C#, parking, far models, shared meshes, effect budgets, the F3 performance readout and the F8 battle drill.
+   - **Modern and future** *(built)*: jets with afterburners and the Falcon; power (generators, the fusion reactor, capacitors); railguns, lasers, the CIWS and point defense; vertical launch cells with strike and air-defense missiles; rocket artillery; big blasts with shock waves; the Vanguard, Hailstorm and Trident examples.
    - Not yet: giant aircraft and land battleships. They can be built from the same blocks, but their wings and tracks are still worked out panel by panel, so a giant one costs more to fly than it needs to.
 4. **Terrain + industry:** deformable terrain, mining, machines you design, conveyors, power, assembly bays that print blueprints.
 5. **Planet war:** a generated planet, a rival faction that designs its own vehicles, territory, the supply network, research, salvage, captured sites, simplified far-off battles.

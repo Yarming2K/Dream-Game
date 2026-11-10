@@ -32,6 +32,9 @@ public enum SoundId
     Hurt,
     Weld,
     Splash,
+    RailShot,
+    LaserZap,
+    ExplosionHuge,
 }
 
 /// <summary>Generates, caches and plays sound effects, and sets up the audio buses (outdoor reverb, limiter).</summary>
@@ -96,6 +99,9 @@ public static class Sfx
             SoundId.Hurt => Synth.Hurt(),
             SoundId.Weld => Synth.WeldLoop(),
             SoundId.Splash => Synth.Splash(),
+            SoundId.RailShot => Synth.RailShot(),
+            SoundId.LaserZap => Synth.LaserZap(),
+            SoundId.ExplosionHuge => Synth.Explosion(2.6f, 34),
             _ => Synth.Tick(),
         };
 

@@ -24,6 +24,9 @@ public enum SeekerKind
 
     /// <summary>Locks on to the nearest enemy aircraft in front of it and chases it. Ignores ground targets.</summary>
     Radar,
+
+    /// <summary>Flies itself to a spot on the ground picked when it's fired (cruise missiles).</summary>
+    Navigation,
 }
 
 /// <summary>A lifting surface: a wing panel or a control surface.</summary>
@@ -61,6 +64,9 @@ public struct MissileStats
     /// <summary>Speed when the motor burns out (m/s), and roughly how far it reaches.</summary>
     public float BurnoutSpeed;
     public float RangeM;
+
+    /// <summary>How long it flies before it gives up and goes off (0: the usual <see cref="Aero.MissileLifeS"/>).</summary>
+    public float LifeS;
 }
 
 /// <summary>A missile on a rail: the parts lined up in front of the rail are the missile.</summary>
@@ -75,6 +81,10 @@ public sealed class MissileInfo
     public MissileStats Stats;
     public bool Valid;
     public string Problem;
+
+    /// <summary>A vertical launch cell (at <see cref="Rail"/>, firing along <see cref="Forward"/>) instead of a missile built on a rail.</summary>
+    public VlsLoad Vls;
+    public bool IsVls => Vls != VlsLoad.None;
 }
 
 public struct AirStats
@@ -234,6 +244,33 @@ public static class Aero
         float mass = MathF.Max(s.MassKg, 1f);
         s.BurnoutSpeed = s.ThrustN / mass * s.BurnS * 0.85f;
         s.RangeM = s.BurnoutSpeed * (s.BurnS * 0.5f + 5f);
+        return s;
+    }
+
+    /// <summary>The missile inside a vertical launch cell.</summary>
+    public static MissileStats VlsMissile(VlsLoad load)
+    {
+        MissileStats s = load switch
+        {
+            // A cruise missile: a long, steady burn at a bit under the speed of sound, and a warhead the size of a bomb load.
+            VlsLoad.Strike => new MissileStats
+            {
+                MassKg = 900, ThrustN = 15000, BurnS = 55, Damage = 4200, RadiusM = 11f, MaxTurnAccel = 70f,
+                Seeker = SeekerKind.Navigation, LifeS = 75f,
+            },
+            // A fast interceptor: a short, hard burn and fins that pull tight turns.
+            VlsLoad.Sam => new MissileStats
+            {
+                MassKg = 220, ThrustN = 30000, BurnS = 5, Damage = 1100, RadiusM = 5f, MaxTurnAccel = 320f,
+                Seeker = SeekerKind.Radar, LifeS = 25f,
+            },
+            _ => new MissileStats(),
+        };
+        if (s.MassKg <= 0) return s;
+        float accel = s.ThrustN / s.MassKg;
+        // Drag caps its speed: it settles where thrust and drag balance.
+        s.BurnoutSpeed = MathF.Min(accel * s.BurnS, MathF.Sqrt(accel / MissileDragK));
+        s.RangeM = s.BurnoutSpeed * (s.BurnS * 0.85f + 5f);
         return s;
     }
 

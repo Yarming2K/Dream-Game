@@ -92,7 +92,10 @@ public partial class VehicleBody
     }
 
     /// <summary>How close it closes in on an attack target before stopping to shoot.</summary>
-    private float AttackRange => Guns.Exists(g => g.Alive && g.Stats.CaliberMm >= 150f) ? 2400f : IsNaval ? 900f : 450f;
+    private float AttackRange =>
+        Guns.Exists(g => g.Alive && g.Info.BreechDef.Breech.Rocket) ? 2500f
+        : Guns.Exists(g => g.Alive && (g.Stats.CaliberMm >= 150f || g.Info.BreechDef.Breech.Rail)) ? 2400f
+        : IsNaval ? 900f : 450f;
 
     /// <summary>Turns the current order into a goal for the AI driver (and, for aircraft, a patrol circle).</summary>
     private void OrdersTick()

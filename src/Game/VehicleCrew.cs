@@ -190,7 +190,10 @@ public partial class VehicleBody
         g.CrewStamp = _crewStamp;
         g.Controller = FindController(g);
         SeatRt c = g.Controller;
-        g.Directed = c != null && (c.Occupant == Occupant.Player || (c.Occupant == Occupant.Ai && PlayerSeat != null && GunnerFollowsPlayer));
+        // Point defense is aimed by its own radar: it only follows the player when they sit in its mount.
+        g.Directed = c != null && (g.Info.BreechDef.Breech.PointDefense
+            ? c.Occupant == Occupant.Player && c.Block.Section == g.Breech.Section
+            : c.Occupant == Occupant.Player || (c.Occupant == Occupant.Ai && PlayerSeat != null && GunnerFollowsPlayer));
         return g.Controller;
     }
 
@@ -224,6 +227,12 @@ public partial class VehicleBody
             return PlayerInput.HasAim;
         }
 
+        if (OnPdWatch(g))
+        {
+            aim = _pdAim;
+            return true;
+        }
+
         if (OnAirWatch(g))
         {
             aim = _aaAim;
@@ -253,6 +262,7 @@ public partial class VehicleBody
     public AmmoType AmmoFor(GunRt g)
     {
         if (PlayerDirects(g)) return SelectedAmmo;
+        if (OnPdWatch(g)) return g.Info.FlakRacks.Count > 0 ? AmmoType.Flak : AmmoType.HE;
         if (OnAirWatch(g)) return g.Info.FlakRacks.Count > 0 ? AmmoType.Flak : AmmoType.HE;
         if (_aiVehicleTarget == null) return AmmoType.HE;
         return _aiVehicleTarget.IsAir && !_aiVehicleTarget.OnGround && g.Info.FlakRacks.Count > 0 ? AmmoType.Flak : AmmoType.AP;
@@ -262,7 +272,8 @@ public partial class VehicleBody
 
     private void CrewTick(float dt)
     {
-        bool aiGuns = AiCrewActive && Roe != Engagement.HoldFire && Guns.Any(g => g.Alive && ControllerOf(g)?.Occupant == Occupant.Ai && !PlayerDirects(g));
+        bool aiGuns = AiCrewActive && Roe != Engagement.HoldFire && Guns.Any(g => g.Alive && !PlayerDirects(g) &&
+            (ControllerOf(g)?.Occupant == Occupant.Ai || (g.Info.BreechDef.Breech.PointDefense && ControllerOf(g) != null)));
         if (!aiGuns)
         {
             _aiHasAim = _aaHasAim = false;
@@ -282,6 +293,7 @@ public partial class VehicleBody
         }
 
         AirWatch(dt);
+        PointDefenseWatch();
         if (!AiTargetValid())
         {
             _aiHasAim = false;
@@ -300,7 +312,8 @@ public partial class VehicleBody
             targetVel = _aiCharacterTarget.Velocity;
         }
 
-        GunRt lead = Guns.FirstOrDefault(g => g.Alive && g.Info.GunSection >= 0 && ControllerOf(g)?.Occupant == Occupant.Ai && !PlayerDirects(g) && !OnAirWatch(g));
+        GunRt lead = Guns.FirstOrDefault(g => g.Alive && g.Info.GunSection >= 0 && ControllerOf(g)?.Occupant == Occupant.Ai && !PlayerDirects(g) &&
+                                              !OnAirWatch(g) && !OnPdWatch(g));
         if (lead == null)
         {
             _aiHasAim = false;
@@ -332,7 +345,7 @@ public partial class VehicleBody
         foreach (GunRt g in Guns)
         {
             if (!g.Alive || g.ReloadLeft > 0 || g.AimError > tolerance) continue;
-            if (ControllerOf(g)?.Occupant != Occupant.Ai || PlayerDirects(g) || OnAirWatch(g)) continue;
+            if (ControllerOf(g)?.Occupant != Occupant.Ai || PlayerDirects(g) || OnAirWatch(g) || OnPdWatch(g)) continue;
             FireGun(g, false, AmmoFor(g));
         }
     }
@@ -361,7 +374,46 @@ public partial class VehicleBody
         foreach (GunRt g in Guns)
         {
             if (!g.Alive || g.ReloadLeft > 0 || g.AimError > 2f) continue;
-            if (ControllerOf(g)?.Occupant != Occupant.Ai || !OnAirWatch(g)) continue;
+            if (ControllerOf(g)?.Occupant != Occupant.Ai || !OnAirWatch(g) || OnPdWatch(g)) continue;
+            FireGun(g, false, AmmoFor(g));
+        }
+    }
+
+    // ---------- Point defense ----------
+
+    private bool _pdHasAim;
+    private Vector3 _pdAim;
+
+    /// <summary>A point-defense gun (CIWS or laser) with a missile or bomb coming in: that comes before any other target.</summary>
+    private bool OnPdWatch(GunRt g) => _pdHasAim && g.Info.BreechDef.Breech.PointDefense && !PlayerDirects(g);
+
+    /// <summary>
+    /// Point-defense gunners watch for missiles and bombs coming at their own vehicle, lead the nearest, and
+    /// fire as soon as their gun bears on it. No settling in: these guns are aimed by radar.
+    /// </summary>
+    private void PointDefenseWatch()
+    {
+        _pdHasAim = false;
+        if (Combat.Instance == null) return;
+        GunRt lead = null;
+        float range = 0;
+        foreach (GunRt g in Guns)
+        {
+            if (!g.Alive || g.Info.GunSection < 0 || !g.Info.BreechDef.Breech.PointDefense || ControllerOf(g) == null || PlayerDirects(g)) continue;
+            lead ??= g;
+            range = Mathf.Max(range, g.Info.BreechDef.Breech.Beam ? g.Stats.BeamRangeM * 1.5f : 1500f);
+        }
+
+        if (lead == null || !Combat.Instance.NearestThreat(this, range, out Vector3 pos, out Vector3 vel)) return;
+        (Vector3 muzzle, _) = Muzzle(lead);
+        float speed = lead.Info.BreechDef.Breech.Beam ? 1e5f : ShellSpeed(lead, AmmoType.HE);
+        // Its shells leave with the ship's own speed, so lead the threat as it moves relative to the ship.
+        _pdAim = GunMath.LeadTarget(muzzle.N(), pos.N(), (vel - LinearVelocity).N(), speed).G();
+        _pdHasAim = true;
+        foreach (GunRt g in Guns)
+        {
+            if (!g.Alive || g.ReloadLeft > 0 || !OnPdWatch(g) || ControllerOf(g) == null) continue;
+            if (g.AimError > (g.Info.BreechDef.Breech.Beam ? 1.2f : 3f)) continue;
             FireGun(g, false, AmmoFor(g));
         }
     }
@@ -397,11 +449,16 @@ public partial class VehicleBody
 
         // Only vehicles in reach are considered (found through the world's grid, not by checking every
         // vehicle), nearest first, and only the first few get a line-of-sight check.
-        bool flak = HasFlak;
+        // Air-defense missiles watch the sky as flak guns do, and further out.
+        bool flak = HasFlak || HasSams;
+        float skyReach = HasSams ? 6000f : 2500f;
         // Big naval guns reach much further than a tank's: their gunners look out to 3 km.
-        float reach = Guns.Exists(g => g.Alive && g.Stats.CaliberMm >= 150f) ? 3000f : 800f;
+        // So do railguns and rocket artillery; lasers reach as far as their lenses focus.
+        float reach = Guns.Exists(g => g.Alive && (g.Stats.CaliberMm >= 150f || g.Info.BreechDef.Breech.Rail || g.Info.BreechDef.Breech.Rocket))
+            ? 3000f
+            : Mathf.Max(800f, Guns.Where(g => g.Alive).Select(g => g.Stats.BeamRangeM * 1.3f).DefaultIfEmpty(0).Max());
         _candidates.Clear();
-        WorldQuery.HostsNear(eye, Mathf.Max(flak ? 2500f : 0f, reach), _candidates);
+        WorldQuery.HostsNear(eye, Mathf.Max(flak ? skyReach : 0f, reach), _candidates);
         _sorted.Clear();
         // Rules of engagement: returning fire only, the gunners look at what's shooting at them and
         // what they were told to attack.
@@ -432,7 +489,7 @@ public partial class VehicleBody
             if (flak && v.IsAir && !v.OnGround)
             {
                 // Aircraft are for the flak guns, which reach much further.
-                if (bestAir == null && d < 2500f && airLooks++ < 4 && Visible(p, v)) bestAir = v;
+                if (bestAir == null && d < skyReach && airLooks++ < 4 && Visible(p, v)) bestAir = v;
                 continue;
             }
 

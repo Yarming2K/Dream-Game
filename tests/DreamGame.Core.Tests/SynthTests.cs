@@ -18,6 +18,7 @@ public class SynthTests
         ("engine", () => Synth.EngineLoop()), ("rifle", () => Synth.Rifle()), ("rocket", () => Synth.RocketLaunch()),
         ("bullet metal", () => Synth.BulletMetal()), ("bullet dirt", () => Synth.BulletDirt()),
         ("footstep", () => Synth.Footstep(1)), ("hurt", () => Synth.Hurt()), ("weld", () => Synth.WeldLoop()), ("splash", () => Synth.Splash()),
+        ("railgun", () => Synth.RailShot()), ("laser", () => Synth.LaserZap()), ("explosion huge", () => Synth.Explosion(2.6f, 34)),
     }.Select(p => new object[] { p.Item1, p.Item2 });
 
     [Theory]

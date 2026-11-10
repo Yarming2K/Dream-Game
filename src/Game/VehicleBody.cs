@@ -54,6 +54,14 @@ public partial class VehicleBody : RigidBody3D, IGridHost
         /// <summary>True while its own ship is in the way of its line of fire (it holds fire).</summary>
         public bool Masked;
 
+        /// <summary>Energy weapons: waiting for the capacitors to hold a shot's worth.</summary>
+        public bool Charging;
+
+        /// <summary>Rocket launchers: rockets still to go in this salvo, and the time to the next.</summary>
+        public int SalvoLeft;
+        public float SalvoTimer;
+        public bool SalvoByPlayer;
+
         // Who controls it and whether the player directs it, worked out once per physics step.
         internal int CrewStamp = -1;
         internal SeatRt Controller;
@@ -313,7 +321,7 @@ public partial class VehicleBody : RigidBody3D, IGridHost
             }
 
             g.Stats = GunMath.Compute(g.Info.BreechDef.Breech, g.Barrels, g.HasBrake, loaders, props);
-            float barrelMass = g.Barrels * 90f + (g.HasBrake ? 70f : 0f);
+            float barrelMass = g.Info.Barrels.Take(g.Barrels).Sum(c => Model.Blocks[c].Def.MassKg) + (g.HasBrake ? 70f : 0f);
             g.ElevSpeedRad = Mathf.DegToRad(Mobility.ElevationDegPerSec(barrelMass));
             if (g.Barrels == 0) g.Alive = false;
         }
@@ -329,6 +337,7 @@ public partial class VehicleBody : RigidBody3D, IGridHost
 
         RefreshNaval();
         RefreshAir();
+        RefreshPower();
     }
 
     private static List<Int3> RacksFor(GunRt g, AmmoType type) => type switch
@@ -436,8 +445,10 @@ public partial class VehicleBody : RigidBody3D, IGridHost
 
         if (PlayerInput.Fire) FirePlayerGuns();
         Perf.Add(Perf.Ai, t3);
+        PowerTick(dt);
         foreach (GunRt g in Guns)
         {
+            if (g.SalvoLeft > 0) SalvoTick(g, dt);
             if (g.ReloadLeft <= 0) continue;
             g.ReloadLeft = Mathf.Max(0, g.ReloadLeft - dt);
             if (g.ReloadLeft <= 0 && g.Alive && PlayerSeat != null && g.Info.GunSection >= 0)
@@ -748,32 +759,82 @@ public partial class VehicleBody : RigidBody3D, IGridHost
     private bool LineOfFireClear(Vector3 muzzle, Vector3 dir) =>
         float.IsPositiveInfinity(WorldQuery.FirstBlockOf(this, muzzle + dir * 0.3f, dir, Radius * 2f + 20f));
 
-    /// <summary>Fires one gun if it's loaded and has ammo.</summary>
+    /// <summary>
+    /// Fires one gun if it's loaded and has ammo (and, for railguns and lasers, the charge). A rocket launcher
+    /// starts its salvo; a gatling fires its burst.
+    /// </summary>
     public bool FireGun(GunRt g, bool byPlayer, AmmoType? ammo = null)
     {
-        if (Combat.Instance == null || !g.Alive || g.ReloadLeft > 0 || g.Info.GunSection < 0) return false;
-        AmmoType type = ammo ?? SelectedAmmo;
-        if (Rounds(g, type) == 0) type = ShellTypes.FirstOrDefault(t => Rounds(g, t) > 0, type);
+        if (Combat.Instance == null || !g.Alive || g.ReloadLeft > 0 || g.Info.GunSection < 0 || g.SalvoLeft > 0) return false;
+        BreechSpec spec = g.Info.BreechDef.Breech;
+        if (spec.Beam) return FireBeam(g, byPlayer);
+
+        // Railguns only fire slugs (AP), rocket launchers only high explosive.
+        AmmoType type = spec.Rail ? AmmoType.AP : spec.Rocket ? AmmoType.HE : ammo ?? SelectedAmmo;
+        if (!spec.Rail && !spec.Rocket && Rounds(g, type) == 0) type = ShellTypes.FirstOrDefault(t => Rounds(g, t) > 0, type);
         if (Rounds(g, type) == 0) return false;
 
         (Vector3 muzzle, Vector3 dir) = Muzzle(g);
         g.Masked = !LineOfFireClear(muzzle, dir);
-        if (g.Masked || !TakeRound(g, type)) return false;
+        if (g.Masked) return false;
+        g.Charging = !Electric.TryDraw(g.Stats.ChargeMJ);
+        if (g.Charging || !TakeRound(g, type)) return false;
 
-        float spread = Mathf.DegToRad(g.Stats.SpreadDeg) * Mathf.Sqrt(_rng.Randf());
-        Vector3 side = dir.Cross(Mathf.Abs(dir.Y) > 0.9f ? Vector3.Right : Vector3.Up).Normalized();
-        dir = dir.Rotated(side, spread).Rotated(dir, _rng.RandfRange(0, Mathf.Tau)).Normalized();
-        float speed = ShellSpeed(g, type);
-        // Flak is fused to burst at the range of whatever the gun is aimed at.
-        float fuse = type == AmmoType.Flak && AimFor(g, out Vector3 aimAt) ? Mathf.Clamp(muzzle.DistanceTo(aimAt), 40f, 4000f) : 0f;
-        Combat.Instance.Fire(this, muzzle, dir * speed + LinearVelocity, type, g.Stats, g.Info.BreechDef.Breech, byPlayer, fuseM: fuse);
+        LaunchRound(g, byPlayer, type, muzzle, dir);
+        if (spec.Rocket && g.Stats.Burst > 1)
+        {
+            g.SalvoLeft = g.Stats.Burst - 1;
+            g.SalvoTimer = GunMath.RippleS;
+            g.SalvoByPlayer = byPlayer;
+        }
 
-        Vector3 breech = View.SectionGlobal(g.Info.GunSection) * Conv.CellPos(g.Info.Breech);
-        ApplyImpulse(-dir * g.Stats.RecoilImpulse, breech - GlobalPosition);
         g.ReloadLeft = g.Stats.ReloadS;
-        Effects.MuzzleFlash(GetParent<Node3D>(), muzzle, dir, g.Stats.CaliberMm, g.HasBrake);
         Fired?.Invoke(g);
         return true;
+    }
+
+    /// <summary>Sends one round (or a gatling's burst) out of the muzzle, with its recoil and flash.</summary>
+    private void LaunchRound(GunRt g, bool byPlayer, AmmoType type, Vector3 muzzle, Vector3 dir)
+    {
+        BreechSpec spec = g.Info.BreechDef.Breech;
+        float speed = ShellSpeed(g, type);
+        // Flak is fused to burst at the range of whatever the gun is aimed at; rockets are fused for the ground.
+        float fuse = type == AmmoType.Flak && AimFor(g, out Vector3 aimAt) ? Mathf.Clamp(muzzle.DistanceTo(aimAt), 40f, 4000f) : 0f;
+        Vector3 side = dir.Cross(Mathf.Abs(dir.Y) > 0.9f ? Vector3.Right : Vector3.Up).Normalized();
+        int rounds = spec.Rocket ? 1 : g.Stats.Burst;
+        for (int i = 0; i < rounds; i++)
+        {
+            // A gatling's burst spreads out a little more than a single shot, into a cloud a missile flies into.
+            float spreadDeg = g.Stats.SpreadDeg + (rounds > 1 ? 0.35f : 0f);
+            float spread = Mathf.DegToRad(spreadDeg) * Mathf.Sqrt(_rng.Randf());
+            Vector3 d = dir.Rotated(side, spread).Rotated(dir, _rng.RandfRange(0, Mathf.Tau)).Normalized();
+            Combat.Instance.Fire(this, muzzle + d * (i * 0.6f), d * speed + LinearVelocity, type, g.Stats, spec, byPlayer, fuseM: fuse,
+                tracer: rounds == 1 || i % 2 == 0);
+        }
+
+        Vector3 breech = View.SectionGlobal(g.Info.GunSection) * Conv.CellPos(g.Info.Breech);
+        if (g.Stats.RecoilImpulse > 0) ApplyImpulse(-dir * g.Stats.RecoilImpulse, breech - GlobalPosition);
+        Node3D world = GetParent<Node3D>();
+        if (spec.Rail) Effects.RailFlash(world, muzzle, dir);
+        else if (spec.Rocket) Effects.Backblast(world, breech, dir);
+        else Effects.MuzzleFlash(world, muzzle, dir, rounds > 1 ? g.Stats.CaliberMm * 1.4f : g.Stats.CaliberMm, g.HasBrake);
+    }
+
+    /// <summary>The rest of a rocket salvo, one rocket every <see cref="GunMath.RippleS"/>.</summary>
+    private void SalvoTick(GunRt g, float dt)
+    {
+        g.SalvoTimer -= dt;
+        if (g.SalvoTimer > 0) return;
+        g.SalvoTimer += GunMath.RippleS;
+        if (!g.Alive || g.Info.GunSection < 0 || !TakeRound(g, AmmoType.HE))
+        {
+            g.SalvoLeft = 0;
+            return;
+        }
+
+        (Vector3 muzzle, Vector3 dir) = Muzzle(g);
+        LaunchRound(g, g.SalvoByPlayer, AmmoType.HE, muzzle, dir);
+        g.SalvoLeft--;
     }
 
     public bool IsUpsideDownOrStuck => GlobalTransform.Basis.Y.Normalized().Dot(Vector3.Up) < 0.5f;

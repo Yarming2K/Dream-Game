@@ -628,6 +628,172 @@ public static class Effects
         };
     }
 
+    // ---------- Big booms ----------
+
+    private static readonly Gradient BigFireRamp = Ramp(
+        (0f, new Color(1f, 0.97f, 0.88f, 1f)), (0.2f, new Color(1f, 0.7f, 0.25f, 1f)), (0.55f, new Color(0.85f, 0.3f, 0.08f, 0.8f)),
+        (1f, new Color(0.15f, 0.08f, 0.05f, 0f)));
+
+    private static readonly Gradient ColumnSmoke = Ramp(
+        (0f, new Color(0.25f, 0.2f, 0.16f, 0f)), (0.06f, new Color(0.22f, 0.18f, 0.15f, 0.9f)),
+        (0.5f, new Color(0.32f, 0.3f, 0.28f, 0.7f)), (1f, new Color(0.5f, 0.49f, 0.48f, 0f)));
+
+    /// <summary>
+    /// A really big blast (a reactor, a cruise missile, a magazine): a blinding flash, a fireball that swells
+    /// and rolls upward, a column of smoke climbing into a cap, a shock wave racing out along the ground
+    /// with a ring of dust, burning debris thrown high, and a wide scorched crater.
+    /// </summary>
+    public static void BigExplosion(Node3D world, Vector3 pos, float radius)
+    {
+        float r = Mathf.Clamp(radius, 5f, 40f);
+        int lod = Detail(pos, r * 0.6f);
+        Sfx.At(world, pos, SoundId.ExplosionHuge, 8f, Rng.RandfRange(0.85f, 1f) * Mathf.Clamp(Mathf.Sqrt(10f / r), 0.6f, 1.1f), 30f + r * 4f);
+        if (lod == 0) return;
+
+        FxNode fx = Spawn(world, pos, 14f);
+        Flash(fx, new Color(1f, 0.95f, 0.85f), r * 9f, 0.35f);
+        Flash(fx, new Color(1f, 0.7f, 0.4f), r * 5f, 0.9f);
+        Light(fx, new Color(1f, 0.7f, 0.42f), 60f, r * 7f, 1.6f, flicker: true);
+
+        // The fireball: swells fast, then rises and dims.
+        StandardMaterial3D ballMat = SpriteMat(null, new Color(1f, 0.85f, 0.6f, 1f));
+        ballMat.BillboardMode = BaseMaterial3D.BillboardModeEnum.Disabled;
+        var ball = new MeshInstance3D { Mesh = Sphere, MaterialOverride = ballMat, CastShadow = GeometryInstance3D.ShadowCastingSetting.Off };
+        fx.AddChild(ball);
+        Chain(fx, u =>
+        {
+            float t = u * fx.Life;
+            float grow = 1f - Mathf.Pow(1f - Mathf.Min(t / 0.35f, 1f), 3f);
+            float fade = Mathf.Max(0, 1f - t / 1.6f);
+            ball.Scale = Vector3.One * Mathf.Max(r * 1.3f * grow, 0.01f);
+            ball.Position = Vector3.Up * r * 0.5f * Mathf.Min(t / 1.6f, 1f);
+            ballMat.AlbedoColor = new Color(1f, 0.55f + 0.4f * fade, 0.2f + 0.4f * fade * fade, fade * fade);
+            ball.Visible = fade > 0;
+        });
+
+        // The shell of compressed air, a faint sphere racing outward.
+        StandardMaterial3D waveMat = SpriteMat(null, new Color(1f, 0.97f, 0.92f, 0.22f), additive: true);
+        waveMat.BillboardMode = BaseMaterial3D.BillboardModeEnum.Disabled;
+        var wave = new MeshInstance3D { Mesh = Sphere, MaterialOverride = waveMat, CastShadow = GeometryInstance3D.ShadowCastingSetting.Off };
+        fx.AddChild(wave);
+        Chain(fx, u =>
+        {
+            float t = u * fx.Life;
+            float k = Mathf.Min(t / 0.55f, 1f);
+            wave.Scale = Vector3.One * Mathf.Max(r * (0.8f + 5f * k), 0.01f);
+            waveMat.AlbedoColor = new Color(1f, 0.97f, 0.92f, 0.22f * (1f - k));
+            wave.Visible = k < 1f;
+        });
+
+        Emit(fx, new Burst
+        {
+            Mat = Fire, Size = r * 0.9f, Amount = 40, Life = 1.6f, LifeRandom = 0.4f, EmitRadius = r * 0.35f,
+            Dir = Vector3.Up, Spread = 180, VelMin = r * 1.2f, VelMax = r * 3.2f, DampMin = r * 1.5f, DampMax = r * 2.5f,
+            Gravity = new Vector3(0, r * 0.4f, 0), ScaleFrom = 0.4f, ScaleTo = 1f, Colors = BigFireRamp,
+        });
+        Emit(fx, new Burst
+        {
+            Mat = Sparks, Size = 0.35f, Amount = 120, Life = 3.5f, LifeRandom = 0.5f, Dir = Vector3.Up, Spread = 75,
+            VelMin = r * 2.5f, VelMax = r * 6f, DampMin = 0.1f, DampMax = 0.3f, Colors = SparkRamp, ScaleFrom = 1f, ScaleTo = 0.4f,
+        });
+
+        // The rising column and the cap it spreads into.
+        Emit(fx, new Burst
+        {
+            Mat = Smoke, Size = r * 1.1f, Amount = 36, Life = 11f, LifeRandom = 0.3f, EmitRadius = r * 0.3f,
+            Dir = Vector3.Up, Spread = 12, VelMin = r * 0.6f, VelMax = r * 1.6f, DampMin = 0.1f, DampMax = 0.25f,
+            Gravity = new Vector3(0, 0.6f, 0), ScaleFrom = 0.3f, ScaleTo = 1f, Colors = ColumnSmoke,
+        });
+        Emit(fx, new Burst
+        {
+            Mat = Smoke, Size = r * 1.6f, Amount = 26, Life = 12f, LifeRandom = 0.25f, EmitRadius = r * 0.5f,
+            Dir = Vector3.Up, Spread = 30, VelMin = r * 2.2f, VelMax = r * 3f, DampMin = r * 0.25f, DampMax = r * 0.32f,
+            Gravity = new Vector3(0, 0.3f, 0), ScaleFrom = 0.4f, ScaleTo = 1f, Colors = ColumnSmoke,
+        });
+
+        bool nearGround = GroundBelow(world, pos, r * 1.5f, out Vector3 ground, out Vector3 gn);
+        if (!nearGround && pos.Y < Ocean.Level + r && pos.Y > Ocean.Level - 1f)
+        {
+            // Over the sea: a great ring of spray instead of dust.
+            Splash(world, new Vector3(pos.X, Ocean.Level, pos.Z), r * 0.5f);
+            return;
+        }
+
+        if (!nearGround) return;
+        Shockwave(world, ground + gn * 0.2f, gn, r * 0.9f);
+        Decals.Place(world, ground, gn, FxTextures.Scorch, r * 3.2f, r * 0.8f, lifeSeconds: 240f);
+        FxNode dust = Spawn(world, ground + gn * 0.3f, 12f);
+        Emit(dust, new Burst
+        {
+            Mat = Smoke, Size = r * 1.2f, Amount = 48, Life = 6f, LifeRandom = 0.3f, Dir = Vector3.Right, Spread = 180, Flatness = 1f,
+            VelMin = r * 3f, VelMax = r * 6.5f, DampMin = r * 0.35f, DampMax = r * 0.55f, Gravity = new Vector3(0, 0.4f, 0),
+            Colors = DustRamp, ScaleFrom = 0.3f, ScaleTo = 1f, EmitRadius = r * 0.4f,
+        });
+        Emit(dust, new Burst
+        {
+            Mat = Smoke, Size = 0.6f + r * 0.06f, Amount = 70, Life = 3f, Dir = gn, Spread = 45, VelMin = r * 2f,
+            VelMax = r * 5f, Gravity = new Vector3(0, -12f, 0), Colors = ClodRamp, ScaleFrom = 0.8f, ScaleTo = 0.6f,
+        });
+    }
+
+    // ---------- Energy weapons ----------
+
+    /// <summary>A railgun shot: a blue-white flash and crackle at the muzzle, a ring of plasma, a puff of hot gas.</summary>
+    public static void RailFlash(Node3D world, Vector3 pos, Vector3 dir)
+    {
+        if (world == null) return;
+        Sfx.At(world, pos, SoundId.RailShot, 3f, Rng.RandfRange(0.95f, 1.05f), 30f, delayByDistance: false);
+        int lod = Detail(pos, 1.2f);
+        if (lod == 0) return;
+        FxNode fx = Spawn(world, pos, 2.5f);
+        Flash(fx, new Color(0.6f, 0.82f, 1f), 3.2f, 0.09f, dir * 0.6f);
+        Flash(fx, new Color(0.85f, 0.95f, 1f), 1.4f, 0.05f);
+        Light(fx, new Color(0.5f, 0.75f, 1f), 10f, 10f, 0.12f);
+        Emit(fx, new Burst
+        {
+            Mat = Sparks, Size = 0.1f, Amount = 30, Life = 0.5f, LifeRandom = 0.5f, Dir = dir, Spread = 35, VelMin = 8, VelMax = 30,
+            DampMin = 4, DampMax = 8, Colors = Ramp((0f, new Color(0.85f, 0.95f, 1f, 1f)), (1f, new Color(0.3f, 0.5f, 1f, 0f))),
+            ScaleFrom = 1f, ScaleTo = 0.2f,
+        });
+        if (lod < 2) return;
+        Emit(fx, new Burst
+        {
+            Mat = Smoke, Size = 1f, Amount = 6, Life = 1.6f, Dir = dir, Spread = 20, VelMin = 3, VelMax = 9, DampMin = 4, DampMax = 6,
+            Gravity = new Vector3(0, 0.6f, 0), ScaleFrom = 0.3f, ScaleTo = 1f, Colors = GunSmoke,
+        });
+    }
+
+    private static float _lastBurnSound;
+
+    /// <summary>Where a laser touches: white-hot sparks and a glow, a wisp of smoke, and a scorch if it burned something through.</summary>
+    public static void LaserBurn(Node3D world, Vector3 pos, Vector3 normal, bool burnedThrough)
+    {
+        if (world == null) return;
+        int lod = Detail(pos, burnedThrough ? 0.8f : 0.4f);
+        float now = Time.GetTicksMsec() / 1000f;
+        if (now - _lastBurnSound > 0.25f || burnedThrough)
+        {
+            _lastBurnSound = now;
+            Sfx.At(world, pos, burnedThrough ? SoundId.Penetration : SoundId.BulletMetal, burnedThrough ? 0f : -8f, Rng.RandfRange(1.3f, 1.6f), 8f);
+        }
+
+        if (lod == 0) return;
+        FxNode fx = Spawn(world, pos + normal * 0.05f, 1.5f);
+        Flash(fx, new Color(1f, 0.6f, 0.45f), burnedThrough ? 1.6f : 0.7f, 0.1f);
+        Emit(fx, new Burst
+        {
+            Mat = Sparks, Size = 0.06f, Amount = burnedThrough ? 24 : 6, Life = 0.5f, LifeRandom = 0.5f, Dir = normal, Spread = 70,
+            VelMin = 2, VelMax = 7, Colors = SparkRamp, ScaleFrom = 1f, ScaleTo = 0.3f,
+        });
+        if (lod < 2 || (!burnedThrough && Rng.Randf() > 0.3f)) return;
+        Emit(fx, new Burst
+        {
+            Mat = Smoke, Size = 0.5f, Amount = 3, Life = 1.2f, Dir = normal, Spread = 20, VelMin = 0.5f, VelMax = 1.5f,
+            Gravity = new Vector3(0, 1f, 0), ScaleFrom = 0.3f, ScaleTo = 1f, Colors = GunSmoke,
+        });
+        if (burnedThrough) Decals.Place(world, pos, normal, FxTextures.Scorch, 0.5f, 0.4f, new Color(1, 1, 1, 0.7f));
+    }
+
     // ---------- Small arms ----------
 
     public static void RifleFlash(Node3D world, Vector3 pos, Vector3 dir)

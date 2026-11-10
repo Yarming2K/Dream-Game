@@ -19,6 +19,11 @@ public partial class Combat
         public bool ByPlayer;
         public float Age;
         public Node3D Visual;
+
+        /// <summary>How much shooting it takes to knock it down, and the side that dropped it.</summary>
+        public float Hp = 60f;
+        public int Faction = -1;
+        public bool Dead;
     }
 
     private sealed class MissileRun
@@ -31,6 +36,15 @@ public partial class Combat
         public VehicleBody Target;
         public Node3D Visual;
         public CpuParticles3D Trail;
+        public float Hp = 30f;
+        public int Faction = -1;
+        public bool Dead;
+
+        /// <summary>Cruise missiles: the spot on the ground they're flying to.</summary>
+        public Vector3? Goal;
+
+        /// <summary>Fired straight up out of a deck cell: it climbs clear before it turns.</summary>
+        public bool Vertical;
     }
 
     private readonly List<BombRun> _bombs = new();
@@ -46,20 +60,31 @@ public partial class Combat
         visual.AddChild(new MeshInstance3D { Mesh = _bombMesh, MaterialOverride = _bombMat, Rotation = new Vector3(Mathf.Pi / 2, 0, 0) });
         AddChild(visual);
         visual.GlobalPosition = pos;
-        _bombs.Add(new BombRun { Owner = owner, Pos = pos, Vel = vel, ByPlayer = byPlayer, Visual = visual });
+        _bombs.Add(new BombRun
+        {
+            Owner = owner, Pos = pos, Vel = vel, ByPlayer = byPlayer, Visual = visual, Faction = (owner as VehicleBody)?.Faction ?? -1,
+        });
     }
 
+    /// <summary>
+    /// Launches a missile. <paramref name="goal"/> is where a cruise missile flies to; <paramref name="vertical"/>
+    /// means it left a deck cell straight up and climbs clear before turning.
+    /// </summary>
     public void LaunchMissile(VehicleBody owner, Vector3 pos, Vector3 dir, Vector3 carrierVelocity, MissileStats stats, bool byPlayer,
-        Node3D visual, VehicleBody target)
+        Node3D visual, VehicleBody target, Vector3? goal = null, bool vertical = false)
     {
         AddChild(visual);
         visual.GlobalPosition = pos;
         _missiles.Add(new MissileRun
         {
-            Owner = owner, Pos = pos, Vel = carrierVelocity + dir * 25f, Stats = stats, ByPlayer = byPlayer, Burn = stats.BurnS,
+            Owner = owner, Pos = pos, Vel = carrierVelocity + dir * (vertical ? 40f : 25f), Stats = stats, ByPlayer = byPlayer, Burn = stats.BurnS,
             Target = target, Visual = visual, Trail = stats.BurnS > 0 ? Effects.RocketTrail(this, pos) : null,
+            Goal = goal, Vertical = vertical, Faction = owner?.Faction ?? -1,
+            // Bigger missiles take more shooting to knock down.
+            Hp = Mathf.Clamp(stats.MassKg / 5f, 20f, 150f),
         });
-        Sfx.At(this, pos, SoundId.RocketLaunch, 0f, 0.9f, 16f, delayByDistance: false);
+        Sfx.At(this, pos, SoundId.RocketLaunch, vertical ? 4f : 0f, vertical ? 0.7f : 0.9f, vertical ? 40f : 16f, delayByDistance: false);
+        if (vertical) Effects.Backblast(this, pos, -dir);
     }
 
     private void OrdnanceTick(float dt)
@@ -68,6 +93,13 @@ public partial class Combat
         for (int i = _bombs.Count - 1; i >= 0; i--)
         {
             BombRun b = _bombs[i];
+            if (b.Dead)
+            {
+                if (IsInstanceValid(b.Visual)) b.Visual.QueueFree();
+                _bombs.RemoveAt(i);
+                continue;
+            }
+
             b.Age += dt;
             Vector3 from = b.Pos;
             float speed = b.Vel.Length();
@@ -89,7 +121,7 @@ public partial class Combat
         for (int i = _missiles.Count - 1; i >= 0; i--)
         {
             MissileRun m = _missiles[i];
-            if (MissileStep(space, m, dt)) continue;
+            if (!m.Dead && MissileStep(space, m, dt)) continue;
             Effects.StopTrail(m.Trail);
             if (IsInstanceValid(m.Visual)) m.Visual.QueueFree();
             _missiles.RemoveAt(i);
@@ -105,7 +137,15 @@ public partial class Combat
 
         // Find something to steer at.
         Vector3? aim = null;
-        if (m.Stats.Seeker == SeekerKind.Optical && m.Owner != null && IsInstanceValid(m.Owner)) aim = m.Owner.GuidancePoint(m.ByPlayer);
+        bool ownerOk = m.Owner != null && IsInstanceValid(m.Owner);
+        if (m.Stats.Seeker == SeekerKind.Optical && ownerOk) aim = m.Owner.GuidancePoint(m.ByPlayer);
+        else if (m.Stats.Seeker == SeekerKind.Navigation && m.Goal.HasValue)
+        {
+            // Fired at a vehicle, its datalink keeps the target point on it as it moves.
+            if (m.Target != null && IsInstanceValid(m.Target) && m.Target.Model.Blocks.Count > 0)
+                m.Goal = m.Target.GlobalTransform * m.Target.CenterOfMass;
+            aim = CruiseAim(m);
+        }
         else if (m.Stats.Seeker == SeekerKind.Radar)
         {
             if (m.Target == null || !IsInstanceValid(m.Target) || m.Target.Model.Blocks.Count == 0)
@@ -115,7 +155,10 @@ public partial class Combat
                 if (m.Search <= 0)
                 {
                     m.Search = 0.5f;
-                    m.Target = VehicleBody.RadarLock(m.Pos, vdir, m.Owner != null && IsInstanceValid(m.Owner) ? m.Owner.Faction : -1, 20f, 3000f);
+                    // A missile climbing out of a deck cell looks where its crew is looking, not straight up.
+                    Vector3 look = vdir;
+                    if (m.Vertical && ownerOk && m.Owner.GuidancePoint(m.ByPlayer) is Vector3 g) look = (g - m.Pos).Normalized();
+                    m.Target = VehicleBody.RadarLock(m.Pos, look, ownerOk ? m.Owner.Faction : -1, m.Vertical ? 35f : 20f, m.Vertical ? 6000f : 3000f);
                 }
             }
 
@@ -132,7 +175,7 @@ public partial class Combat
             }
         }
 
-        bool guided = aim.HasValue && m.Stats.MaxTurnAccel > 0 && m.Age > 0.25f;
+        bool guided = aim.HasValue && m.Stats.MaxTurnAccel > 0 && m.Age > (m.Vertical ? 0.7f : 0.25f);
         if (guided)
         {
             Vector3 want = (aim.Value - m.Pos).Normalized();
@@ -157,7 +200,7 @@ public partial class Combat
             return false;
         }
 
-        if (m.Age > Aero.MissileLifeS)
+        if (m.Age > (m.Stats.LifeS > 0 ? m.Stats.LifeS : Aero.MissileLifeS))
         {
             Explode(to, m.Stats.RadiusM * 0.6f, m.Stats.Damage * 0.3f, m.ByPlayer, "Missile", flak: true);
             return false;

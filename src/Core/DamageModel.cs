@@ -84,6 +84,15 @@ public static class DamageModel
         return MathF.Acos(MathF.Abs(c)) * 180f / MathF.PI;
     }
 
+    /// <summary>Armor thickness that halves a laser's burn.</summary>
+    public const float LaserArmorMm = 40f;
+
+    /// <summary>
+    /// What a laser pulse does to a block. A beam burns rather than punches, so armor slows it (thick plate
+    /// takes seconds to burn through) but never stops it outright.
+    /// </summary>
+    public static float LaserBurn(BlockDef def, float damage) => damage * LaserArmorMm / (LaserArmorMm + def.ArmorMm);
+
     /// <summary>Deals damage; returns true only on the hit that destroys the block.</summary>
     public static bool ApplyDamage(BlockInstance b, float damage)
     {

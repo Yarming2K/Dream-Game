@@ -29,7 +29,7 @@ public class DesignTests
         Assert.DoesNotContain(a.Warnings, w => w.Severity != Severity.Info);
         Assert.True(a.CanDrive);
         Assert.Empty(a.Disconnected);
-        Assert.All(a.Guns, g => Assert.True(g.Valid && g.ApRounds + g.HeRounds + g.FlakRounds > 0));
+        Assert.All(a.Guns, g => Assert.True(g.Valid && (g.ApRounds + g.HeRounds + g.FlakRounds > 0 || g.BreechDef.Breech.Beam)));
         if (a.IsAir) Assert.InRange(a.TopSpeedKmh, 50, 1200);
         else Assert.InRange(a.TopSpeedKmh, a.IsNaval ? 15 : 25, 110);
         Assert.True(a.Front.Samples > 0);

@@ -52,6 +52,30 @@ public enum BlockKind
 
     /// <summary>A search radar: everything aboard sees further.</summary>
     Radar,
+
+    /// <summary>Makes electricity for energy weapons, burning fuel while it charges.</summary>
+    Generator,
+
+    /// <summary>Makes a great deal of electricity with no fuel. Goes up like a bomb if it's destroyed.</summary>
+    Reactor,
+
+    /// <summary>Stores charge for energy weapons.</summary>
+    Capacitor,
+
+    /// <summary>A vertical launch cell: one missile inside, fired straight up out of the deck.</summary>
+    VlsCell,
+}
+
+/// <summary>What a vertical launch cell holds.</summary>
+public enum VlsLoad
+{
+    None,
+
+    /// <summary>A cruise missile that flies itself to a spot on the ground and hits it with a huge warhead.</summary>
+    Strike,
+
+    /// <summary>An anti-aircraft missile that locks on to an enemy aircraft and chases it.</summary>
+    Sam,
 }
 
 public enum BlockShape
@@ -124,6 +148,33 @@ public sealed class BreechSpec
 
     /// <summary>How far up the gun can point. Anti-aircraft guns point nearly straight up.</summary>
     public float MaxElevationDeg = 20f;
+
+    /// <summary>What goes in front of it: null for ordinary barrels, or "rail", "lens" or "tube" (see <see cref="BlockDef.BarrelTag"/>).</summary>
+    public string BarrelTag;
+
+    /// <summary>Electric charge each shot takes from the vehicle's power, in megajoules (energy weapons).</summary>
+    public float ChargeMJ;
+
+    /// <summary>Railgun: fires solid slugs (from AP racks) with magnets.</summary>
+    public bool Rail;
+
+    /// <summary>Laser: a beam that burns the first thing it touches. No ammo at all.</summary>
+    public bool Beam;
+
+    /// <summary>Rockets: each launch tube in front adds two rockets to the salvo, fired one after another.</summary>
+    public bool Rocket;
+
+    /// <summary>Point defense: its gunners shoot down missiles and bombs coming at their vehicle before anything else.</summary>
+    public bool PointDefense;
+
+    /// <summary>Rounds fired for each one taken from the rack (a gatling fires a burst).</summary>
+    public int Burst = 1;
+
+    /// <summary>Lasers: how far the beam does full damage before it spreads out (lenses add to it).</summary>
+    public float BeamRangeM;
+
+    /// <summary>What the weapon is called instead of its caliber ("Railgun").</summary>
+    public string Label;
 }
 
 public sealed class BlockDef
@@ -198,6 +249,18 @@ public sealed class BlockDef
 
     /// <summary>Glass: drawn as framed panes (cockpits, bridges, windows).</summary>
     public bool Glass;
+
+    /// <summary>Barrel-like blocks: the kind of breech they go on, matching <see cref="BreechSpec.BarrelTag"/> (null for gun barrels).</summary>
+    public string BarrelTag;
+
+    /// <summary>Generators and reactors: the electricity they make, in kW.</summary>
+    public float ElectricKw;
+
+    /// <summary>Capacitor Banks: the charge they hold, in MJ.</summary>
+    public float StoreMJ;
+
+    /// <summary>VLS cells: the missile inside.</summary>
+    public VlsLoad Vls;
     public bool ConductsAmmo => Kind == BlockKind.AmmoRack || Kind == BlockKind.AmmoFeed || Kind == BlockKind.TurretRing;
     public bool IsWheelLike => Kind == BlockKind.Wheel || Kind == BlockKind.SteerWheel || Kind == BlockKind.Track;
     public bool IsSeat => Kind == BlockKind.DriverSeat || Kind == BlockKind.GunnerSeat || Kind == BlockKind.CommanderSeat ||
@@ -208,7 +271,7 @@ public sealed class BlockDef
 
 public static class BlockCatalog
 {
-    public static readonly string[] Categories = { "Structure", "Mobility", "Sea", "Air", "Control", "Weapons", "Ammo", "Details" };
+    public static readonly string[] Categories = { "Structure", "Mobility", "Sea", "Air", "Control", "Weapons", "Ammo", "Power", "Details" };
 
     public static readonly BreechSpec Light37 = new()
     {
@@ -250,6 +313,41 @@ public static class BlockCatalog
         CaliberMm = 40, ShellMassKg = 0.9f, BaseVelocity = 700, BasePenMm = 42,
         ApDamage = 55, HeDamage = 80, HeRadiusM = 1.4f, ReloadS = 0.3f, ShellUnits = 1, DragK = 0.00014f,
         MaxElevationDeg = 85f,
+    };
+
+    /// <summary>
+    /// Railgun: a 40 mm slug thrown by magnets at well over 2 km/s. It flies flat and hits as hard as a big gun,
+    /// but every shot drains 20 MJ from the vehicle's power.
+    /// </summary>
+    public static readonly BreechSpec Rail40 = new()
+    {
+        CaliberMm = 40, ShellMassKg = 5f, BaseVelocity = 1400, BasePenMm = 180,
+        ApDamage = 380, HeDamage = 0, HeRadiusM = 0, ReloadS = 4f, ShellUnits = 2, DragK = 0.00002f,
+        MaxElevationDeg = 35f, BarrelTag = "rail", ChargeMJ = 20f, Rail = true, Label = "Railgun",
+    };
+
+    /// <summary>Laser: ten pulses a second, each burning the first block the beam touches. Takes 5 MW while it fires.</summary>
+    public static readonly BreechSpec Laser = new()
+    {
+        CaliberMm = 12, ShellMassKg = 0, BaseVelocity = 100000, BasePenMm = 1,
+        ApDamage = 22, ReloadS = 0.1f, ShellUnits = 1, MaxElevationDeg = 88f,
+        BarrelTag = "lens", ChargeMJ = 0.5f, Beam = true, PointDefense = true, BeamRangeM = 1000f, Label = "Laser",
+    };
+
+    /// <summary>Close-in weapon system: a 20 mm gatling firing bursts of five, for shooting down missiles and bombs.</summary>
+    public static readonly BreechSpec Gatling20 = new()
+    {
+        CaliberMm = 20, ShellMassKg = 0.1f, BaseVelocity = 700, BasePenMm = 28,
+        ApDamage = 22, HeDamage = 30, HeRadiusM = 0.8f, ReloadS = 0.1f, ShellUnits = 1, DragK = 0.0002f,
+        MaxElevationDeg = 88f, Burst = 5, PointDefense = true, Label = "20 mm CIWS",
+    };
+
+    /// <summary>Rocket artillery: unguided 122 mm rockets, rippled off in salvos at targets kilometers away.</summary>
+    public static readonly BreechSpec Rocket122 = new()
+    {
+        CaliberMm = 122, ShellMassKg = 60f, BaseVelocity = 330, BasePenMm = 30,
+        ApDamage = 0, HeDamage = 560, HeRadiusM = 5f, ReloadS = 12f, ShellUnits = 2, DragK = 0.00003f,
+        MaxElevationDeg = 55f, BarrelTag = "tube", Rocket = true, Label = "Rockets",
     };
 
     private static readonly List<BlockDef> Defs = new()
@@ -777,6 +875,94 @@ public static class BlockCatalog
             AmmoUnits = 24,
             Description = "Air-burst shells for any gun: they go off when they pass close to an aircraft, or at the range you're aiming at, filling the sky with shrapnel. Explodes if destroyed while loaded.",
             MassKg = 120, Hp = 70, ArmorMm = 5, Watertight = false, ColorR = 0.35f, ColorG = 0.38f, ColorB = 0.42f, Metallic = 0.5f, Roughness = 0.5f,
+        },
+
+        // Power
+        new BlockDef
+        {
+            Id = "generator", Name = "Generator", Category = "Power", Kind = BlockKind.Generator,
+            Description = "Makes 1.5 MW of electricity for railguns and lasers, burning fuel while it charges. The charge is kept in Capacitor Banks.",
+            MassKg = 400, Hp = 110, ArmorMm = 10, ElectricKw = 1500,
+            ColorR = 0.36f, ColorG = 0.38f, ColorB = 0.42f, Metallic = 0.7f, Roughness = 0.45f, Watertight = false,
+        },
+        new BlockDef
+        {
+            Id = "capacitor", Name = "Capacitor Bank", Category = "Power", Kind = BlockKind.Capacitor,
+            Description = "Holds 12 MJ of charge. A railgun takes a big gulp every shot, so a few of these let it fire as fast as it reloads. Discharges with a bang if it's destroyed.",
+            MassKg = 220, Hp = 70, ArmorMm = 8, StoreMJ = 12, DeathExplosionDamage = 150, DeathExplosionRadiusM = 1.5f,
+            ColorR = 0.2f, ColorG = 0.3f, ColorB = 0.42f, Metallic = 0.6f, Roughness = 0.4f, Watertight = false,
+        },
+        new BlockDef
+        {
+            Id = "reactor", Name = "Fusion Reactor (3×3×3)", Category = "Power", Kind = BlockKind.Reactor, Size = new Int3(3, 3, 3),
+            Description = "Makes 40 MW of electricity with no fuel at all: enough to keep lasers burning and railguns firing. Bury it deep and armor it well: if it's destroyed it goes up in an enormous blast.",
+            MassKg = 22000, Hp = 1400, ArmorMm = 60, ElectricKw = 40000, DeathExplosionDamage = 9000, DeathExplosionRadiusM = 26f,
+            ColorR = 0.3f, ColorG = 0.33f, ColorB = 0.38f, Metallic = 0.8f, Roughness = 0.35f,
+        },
+
+        // Modern and future weapons
+        new BlockDef
+        {
+            Id = "rail_breech", Name = "Railgun Breech", Category = "Weapons", Kind = BlockKind.Breech, Breech = Rail40,
+            Description = "Throws 40 mm slugs at over 2 km/s with magnets: flat, fast and very hard-hitting. Put Rail Segments in front (the arrow side) and feed it slugs from AP racks. Every shot takes 20 MJ, so it needs a Generator or Reactor and Capacitor Banks.",
+            MassKg = 900, Hp = 220, ArmorMm = 40, Watertight = false,
+            ColorR = 0.2f, ColorG = 0.22f, ColorB = 0.26f, Metallic = 0.85f, Roughness = 0.3f,
+        },
+        new BlockDef
+        {
+            Id = "rail", Name = "Rail Segment", Category = "Weapons", Kind = BlockKind.Barrel, BarrelTag = "rail",
+            Description = "Goes in a straight line in front of a Railgun Breech. Each one adds speed and punch, like barrels on a gun.",
+            MassKg = 110, Hp = 100, ArmorMm = 20, HasCollider = false, Watertight = false,
+            ColorR = 0.22f, ColorG = 0.23f, ColorB = 0.27f, Metallic = 0.85f, Roughness = 0.3f,
+        },
+        new BlockDef
+        {
+            Id = "laser_emitter", Name = "Laser Emitter", Category = "Weapons", Kind = BlockKind.Breech, Breech = Laser,
+            Description = "A beam that burns through whatever it touches at the speed of light: no drop, no lead, no ammo. Needs a Focusing Lens in front and a lot of power (5 MW while it fires). Its gunners burn incoming missiles and bombs out of the sky first.",
+            MassKg = 450, Hp = 120, ArmorMm = 20, Watertight = false,
+            ColorR = 0.3f, ColorG = 0.32f, ColorB = 0.36f, Metallic = 0.75f, Roughness = 0.35f,
+        },
+        new BlockDef
+        {
+            Id = "laser_lens", Name = "Focusing Lens", Category = "Weapons", Kind = BlockKind.Barrel, BarrelTag = "lens",
+            Description = "Goes in front of a Laser Emitter. Each one focuses the beam further, so it keeps its full strength out to a longer range.",
+            MassKg = 40, Hp = 50, ArmorMm = 10, HasCollider = false, Watertight = false,
+            ColorR = 0.32f, ColorG = 0.34f, ColorB = 0.38f, Metallic = 0.7f, Roughness = 0.3f,
+        },
+        new BlockDef
+        {
+            Id = "breech_20gat", Name = "20 mm Gatling (CIWS)", Category = "Weapons", Kind = BlockKind.Breech, Breech = Gatling20,
+            Description = "A spinning gun firing fifty rounds a second, made for shooting down missiles and bombs: its gunners go after anything incoming first. Put a barrel or three in front.",
+            MassKg = 280, Hp = 100, ArmorMm = 15, Watertight = false,
+            ColorR = 0.8f, ColorG = 0.8f, ColorB = 0.78f, Metallic = 0.4f, Roughness = 0.5f,
+        },
+        new BlockDef
+        {
+            Id = "rocket_pod", Name = "Rocket Launcher", Category = "Weapons", Kind = BlockKind.Breech, Breech = Rocket122,
+            Description = "Rocket artillery. Put Launch Tubes in front of it (the arrow side): each adds two rockets to a salvo. Feed it from HE racks, aim at the ground kilometers away, and it ripples off the whole salvo.",
+            MassKg = 350, Hp = 120, ArmorMm = 15, Watertight = false,
+            ColorR = 0.3f, ColorG = 0.32f, ColorB = 0.27f, Metallic = 0.6f, Roughness = 0.5f,
+        },
+        new BlockDef
+        {
+            Id = "rocket_tube", Name = "Launch Tubes", Category = "Weapons", Kind = BlockKind.Barrel, BarrelTag = "tube",
+            Description = "A pack of two rocket tubes, in a line in front of a Rocket Launcher.",
+            MassKg = 70, Hp = 60, ArmorMm = 6, HasCollider = false, Watertight = false,
+            ColorR = 0.33f, ColorG = 0.35f, ColorB = 0.3f, Metallic = 0.5f, Roughness = 0.55f,
+        },
+        new BlockDef
+        {
+            Id = "vls_strike", Name = "VLS Cell: Strike Missile", Category = "Weapons", Kind = BlockKind.VlsCell, Vls = VlsLoad.Strike, AmmoUnits = 1,
+            Description = "A cruise missile in a deck cell, launched straight up. It flies itself to the spot under your crosshair when you fire (up to about 12 km), skims in low and lands a huge warhead. Nothing may sit on its hatch. Fire with F.",
+            MassKg = 900, Hp = 90, ArmorMm = 12, Watertight = false,
+            ColorR = 0.36f, ColorG = 0.38f, ColorB = 0.38f, Metallic = 0.6f, Roughness = 0.5f,
+        },
+        new BlockDef
+        {
+            Id = "vls_sam", Name = "VLS Cell: Air-Defense Missile", Category = "Weapons", Kind = BlockKind.VlsCell, Vls = VlsLoad.Sam, AmmoUnits = 1,
+            Description = "An anti-aircraft missile in a deck cell, launched straight up. It locks on to the enemy aircraft nearest your crosshair and runs it down on its own. Nothing may sit on its hatch. Fire with F.",
+            MassKg = 260, Hp = 70, ArmorMm = 12, Watertight = false,
+            ColorR = 0.36f, ColorG = 0.38f, ColorB = 0.38f, Metallic = 0.6f, Roughness = 0.5f,
         },
 
         // Details

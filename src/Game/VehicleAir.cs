@@ -676,16 +676,33 @@ public partial class VehicleBody
         return null;
     }
 
-    private bool MissileReady(MissileInfo m) =>
-        m.Valid && m.Parts.Count > 0 && Model.Blocks.TryGetValue(m.Rail, out BlockInstance rail) && rail.Alive &&
-        m.Parts.All(c => Model.Blocks.TryGetValue(c, out BlockInstance b) && b.Alive);
+    private bool MissileReady(MissileInfo m)
+    {
+        if (!m.Valid) return false;
+        if (m.IsVls) return Model.Blocks.TryGetValue(m.Rail, out BlockInstance cell) && cell.Alive && cell.AmmoUnits >= 1f;
+        return m.Parts.Count > 0 && Model.Blocks.TryGetValue(m.Rail, out BlockInstance rail) && rail.Alive &&
+               m.Parts.All(c => Model.Blocks.TryGetValue(c, out BlockInstance b) && b.Alive);
+    }
 
-    /// <summary>Launches one missile. Its parts leave the vehicle and fly as the missile; supply points build new ones.</summary>
-    public bool FireMissile(bool byPlayer, Vector3? aim)
+    /// <summary>Whether any vertical launch cells hold air-defense missiles (its crew then watch the sky further out).</summary>
+    public bool HasSams => Analysis.Missiles.Any(m => m.Vls == VlsLoad.Sam);
+
+    /// <summary>
+    /// Launches one missile. Its parts leave the vehicle and fly as the missile; supply points build new ones.
+    /// With an enemy aircraft near the crosshair, a radar-guided one goes first; otherwise one that flies to the crosshair.
+    /// </summary>
+    public bool FireMissile(bool byPlayer, Vector3? aim, System.Func<MissileInfo, bool> suits = null)
     {
         if (Combat.Instance == null) return false;
-        MissileInfo m = Analysis.Missiles.Where(MissileReady).OrderBy(x => x.Rail.X).FirstOrDefault();
-        if (m == null) return false;
+        var ready = Analysis.Missiles.Where(x => MissileReady(x) && (suits == null || suits(x))).ToList();
+        // A cruise missile needs a spot to fly to.
+        if (!aim.HasValue) ready.RemoveAll(x => x.Stats.Seeker == SeekerKind.Navigation);
+        if (ready.Count == 0) return false;
+        Vector3 eye = GlobalTransform * CenterOfMass;
+        bool airLock = aim.HasValue && RadarLock(eye, (aim.Value - eye).Normalized(), Faction, 25f, 6000f) != null;
+        MissileInfo m = ready.Where(x => (x.Stats.Seeker == SeekerKind.Radar) == airLock).OrderBy(x => x.Rail.X).FirstOrDefault() ??
+                        ready.OrderBy(x => x.Rail.X).First();
+        if (m.IsVls) return FireFromCell(m, byPlayer, aim);
 
         Transform3D sec = View.SectionGlobal(m.Section);
         Vector3 f = m.Forward.G();
@@ -713,6 +730,54 @@ public partial class VehicleBody
         Combat.Instance.LaunchMissile(this, center, dir, LinearVelocity, m.Stats, byPlayer, visual, target);
         RefreshStats();
         return true;
+    }
+
+    /// <summary>Fires the missile in a vertical launch cell straight up out of the deck.</summary>
+    private bool FireFromCell(MissileInfo m, bool byPlayer, Vector3? aim)
+    {
+        BlockInstance cell = Model.Blocks[m.Rail];
+        Transform3D sec = View.SectionGlobal(m.Section);
+        Vector3 up = (sec.Basis * m.Forward.G()).Normalized();
+        Vector3 at = sec * Conv.CellPos(m.Rail) + up * 1.6f;
+        VehicleBody target = null;
+        Vector3? goal = null;
+        if (m.Vls == VlsLoad.Strike)
+        {
+            goal = aim;
+            target = EnemyNear(aim.Value, 25f);
+        }
+        else if (aim.HasValue) target = RadarLock(at, (aim.Value - at).Normalized(), Faction, 30f, 6000f);
+
+        cell.AmmoUnits = 0;
+        ShowCellHatch(cell, false);
+        Combat.Instance.LaunchMissile(this, at, up, LinearVelocity, m.Stats, byPlayer, Combat.VlsMissileVisual(m.Vls), target, goal, vertical: true);
+        return true;
+    }
+
+    /// <summary>The enemy vehicle nearest a point, within <paramref name="radius"/> of its edge (null if none).</summary>
+    private VehicleBody EnemyNear(Vector3 point, float radius)
+    {
+        var near = new List<IGridHost>();
+        WorldQuery.HostsNear(point, radius + 40f, near);
+        VehicleBody best = null;
+        float bestD = float.MaxValue;
+        foreach (IGridHost h in near)
+        {
+            if (h is not VehicleBody v || v.Faction == Faction || v.Model.Blocks.Count == 0) continue;
+            float d = (v.GlobalTransform * v.CenterOfMass).DistanceTo(point) - v.Radius;
+            if (d > radius || d >= bestD) continue;
+            bestD = d;
+            best = v;
+        }
+
+        return best;
+    }
+
+    /// <summary>A loaded launch cell shows its closed hatch; an empty one shows the open well.</summary>
+    private void ShowCellHatch(BlockInstance cell, bool loaded)
+    {
+        Node3D hatch = View.VisualOf(cell)?.GetNodeOrNull<Node3D>("Payload");
+        if (hatch != null) hatch.Visible = loaded;
     }
 
     /// <summary>The enemy aircraft closest to a line of sight, within a cone.</summary>
@@ -745,18 +810,29 @@ public partial class VehicleBody
     /// <summary>The AI crew fires missiles at what its gunner is shooting at.</summary>
     private void AiMissiles(float dt)
     {
-        if (!AiCrewActive || PlayerSeat != null || MissilesReady == 0) return;
+        if (!AiCrewActive || PlayerSeat != null || MissilesReady == 0 || Roe == Engagement.HoldFire) return;
         _missileWait -= dt;
         if (_missileWait > 0) return;
         _missileWait = 7f;
-        VehicleBody target = _aiVehicleTarget;
-        if (target == null || !IsInstanceValid(target)) return;
-        Vector3 to = target.GlobalTransform * target.CenterOfMass;
-        if (GlobalPosition.DistanceTo(to) > 1500f) return;
-        MissileInfo m = Analysis.Missiles.FirstOrDefault(MissileReady);
-        if (m == null || (m.Stats.Seeker == SeekerKind.Radar && !target.IsAir)) return;
-        FireMissile(false, to);
+        // Aircraft first (for the air-defense missiles), then whatever the gunners are shooting at.
+        VehicleBody air = AaTargetValid() ? _aaTarget : null;
+        VehicleBody other = _aiVehicleTarget != null && IsInstanceValid(_aiVehicleTarget) && _aiVehicleTarget.Model.Blocks.Count > 0 ? _aiVehicleTarget : null;
+        foreach (VehicleBody target in new[] { air, other })
+        {
+            if (target == null) continue;
+            Vector3 to = target.GlobalTransform * target.CenterOfMass;
+            float d = GlobalPosition.DistanceTo(to);
+            if (FireMissile(false, to, m => MissileSuits(m, target, d))) return;
+        }
     }
+
+    /// <summary>Whether a missile is the right one for a target this far away.</summary>
+    private static bool MissileSuits(MissileInfo m, VehicleBody target, float d) => m.Stats.Seeker switch
+    {
+        SeekerKind.Radar => target.IsAir && !target.OnGround && d < (m.IsVls ? 6000f : 3000f),
+        SeekerKind.Navigation => !target.IsAir && d > 400f && d < m.Stats.RangeM * 0.9f,
+        _ => d < 1500f,
+    };
 
     /// <summary>At a supply point: hang new bombs and build new missiles onto empty rails, a part at a time.</summary>
     private bool ResupplyOrdnance(float dt)
@@ -764,8 +840,9 @@ public partial class VehicleBody
         bool changed = false;
         foreach (BlockInstance b in Model.Instances)
         {
-            if (!b.Alive || b.Def.Kind != BlockKind.BombRack || b.AmmoUnits >= 1f) continue;
-            b.AmmoUnits = Mathf.Min(1f, b.AmmoUnits + dt / 3f);
+            if (!b.Alive || b.Def.Kind is not (BlockKind.BombRack or BlockKind.VlsCell) || b.AmmoUnits >= 1f) continue;
+            b.AmmoUnits = Mathf.Min(1f, b.AmmoUnits + dt / (b.Def.Kind == BlockKind.VlsCell ? 4f : 3f));
+            if (b.Def.Kind == BlockKind.VlsCell && b.AmmoUnits >= 1f) ShowCellHatch(b, true);
             changed = true;
         }
 

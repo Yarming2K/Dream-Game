@@ -161,6 +161,32 @@ public static class Synth
         return Finish(b, 2.1f);
     }
 
+    /// <summary>A railgun: an electric snap and a falling zip as the slug leaves, a sonic crack and a hard thump.</summary>
+    public static float[] RailShot(uint seed = 19)
+    {
+        var r = new Rng(seed);
+        float[] b = Buffer(2.2f);
+        Noise(b, r, 0, 0.0002f, 0.004f, 3000, 16000, 1.2f);                 // the snap of the discharge
+        Sweep(b, 0, 5200, 380, 0.12f, 0.0005f, 0.07f, 0.5f);                  // the zip down the rails
+        Sweep(b, 0, 2600, 190, 0.14f, 0.0005f, 0.06f, 0.25f, 60f, 0.08f);
+        Noise(b, r, 0.002f, 0.0005f, 0.05f, 120, 3500, 0.7f);                 // the crack of the slug
+        Sweep(b, 0, 95, 38, 0.2f, 0.002f, 0.12f, 0.8f);                       // thump
+        Noise(b, r, 0.01f, 0.02f, 0.35f, 30, 260, 0.35f);                     // rumble
+        Echo(b, 0.25f, 0.2f, 1200);
+        return Finish(b, 1.8f);
+    }
+
+    /// <summary>A laser pulse: a short electric buzz with a crackle on top.</summary>
+    public static float[] LaserZap(uint seed = 20)
+    {
+        var r = new Rng(seed);
+        float[] b = Buffer(0.28f);
+        Sweep(b, 0, 1900, 1100, 0.07f, 0.002f, 0.04f, 0.45f, 120f, 0.15f);
+        Sweep(b, 0, 3800, 2200, 0.07f, 0.002f, 0.03f, 0.2f, 120f, 0.15f);
+        Noise(b, r, 0, 0.001f, 0.03f, 2500, 12000, 0.25f);
+        return Finish(b, 1.4f, 0.7f);
+    }
+
     /// <summary>A shell punching through steel: sharp crack, crunch and a short metallic ring.</summary>
     public static float[] Penetration(uint seed = 3)
     {

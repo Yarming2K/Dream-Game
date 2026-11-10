@@ -125,7 +125,15 @@ public partial class Combat : Node3D
             InfantryDamage = infantryDamage >= 0 ? infantryDamage : InfantryDamage.FromShell(shell),
             Ignore = ignore, Small = stats.CaliberMm < 20f, FuseM = fuseM, Owner = owner,
         };
-        if (rocket) p.Trail = Effects.RocketTrail(this, pos);
+        if (rocket || breech?.Rocket == true) p.Trail = Effects.RocketTrail(this, pos);
+        else if (breech?.Rail == true)
+        {
+            // A railgun slug glows from the heat of the magnets: a blue-white streak.
+            p.Tracer = true;
+            p.Tint = new Color(0.55f, 0.82f, 1f);
+            p.TracerWidth = 0.07f;
+            p.HeadSize = 2.4f;
+        }
         else if (tracer)
         {
             p.Tracer = true;
@@ -153,7 +161,8 @@ public partial class Combat : Node3D
             p.Vel *= Mathf.Max(0f, 1f - (p.Underwater ? UnderwaterDrag : p.DragK) * speed * dt);
             if (p.Underwater) p.Shell.PenMm *= p.Vel.Length() / Mathf.Max(speed, 1f);
             Vector3 to = from + p.Vel * dt;
-            bool done = p.Shell.Type == AmmoType.Flak && FlakFuse(p, from, ref to);
+            bool done = ShootDown(p, from, to);
+            if (!done && p.Shell.Type == AmmoType.Flak) done = FlakFuse(p, from, ref to);
             if (!done) done = Step(p, from, to);
             if (!done)
             {
@@ -172,6 +181,7 @@ public partial class Combat : Node3D
             }
         }
 
+        DrawBeams(dt);
         _tracers.End();
         Perf.Add(Perf.Shells, started);
         long ordnance = Perf.Now;
@@ -395,6 +405,7 @@ public partial class Combat : Node3D
         // Under water there's no fireball, just a column of spray thrown up at the surface.
         if (center.Y < Ocean.Level - 0.4f) Effects.UnderwaterBlast(this, center, radius);
         else if (flak) Effects.FlakBurst(this, center, radius);
+        else if (radius >= BigBlastM) Effects.BigExplosion(this, center, radius);
         else Effects.Explosion(this, center, radius);
         Blast?.Invoke(center, radius, damage);
         var destroyedAll = new List<OrderedHit>();
@@ -422,6 +433,9 @@ public partial class Combat : Node3D
                 rb.ApplyImpulse(away * Mathf.Min(damage * 6f, rb.Mass * 3f), center - rb.GlobalPosition);
             }
         }
+
+        // A big blast's shock wave shoves everything around it, hurt or not.
+        if (radius >= BigBlastM) ShockwavePush(center, radius, damage, caught);
 
         // People and targets caught in the blast.
         foreach (IBlastable b in Hittables.Blastables.ToArray())
@@ -469,10 +483,21 @@ public partial class Combat : Node3D
                 {
                     QueueBlast(at, Aero.BombRadiusM * 0.8f, Aero.BombDamage * 0.7f, byPlayer, "Bomb");
                 }
+                else if (b.Def.Kind == BlockKind.VlsCell && b.AmmoUnits >= 1f)
+                {
+                    // A loaded cell takes its missile's warhead with it.
+                    MissileStats m = Aero.VlsMissile(b.Def.Vls);
+                    QueueBlast(at, m.RadiusM * 0.8f, m.Damage * 0.7f, byPlayer, "Missile cell");
+                }
                 else if (b.Def.DeathExplosionDamage > 0)
                 {
-                    QueueBlast(at, b.Def.DeathExplosionRadiusM, b.Def.DeathExplosionDamage, byPlayer,
-                        b.Def.Kind == BlockKind.FuelTank ? "Fuel tank" : "Propellant");
+                    QueueBlast(at, b.Def.DeathExplosionRadiusM, b.Def.DeathExplosionDamage, byPlayer, b.Def.Kind switch
+                    {
+                        BlockKind.FuelTank => "Fuel tank",
+                        BlockKind.Reactor => "Reactor",
+                        BlockKind.Capacitor => "Capacitor",
+                        _ => "Propellant",
+                    });
                 }
 
                 Effects.Shatter(this, at, b.Def, host.VelocityAt(at), (at - source).Normalized());
@@ -557,6 +582,7 @@ public partial class Combat : Node3D
         _shells.Clear();
         _tracers?.Clear();
         _blasts.Clear();
+        _beams.Clear();
         ClearTorpedoes();
         ClearOrdnance();
     }
