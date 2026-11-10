@@ -57,6 +57,9 @@ public partial class VehicleBody : RigidBody3D, IGridHost
         /// <summary>Energy weapons: waiting for the capacitors to hold a shot's worth.</summary>
         public bool Charging;
 
+        /// <summary>Heavy weapons: waiting for the vehicle to stop and brace.</summary>
+        public bool NeedsBrace;
+
         /// <summary>Rocket launchers: rockets still to go in this salvo, and the time to the next.</summary>
         public int SalvoLeft;
         public float SalvoTimer;
@@ -347,6 +350,7 @@ public partial class VehicleBody : RigidBody3D, IGridHost
         RefreshAir();
         RefreshPower();
         RefreshFittings();
+        RefreshStabilizers();
     }
 
     private static List<Int3> RacksFor(GunRt g, AmmoType type) => type switch
@@ -459,6 +463,7 @@ public partial class VehicleBody : RigidBody3D, IGridHost
         InteriorTick(dt);
         FloodViewTick(dt);
         FittingsTick(dt);
+        AnimateStabilizers(dt);
         foreach (GunRt g in Guns)
         {
             if (g.SalvoLeft > 0) SalvoTick(g, dt);
@@ -727,13 +732,15 @@ public partial class VehicleBody : RigidBody3D, IGridHost
             var flat = new Vector3(to.X, 0, to.Z);
             float dist = flat.Length();
             float v = ShellSpeed(g, AmmoFor(g));
-            if (!GunMath.SolveElevation(v, dist, to.Y, out float elev)) elev = Mathf.Pi / 4f;
+            bool high = g.Info.BreechDef.Breech.HighArc;
+            float elev;
+            if (!(high ? GunMath.SolveElevationHigh(v, dist, to.Y, out elev) : GunMath.SolveElevation(v, dist, to.Y, out elev))) elev = Mathf.Pi / 4f;
             Vector3 dirW = dist > 0.01f ? flat / dist * Mathf.Cos(elev) + Vector3.Up * Mathf.Sin(elev) : Vector3.Up;
             Vector3 dirL = parent.Basis.Inverse() * dirW;
             Vector3 f0 = g.Info.Forward.G();
             Vector3 axis = g.Info.Right.G();
             float desired = Mathf.Atan2(axis.Dot(f0.Cross(dirL)), f0.Dot(dirL));
-            desired = Mathf.Clamp(desired, Mathf.DegToRad(Mobility.MinElevationDeg), Mathf.DegToRad(g.Info.BreechDef.Breech.MaxElevationDeg));
+            desired = Mathf.Clamp(desired, Mathf.DegToRad(g.Info.BreechDef.Breech.MinElevationDeg), Mathf.DegToRad(g.Info.BreechDef.Breech.MaxElevationDeg));
             float step = g.ElevSpeedRad * dt;
             g.Pitch += Mathf.Clamp(desired - g.Pitch, -step, step);
             View.SetAngle(g.Info.GunSection, g.Pitch);
@@ -781,6 +788,7 @@ public partial class VehicleBody : RigidBody3D, IGridHost
     public bool FireGun(GunRt g, bool byPlayer, AmmoType? ammo = null)
     {
         if (Combat.Instance == null || !g.Alive || g.ReloadLeft > 0 || g.Info.GunSection < 0 || g.SalvoLeft > 0) return false;
+        if (!MountAllows(g)) return false;
         BreechSpec spec = g.Info.BreechDef.Breech;
         if (spec.Beam) return FireBeam(g, byPlayer);
 
@@ -803,7 +811,7 @@ public partial class VehicleBody : RigidBody3D, IGridHost
             g.SalvoByPlayer = byPlayer;
         }
 
-        g.ReloadLeft = g.Stats.ReloadS;
+        g.ReloadLeft = ReloadFor(g);
         Fired?.Invoke(g);
         return true;
     }
@@ -820,7 +828,7 @@ public partial class VehicleBody : RigidBody3D, IGridHost
         for (int i = 0; i < rounds; i++)
         {
             // A gatling's burst spreads out a little more than a single shot, into a cloud a missile flies into.
-            float spreadDeg = g.Stats.SpreadDeg + (rounds > 1 ? 0.35f : 0f);
+            float spreadDeg = (g.Stats.SpreadDeg + (rounds > 1 ? 0.35f : 0f)) * SpreadFor(g);
             float spread = Mathf.DegToRad(spreadDeg) * Mathf.Sqrt(_rng.Randf());
             Vector3 d = dir.Rotated(side, spread).Rotated(dir, _rng.RandfRange(0, Mathf.Tau)).Normalized();
             Combat.Instance.Fire(this, muzzle + d * (i * 0.6f), d * speed + LinearVelocity, type, g.Stats, spec, byPlayer, fuseM: fuse,

@@ -123,4 +123,26 @@ public static class GunMath
         angle = MathF.Atan((v2 - MathF.Sqrt(disc)) / (g * horizontal));
         return true;
     }
+
+    /// <summary>The high, plunging arc to the same point (mortars). False if out of range.</summary>
+    public static bool SolveElevationHigh(float speed, float horizontal, float height, out float angle)
+    {
+        const float g = Gravity;
+        if (horizontal < 0.01f)
+        {
+            angle = MathF.PI / 2;
+            return true;
+        }
+
+        float v2 = speed * speed;
+        float disc = v2 * v2 - g * (g * horizontal * horizontal + 2 * height * v2);
+        if (disc < 0)
+        {
+            angle = MathF.PI / 4;
+            return false;
+        }
+
+        angle = MathF.Atan((v2 + MathF.Sqrt(disc)) / (g * horizontal));
+        return true;
+    }
 }

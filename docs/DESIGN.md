@@ -178,7 +178,11 @@ Jets push on their own at any speed. Opening the throttle all the way lights the
   - **Weapon Locker:** restocks your rifle and rockets.
   - **Workbench:** a repair bay. Your vehicles parked within 14 m are patched up and have shot-away blocks rebuilt, one every 3 s. On a truck, a repair truck.
   - **Supply Crates:** a supply point. Your vehicles parked within 14 m are rearmed and refuelled, and people restock. On a truck, a supply truck. They burn and blow up if hit.
-- **Examples:** the **Pillbox** (a 37 mm on a turntable firing through a slit, bunk, locker, first aid), the **Flak Nest** (a 40 mm inside a low wall, radar and searchlight), and the **Outpost** (a forward base: bunks, locker, first aid, a workbench, supply crates on its apron, stairs to an AA gun on the roof). On the range, your outpost stands east of the depot; an enemy pillbox and flak nest wait down range.
+- **Why build a fort: heavy weapons and a steady mount.**
+  - Every gun on a building spreads 40% less.
+  - **Heavy weapons** fire at full rate from a building. A land vehicle can carry one but can only fire it stopped with two or more **Stabilizers** braced against the ground (they swing down when it stops), and any vehicle reloads it at half the rate and spreads it twice as much. Ships count as braced (still half rate); aircraft can't fire them at all.
+  - The heavy weapons: the **420 mm Siege Mortar** (3×3×3, high-arc only, a 13 m blast, kilometers of range, from HE magazines), the **Heavy Railgun** (3×3×3, 120 mm slugs at about 3.4 km/s through 700 mm of armor, 150 MJ a shot), and the **Laser Battery** (3×3×2, point defense and anything else out to three or four kilometers, 25 MW while firing).
+- **Examples:** the **Pillbox** (a 37 mm on a turntable firing through a slit, bunk, locker, first aid), the **Flak Nest** (a 40 mm inside a low wall, radar and searchlight), and the **Outpost** (a forward base: bunks, locker, first aid, a workbench, supply crates on its apron, stairs to an AA gun on the roof), the **Siege Battery** (a 420 mm mortar in an open pit) and the **Coastal Fort** (a heavy railgun and a laser battery on a reactor-powered casemate). The **Juggernaut** is the vehicle answer: a tracked siege mortar carrier with four stabilizers. On the range, your outpost stands east of the depot with the siege battery behind it and the coastal fort above the east beach; an enemy pillbox and flak nest wait down range.
 
 ### Mobility
 - Wheels and track segments both use raycast suspension. Wheels steer; tracks skid-steer.

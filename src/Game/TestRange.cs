@@ -1563,6 +1563,8 @@ public partial class TestRange : Node3D
             if (alive == 0) Paint(row.State, "DESTROYED", Ui.Bad);
             else if (crewed == 0) Paint(row.State, one ? "NO GUNNER" : "NO GUNNERS", Ui.Bad);
             else if (apRounds + heRounds + flakRounds == 0 && !row.Guns[0].Info.BreechDef.Breech.Beam) Paint(row.State, "OUT OF AMMO", Ui.Bad);
+            else if (row.Guns[0].Info.BreechDef.Breech.Heavy && v.Mount == Mount.Loose)
+                Paint(row.State, v.IsAir ? "CAN'T BRACE IN THE AIR" : v.Stabilizers < Emplacement.StabilizersNeeded ? "NEEDS STABILIZERS" : "STOP TO BRACE", Ui.Warn);
             else if (row.Guns.Any(g => g.Alive && g.Charging) && v.Electric.StoredMJ < row.Guns[0].Stats.ChargeMJ)
                 Paint(row.State, v.Electric.SupplyMW > 0 ? "CHARGING" : "NO POWER", v.Electric.SupplyMW > 0 ? Ui.Warn : Ui.Bad);
             else if (one && loaded == 0) Paint(row.State, $"RELOADING {nextReload:0.0}s", Ui.Warn);

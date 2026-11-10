@@ -73,7 +73,7 @@ public partial class VehicleBody
         g.Charging = !Electric.TryDraw(g.Stats.ChargeMJ);
         if (g.Charging) return false;
         Combat.Instance.FireBeam(this, muzzle, dir, g.Stats.BeamRangeM, g.Stats.ApDamage, byPlayer);
-        g.ReloadLeft = g.Stats.ReloadS;
+        g.ReloadLeft = ReloadFor(g);
         if (_rng.Randf() < 0.5f) Sfx.At(GetParent<Node3D>(), muzzle, SoundId.LaserZap, -4f, _rng.RandfRange(0.92f, 1.08f), 14f, delayByDistance: false);
         Fired?.Invoke(g);
         return true;

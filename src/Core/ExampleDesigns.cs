@@ -140,7 +140,7 @@ public static class ExampleDesigns
 
     public static IReadOnlyList<Blueprint> All => new[]
     {
-        Warden(), Vanguard(), Jackal(), Hailstorm(), Bulwark(), Skyguard(), Corsair(), Trident(), Barracuda(), Kestrel(), Falcon(), Hornet(),
+        Warden(), Vanguard(), Jackal(), Hailstorm(), Juggernaut(), Bulwark(), Skyguard(), Corsair(), Trident(), Barracuda(), Kestrel(), Falcon(), Hornet(),
         Wasp(), Zephyr(), Colossus(),
     };
 
@@ -296,6 +296,49 @@ public static class ExampleDesigns
         d.Set(-2, 3, 3, "antenna");
         d.Set(-1, 5, -1, "hatch");
         return d.Build("Jackal (scout car)", "desert");
+    }
+
+    /// <summary>
+    /// Juggernaut: a tracked carrier for the 420 mm siege mortar. It can bring a heavy weapon anywhere, but
+    /// it has to stop and put its four stabilizers down before it can fire, and it reloads at half a
+    /// building's rate.
+    /// </summary>
+    public static Blueprint Juggernaut()
+    {
+        var d = new Draft();
+        for (int z = -7; z <= 7; z++)
+        {
+            d.Set(-4, 0, z, "track");
+            d.Set(4, 0, z, "track");
+        }
+
+        d.Set(0, 1, -6, "driver_seat");
+        foreach (int x in new[] { -2, 0, 2 }) d.Set(x, 1, 6, "engine_large");
+        foreach (int x in new[] { -1, 1 }) d.Set(x, 1, 6, "fuel_tank");
+        d.Set(0, 1, 5, "fuel_tank");
+        d.Fill(-3, 3, 0, 1, -7, 7, "frame");
+        d.Fill(-3, 3, 2, 2, -7, 7, "armor_light");
+        d.FillSlope(-3, 3, 1, 1, -8, -8, "armor_heavy_slope", new Int3(0, 1, -1));
+        d.Fill(-3, 3, 1, 1, 8, 8, "armor_light");
+
+        // The mortar on its turntable, the magazine beside it and the gunner behind.
+        d.Set(0, 3, 1, "turret_ring");
+        d.Set(0, 5, 1, "siege_mortar");
+        for (int z = -1; z >= -3; z--) d.Set(0, 5, z, "heavy_barrel");
+        d.Set(2, 4, 1, "magazine_he");
+        d.Set(0, 4, 3, "gunner_seat");
+
+        // Stabilizers at the four corners, legs pointing out.
+        foreach (int z in new[] { -6, 6 })
+        {
+            d.Set(-4, 1, z, "stabilizer", Pointing(new Int3(-1, 0, 0)));
+            d.Set(4, 1, z, "stabilizer", Pointing(new Int3(1, 0, 0)));
+        }
+
+        d.Set(-2, 3, -6, "headlight");
+        d.Set(2, 3, -6, "headlight");
+        d.Set(-3, 3, 7, "antenna");
+        return d.Build("Juggernaut (siege mortar carrier)", "olive");
     }
 
     /// <summary>
@@ -1323,7 +1366,89 @@ public static class ExampleDesigns
     /// radar and an antenna on the roof. Stand next to it and press M to command your units.
     /// </summary>
     /// <summary>Example buildings: stationary ground units with crews and guns.</summary>
-    public static IReadOnlyList<Blueprint> Buildings => new[] { Pillbox(), FlakNest(), Outpost() };
+    public static IReadOnlyList<Blueprint> Buildings => new[] { Pillbox(), FlakNest(), Outpost(), SiegeBattery(), CoastalFort() };
+
+    /// <summary>
+    /// Siege battery: a 420 mm siege mortar on a turntable in an open concrete pit, with its shell magazine
+    /// turning with it. A heavy weapon at full rate, as only a building can fire it. A bunk, a weapon locker,
+    /// first aid, supply crates, and a radar on a post.
+    /// </summary>
+    public static Blueprint SiegeBattery()
+    {
+        var d = new Draft();
+        d.Fill(-5, 5, 0, 0, -5, 5, "foundation");
+        d.Set(0, 1, 0, "turret_ring");
+        d.Set(0, 3, 0, "siege_mortar");
+        for (int z = -2; z >= -4; z--) d.Set(0, 3, z, "heavy_barrel");
+        d.Set(2, 2, 0, "magazine_he");
+        d.Set(0, 2, 2, "gunner_seat");
+
+        d.Set(-4, 1, 0, "bunk");
+        d.Set(-4, 2, -4, "weapon_locker");
+        d.Set(4, 2, -3, "first_aid", Orient(new Int3(0, -1, 0), new Int3(-1, 0, 0)));
+        d.Set(3, 1, 3, "supply_crate");
+        d.Fill(-4, -4, 1, 2, 4, 4, "concrete");
+        d.Set(-4, 3, 4, "radar");
+        d.Fill(-5, 5, 1, 2, -5, -5, "concrete");
+        d.Fill(-5, 5, 1, 2, 5, 5, "concrete");
+        d.Fill(-5, -5, 1, 2, -4, 4, "concrete");
+        d.Fill(5, 5, 1, 2, -4, 4, "concrete");
+        foreach (int x in new[] { -1, 0 })
+        foreach (int y in new[] { 1, 2 })
+            d.Remove(x, y, 5);
+        d.Set(4, 3, 4, "antenna");
+        return d.Build("Siege battery (420 mm)", "olive");
+    }
+
+    /// <summary>
+    /// Coastal fort: a concrete casemate with a fusion reactor and a bank of capacitors inside, a heavy
+    /// railgun on the roof facing the sea, and a laser battery behind it that burns missiles and aircraft
+    /// out of the sky for kilometers around. Stairs to the roof, a command console, bunks and first aid.
+    /// </summary>
+    public static Blueprint CoastalFort()
+    {
+        var d = new Draft();
+        const int roof = 6;
+        d.Fill(-7, 7, 0, 0, -7, 7, "foundation");
+
+        // Inside: the reactor and its capacitors, the console, bunks, first aid, lamps, the door.
+        d.Set(-4, 2, 3, "reactor");
+        for (int z = -5; z <= 4; z++) d.Set(-6, 1, z, "capacitor");
+        d.Set(3, 1, 4, "command_console", Pointing(Int3.Back));
+        d.Set(5, 1, 0, "bunk");
+        d.Set(6, 3, -4, "first_aid", Orient(new Int3(0, -1, 0), new Int3(-1, 0, 0)));
+        d.Set(2, 2, 6, "weapon_locker");
+        d.Set(-1, 2, -7, "door");
+        foreach ((int x, int z) in new[] { (-3, -3), (2, -3), (2, 2), (-1, 5) }) d.Set(x, roof - 1, z, "lamp");
+
+        d.Fill(-7, 7, 1, roof - 1, -7, -7, "concrete");
+        d.Fill(-7, 7, 1, roof - 1, 7, 7, "concrete");
+        d.Fill(-7, -7, 1, roof - 1, -6, 6, "concrete");
+        d.Fill(7, 7, 1, roof - 1, -6, 6, "concrete");
+        d.Fill(-7, 7, roof, roof, -7, 7, "concrete");
+
+        // The heavy railgun on the roof, its slugs turning with it.
+        d.Set(0, roof + 1, -2, "turret_ring");
+        d.Set(0, roof + 3, -2, "heavy_rail_breech");
+        for (int z = -4; z >= -11; z--) d.Set(0, roof + 3, z, "rail");
+        d.Set(2, roof + 2, -2, "magazine_ap");
+        d.Set(0, roof + 2, 0, "gunner_seat");
+
+        // The laser battery behind it, facing inland (it turns to meet whatever comes).
+        d.Set(0, roof + 1, 4, "turret_ring");
+        d.Set(0, roof + 3, 4, "laser_battery", Pointing(Int3.Back));
+        foreach (int z in new[] { 5, 6 }) d.Set(0, roof + 3, z, "laser_lens", Pointing(Int3.Back));
+        d.Set(0, roof + 2, 2, "gunner_seat");
+
+        // Stairs up the right-hand side, a radar and antennas on the roof.
+        for (int i = 0; i < roof; i++)
+            foreach (int x in new[] { 8, 9 })
+                d.Set(x, 1 + i, -6 + i, "stairs");
+        d.Set(-6, roof + 1, -6, "radar");
+        d.Set(6, roof + 1, 6, "antenna");
+        d.Set(-6, roof + 1, 6, "antenna");
+        return d.Build("Coastal fort", "urban");
+    }
 
     /// <summary>
     /// Pillbox: a concrete blockhouse with a 37 mm on a turntable inside, firing out through a wide slit in

@@ -1073,10 +1073,25 @@ public sealed class VehicleAnalysis
         }
     }
 
+    /// <summary>Heavy weapons on a vehicle: land vehicles need stabilizers, aircraft can't fire them at all.</summary>
+    private void HeavyWarnings()
+    {
+        GunInfo heavy = Guns.FirstOrDefault(g => g.Valid && g.BreechDef.Breech.Heavy);
+        if (heavy == null) return;
+        if (IsAir)
+            Warnings.Add(new DesignWarning(Severity.Warning, $"The {heavy.Label} is a heavy weapon: an aircraft can't brace it, so it can't fire."));
+        else if (!IsNaval && Kit.Stabilizers < Emplacement.StabilizersNeeded)
+            Warnings.Add(new DesignWarning(Severity.Warning,
+                $"The {heavy.Label} is a heavy weapon: a land vehicle can only fire it stopped and braced. Add {Emplacement.StabilizersNeeded} or more Stabilizers (Mobility)."));
+        else
+            Warnings.Add(new DesignWarning(Severity.Info,
+                $"The {heavy.Label} is a heavy weapon: it fires {(IsNaval ? "from the ship" : "only when stopped and braced")}, and reloads at half the rate it would from a building."));
+    }
+
     /// <summary>A building needs none of a vehicle's parts; its guns need someone to fire them.</summary>
     private void BuildingWarnings()
     {
-        Warnings.Add(new DesignWarning(Severity.Info, "A building: it stays where it's put, anchored by its foundation."));
+        Warnings.Add(new DesignWarning(Severity.Info, "A building: it stays where it's put, anchored by its foundation. Its guns are steadier than on any vehicle, and heavy weapons fire at full rate."));
         if (Guns.Any(g => g.Valid) && !Seats.Any(s => s.Role is SeatRole.Gunner or SeatRole.Driver))
             Warnings.Add(new DesignWarning(Severity.Warning, "Its guns have nobody to fire them. Add a Gunner Seat (Control)."));
         if (GeneratorKw > 0 && FuelL <= 0)
@@ -1151,6 +1166,7 @@ public sealed class VehicleAnalysis
         if (IsNaval) NavalWarnings();
         if (IsAir) AirWarnings();
         PowerWarnings();
+        HeavyWarnings();
         foreach (MissileInfo m in Missiles.Where(m => m.Problem != null))
             Warnings.Add(new DesignWarning(m.Valid ? Severity.Info : Severity.Warning, m.Problem));
 

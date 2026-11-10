@@ -633,6 +633,17 @@ public static class BlockModels
                 break;
             }
 
+            case BlockKind.Stabilizer:
+                // A hinge bracket on the hull and a hydraulic leg with a spade; the leg swings down when braced.
+                k.Bevel(new Vector3(0.36f, 0.2f, 0.3f), Paint.Self, new Vector3(0, 0.1f, 0), 0.015f);
+                k.Cyl(0.05f, 0.42f, Paint.Steel, new Vector3(0, 0.05f, 0), AlongX, sides: 12);
+                k.Node = k.AddNode("Leg", new Vector3(0, 0.05f, 0));
+                k.Box(new Vector3(0.14f, 0.1f, 0.42f), Paint.SelfDark, new Vector3(0, 0, -0.2f));
+                k.Cyl(0.035f, 0.36f, Paint.Steel, new Vector3(0, 0.07f, -0.18f), AlongZ, sides: 10);
+                k.Box(new Vector3(0.3f, 0.04f, 0.16f), Paint.Dark, new Vector3(0, -0.05f, -0.42f));
+                k.Node = -1;
+                break;
+
             case BlockKind.Foundation:
                 // A concrete footing: a block with a lip round its top and the ends of its reinforcing bars.
                 k.Bevel(new Vector3(Full), Paint.Self, Vector3.Zero, 0.012f);

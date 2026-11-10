@@ -7,7 +7,7 @@ namespace DreamGame.Core;
 public struct FittingCounts
 {
     public int Periscopes, Antennas, Toolboxes, SpareTracks, Vents, SmokeLaunchers, Headlights, Searchlights, Exhausts, Hatches;
-    public int Bunks, FirstAid, Lockers, Workbenches, SupplyCrates;
+    public int Bunks, FirstAid, Lockers, Workbenches, SupplyCrates, Stabilizers;
 }
 
 /// <summary>
@@ -74,6 +74,7 @@ public static class Fittings
                 case "weapon_locker": c.Lockers++; break;
                 case "workbench": c.Workbenches++; break;
                 case "supply_crate": c.SupplyCrates++; break;
+                case "stabilizer": c.Stabilizers++; break;
             }
 
         return c;

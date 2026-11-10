@@ -24,7 +24,7 @@ public class BuildingTests
         Assert.DoesNotContain(a.Warnings, w => w.Severity != Severity.Info);
         Assert.Empty(a.Disconnected);
         Assert.NotEmpty(a.Guns);
-        Assert.All(a.Guns, g => Assert.True(g.Valid && g.ApRounds + g.HeRounds + g.FlakRounds > 0));
+        Assert.All(a.Guns, g => Assert.True(g.Valid && (g.ApRounds + g.HeRounds + g.FlakRounds > 0 || g.BreechDef.Breech.Beam)));
         Assert.Contains(a.Seats, s => s.Role == SeatRole.Gunner);
     }
 

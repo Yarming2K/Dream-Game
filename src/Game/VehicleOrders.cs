@@ -93,7 +93,8 @@ public partial class VehicleBody
 
     /// <summary>How close it closes in on an attack target before stopping to shoot.</summary>
     private float AttackRange =>
-        Guns.Exists(g => g.Alive && g.Info.BreechDef.Breech.Rocket) ? 2500f
+        Guns.Exists(g => g.Alive && g.Info.BreechDef.Breech.HighArc) ? 4500f
+        : Guns.Exists(g => g.Alive && g.Info.BreechDef.Breech.Rocket) ? 2500f
         : Guns.Exists(g => g.Alive && (g.Stats.CaliberMm >= 150f || g.Info.BreechDef.Breech.Rail)) ? 2400f
         : IsNaval ? 900f : 450f;
 

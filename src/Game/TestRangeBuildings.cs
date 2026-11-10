@@ -21,12 +21,21 @@ public partial class TestRange
     private (IGridHost host, BlockInstance bunk)? _bunk;
     private string _serviceNote = "";
 
-    /// <summary>Your forward base by the depot, and an enemy pillbox and flak nest down the range.</summary>
+    /// <summary>
+    /// Yours: the forward base by the depot, a siege battery behind it, and a coastal fort above the east
+    /// beach. The enemy's: a pillbox and a flak nest down the range.
+    /// </summary>
     private void AddBuildings()
     {
         VehicleBody outpost = AddDummy(ExampleDesigns.Outpost(), OutpostAt, 90f);
         outpost.Faction = 0;
         outpost.AddChild(Sign("OUTPOST\nsupplies, repairs, bunks", new Vector3(0, 5.2f, 0), 60));
+        VehicleBody battery = AddDummy(ExampleDesigns.SiegeBattery(), OutpostAt + new Vector3(4, 0, 36), 180f);
+        battery.Faction = 0;
+        battery.AddChild(Sign("SIEGE BATTERY\n420 mm: E at the gunner seat", new Vector3(0, 4.2f, 0), 60));
+        VehicleBody fort = AddDummy(ExampleDesigns.CoastalFort(), new Vector3(Terrain.CoastX - 28f, Ground, 60), -90f);
+        fort.Faction = 0;
+        fort.AddChild(Sign("COASTAL FORT\nheavy railgun, laser battery", new Vector3(0, 7f, 0), 60));
         AddDummy(ExampleDesigns.Pillbox(), new Vector3(-44, Ground, SpawnPoint.Z - 190f), 0f);
         AddDummy(ExampleDesigns.FlakNest(), new Vector3(48, Ground, SpawnPoint.Z - 230f), 30f);
     }

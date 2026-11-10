@@ -91,6 +91,9 @@ public enum BlockKind
 
     /// <summary>A supply point: your vehicles parked near it are rearmed and refuelled.</summary>
     SupplyCrate,
+
+    /// <summary>An outrigger that braces a stopped land vehicle against the ground, so it can fire heavy weapons.</summary>
+    Stabilizer,
 }
 
 /// <summary>What a vertical launch cell holds.</summary>
@@ -202,6 +205,18 @@ public sealed class BreechSpec
 
     /// <summary>What the weapon is called instead of its caliber ("Railgun").</summary>
     public string Label;
+
+    /// <summary>
+    /// A heavy weapon: full rate from a building; a land vehicle can only fire it stopped and braced on its
+    /// stabilizers, and every vehicle reloads it slower (see <see cref="Emplacement"/>).
+    /// </summary>
+    public bool Heavy;
+
+    /// <summary>Fires on a high, plunging arc (mortars), not the flat one.</summary>
+    public bool HighArc;
+
+    /// <summary>Lowest it can point (degrees). Mortars can't fire flat.</summary>
+    public float MinElevationDeg = Mobility.MinElevationDeg;
 }
 
 public sealed class BlockDef
@@ -375,6 +390,30 @@ public static class BlockCatalog
         CaliberMm = 122, ShellMassKg = 60f, BaseVelocity = 330, BasePenMm = 30,
         ApDamage = 0, HeDamage = 560, HeRadiusM = 5f, ReloadS = 12f, ShellUnits = 2, DragK = 0.00003f,
         MaxElevationDeg = 55f, BarrelTag = "tube", Rocket = true, Label = "Rockets",
+    };
+
+    /// <summary>Siege mortar: a 420 mm bomb lobbed high to plunge onto targets kilometers away. A heavy weapon.</summary>
+    public static readonly BreechSpec SiegeMortar420 = new()
+    {
+        CaliberMm = 420, ShellMassKg = 800f, BaseVelocity = 260, BasePenMm = 80,
+        ApDamage = 1500, HeDamage = 6500, HeRadiusM = 13f, ReloadS = 22f, ShellUnits = 32, DragK = 0.00002f,
+        MaxElevationDeg = 80f, MinElevationDeg = 40f, HighArc = true, Heavy = true, Label = "420 mm Siege Mortar",
+    };
+
+    /// <summary>Heavy railgun: a 120 mm slug at well over 3 km/s that goes through anything. 150 MJ a shot. A heavy weapon.</summary>
+    public static readonly BreechSpec HeavyRail = new()
+    {
+        CaliberMm = 120, ShellMassKg = 30f, BaseVelocity = 2000, BasePenMm = 380,
+        ApDamage = 1700, HeDamage = 0, HeRadiusM = 0, ReloadS = 8f, ShellUnits = 16, DragK = 0.00001f,
+        MaxElevationDeg = 30f, BarrelTag = "rail", ChargeMJ = 150f, Rail = true, Heavy = true, Label = "Heavy Railgun",
+    };
+
+    /// <summary>Laser battery: a big beam reaching kilometers, that burns missiles, bombs and aircraft out of the sky. A heavy weapon.</summary>
+    public static readonly BreechSpec LaserBattery = new()
+    {
+        CaliberMm = 30, ShellMassKg = 0, BaseVelocity = 100000, BasePenMm = 1,
+        ApDamage = 75, ReloadS = 0.1f, ShellUnits = 1, MaxElevationDeg = 88f,
+        BarrelTag = "lens", ChargeMJ = 2.5f, Beam = true, PointDefense = true, BeamRangeM = 2200f, Heavy = true, Label = "Laser Battery",
     };
 
     private static readonly List<BlockDef> Defs = new()
@@ -1006,6 +1045,36 @@ public static class BlockCatalog
             Description = "Reinforced concrete: heavy and cheap, and it shrugs off blast better than steel. For bunkers, walls and buildings (press V for its shapes).",
             MassKg = 260, Hp = 380, ArmorMm = 70, HeVulnerability = 0.7f,
             ColorR = 0.62f, ColorG = 0.61f, ColorB = 0.57f, Metallic = 0f, Roughness = 0.95f,
+        },
+
+        // Heavy weapons
+        new BlockDef
+        {
+            Id = "siege_mortar", Name = "420 mm Siege Mortar (3×3×3)", Category = "Weapons", Kind = BlockKind.Breech, Breech = SiegeMortar420, Size = new Int3(3, 3, 3),
+            Description = "A heavy weapon: a one-tonne bomb lobbed high to plunge onto targets kilometers away, with a blast like a reactor going up. Two or three Heavy Barrels in front, fed from HE Shell Magazines. Full rate from a building; on a land vehicle it fires only stopped and braced on Stabilizers, and slower.",
+            MassKg = 32000, Hp = 1600, ArmorMm = 60, Watertight = false,
+            ColorR = 0.24f, ColorG = 0.25f, ColorB = 0.23f, Metallic = 0.8f, Roughness = 0.4f,
+        },
+        new BlockDef
+        {
+            Id = "heavy_rail_breech", Name = "Heavy Railgun Breech (3×3×3)", Category = "Weapons", Kind = BlockKind.Breech, Breech = HeavyRail, Size = new Int3(3, 3, 3),
+            Description = "A heavy weapon: a 120 mm slug at over 3 km/s that goes through anything. Rail Segments in front, slugs from AP Shell Magazines, and 150 MJ a shot (a reactor's work). Full rate from a building; on a land vehicle only stopped and braced.",
+            MassKg = 26000, Hp = 1400, ArmorMm = 60, Watertight = false,
+            ColorR = 0.2f, ColorG = 0.22f, ColorB = 0.26f, Metallic = 0.85f, Roughness = 0.3f,
+        },
+        new BlockDef
+        {
+            Id = "laser_battery", Name = "Laser Battery (3×3×2)", Category = "Weapons", Kind = BlockKind.Breech, Breech = LaserBattery, Size = new Int3(3, 3, 2),
+            Description = "A heavy weapon: a big beam that burns missiles, bombs and aircraft out of the sky out to three or four kilometers, and anything else it's pointed at. Focusing Lenses in front, and 25 MW while it fires. Full rate from a building; on a land vehicle only stopped and braced.",
+            MassKg = 9000, Hp = 700, ArmorMm = 30, Watertight = false,
+            ColorR = 0.3f, ColorG = 0.32f, ColorB = 0.36f, Metallic = 0.75f, Roughness = 0.35f,
+        },
+        new BlockDef
+        {
+            Id = "stabilizer", Name = "Stabilizer", Category = "Mobility", Kind = BlockKind.Stabilizer,
+            Description = "An outrigger with a spade. When the vehicle stops, these swing down and brace it against the ground, so it can fire heavy weapons. A land vehicle needs two or more.",
+            MassKg = 180, Hp = 120, ArmorMm = 15, HasCollider = false, Watertight = false,
+            ColorR = 0.3f, ColorG = 0.32f, ColorB = 0.28f, Metallic = 0.7f, Roughness = 0.5f,
         },
 
         // Interior
