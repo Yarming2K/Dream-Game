@@ -33,6 +33,16 @@ public partial class TestRange
             },
         };
         root.AddChild(_map);
+        // Your units' reports reach the message feed while the map is shut (the map shows its own log).
+        CommandLog.Clear();
+        VehicleBody.ResetCallsigns();
+        CommandLog.Posted += OnReport;
+    }
+
+    private void OnReport(CommandLog.Entry e)
+    {
+        if (!IsInstanceValid(this) || _map == null || _map.Visible) return;
+        AddFeed($"[color={Ui.Hex(e.Color)}]◂ {e.Text}[/color]", true);
     }
 
     private void AddCommandPost()
@@ -150,13 +160,26 @@ public partial class TestRange
         VehicleBody v = VehicleBody.Create(bp, where, false, a);
         v.Faction = faction;
         v.AiCrewActive = true;
+        _ = v.Callsign; // numbered in the order they arrive
         AddChild(v);
-        v.AddChild(new Label3D
+        var diamond = new Label3D
         {
             Text = "◆", FontSize = 40, PixelSize = 0.01f, FixedSize = true, Billboard = BaseMaterial3D.BillboardModeEnum.Enabled,
             Modulate = faction == 0 ? BlueTeam : RedTeam, OutlineSize = 6, Position = Vector3.Up * (v.Radius * 0.6f + 2f),
             NoDepthTest = false,
-        });
+        };
+        v.AddChild(diamond);
+        if (faction == 0)
+        {
+            // Your units say who they are and what they're doing, just above their marker.
+            v.Marker = new Label3D
+            {
+                FontSize = 15, PixelSize = 0.01f, FixedSize = true, Billboard = BaseMaterial3D.BillboardModeEnum.Enabled,
+                Modulate = BlueTeam, OutlineSize = 5, OutlineModulate = new Color(0, 0, 0, 0.8f), VerticalAlignment = VerticalAlignment.Bottom,
+                Position = diamond.Position + Vector3.Up * 0.25f, NoDepthTest = true, VisibilityRangeEnd = 900f, RenderPriority = 2,
+            };
+            v.AddChild(v.Marker);
+        }
         _drill.Add(v);
         return v;
     }

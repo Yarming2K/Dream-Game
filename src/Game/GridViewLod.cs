@@ -18,15 +18,49 @@ namespace DreamGame.Game;
 /// shown instead, so a tank on the horizon costs a few draw calls instead of dozens. The far model sits a
 /// few centimeters inside the real surface, so where the two overlap during the switch the detailed one
 /// is the one you see. It's rebuilt (now and then, and only while it's being looked at) after damage.</item>
+/// <item><b>Far models by the chunk, for big machines.</b> A section longer than a couple of chunks (a
+/// battleship's hull, a long fort wall) gets a far model for each 8 m chunk instead of one for the whole,
+/// and each chunk switches on its own distance. So the far end of a 300 m ship is drawn simply while the
+/// end you're standing on is in full detail, and damage only redoes the far model of the chunk it hit.</item>
+/// <item><b>Detail by size.</b> Small parts (bolts, rails, handles, fittings) are drawn out to 90 m and
+/// interior items (bunks, lockers, lamps, consoles) out to 45 m: past that they're a pixel or behind a
+/// wall. Neither casts a shadow.</item>
 /// </list>
 /// </summary>
 public sealed partial class GridView
 {
+    /// <summary>How far a batch stays drawn: to the far model's distance, or less for small parts and interior items.</summary>
+    private enum Tier { Normal, Small, Inside }
+
+    private const float SmallRangeM = 90f, InsideRangeM = 45f;
+
+    /// <summary>A chunk of a big section switches to its far model about this far away (it's 8 m across).</summary>
+    private const float ChunkLodM = 280f, ChunkHalfM = 8f;
+
+    private static Tier TierOf(BlockDef def) => def.Kind switch
+    {
+        BlockKind.Bunk or BlockKind.FirstAid or BlockKind.Locker or BlockKind.Workbench or BlockKind.Lamp or BlockKind.CommandConsole => Tier.Inside,
+        BlockKind.Detail or BlockKind.Stairs or BlockKind.SupplyCrate or BlockKind.DriverSeat or BlockKind.GunnerSeat or BlockKind.CommanderSeat
+            or BlockKind.Loader or BlockKind.AmmoFeed => Tier.Small,
+        _ => Tier.Normal,
+    };
+
+    private static readonly Dictionary<Mesh, Aabb> MeshBoxes = new();
+
+    /// <summary>A part under 14 cm across, once placed.</summary>
+    private static bool IsSmall(Mesh mesh, in Transform3D local)
+    {
+        if (!MeshBoxes.TryGetValue(mesh, out Aabb box)) MeshBoxes[mesh] = box = mesh.GetAabb();
+        Vector3 size = (local * box).Size;
+        return Mathf.Max(size.X, Mathf.Max(size.Y, size.Z)) < 0.14f;
+    }
+
     private sealed class Piece
     {
         public Resource Res;
         public Material Mat;
         public bool ShadowOff;
+        public Tier Tier;
 
         public GeometryInstance3D Instance() => Res is MultiMesh mm
             ? new MultiMeshInstance3D { Multimesh = mm, MaterialOverride = Mat, CastShadow = ShadowOff ? GeometryInstance3D.ShadowCastingSetting.Off : GeometryInstance3D.ShadowCastingSetting.On }
@@ -37,6 +71,7 @@ public sealed partial class GridView
     {
         public readonly Dictionary<(int, Int3), List<Piece>> Chunks = new();
         public readonly Dictionary<int, ArrayMesh> Far = new();
+        public readonly Dictionary<(int, Int3), ArrayMesh> ChunkFar = new();
     }
 
     private static readonly ConditionalWeakTable<object, SharedLook> SharedLooks = new();
@@ -49,6 +84,9 @@ public sealed partial class GridView
     private float _nearEnd, _farBegin;
     private MeshInstance3D[] _far;
     private bool[] _farDirty;
+    private bool[] _chunked;
+    private readonly Dictionary<(int, Int3), MeshInstance3D> _chunkFar = new();
+    private readonly HashSet<Chunk> _farDirtyChunks = new();
     private bool _farTimer;
     private ulong _farBuiltMs;
 
@@ -61,7 +99,7 @@ public sealed partial class GridView
     /// </summary>
     public static float LodScale = 1f;
 
-    private readonly List<GeometryInstance3D> _nearNodes = new();
+    private readonly List<(GeometryInstance3D g, float end)> _nearNodes = new();
     private float _appliedScale = 1f;
 
     private void SetupLod(object shareKey, bool lod)
@@ -71,25 +109,47 @@ public sealed partial class GridView
         if (shareKey != null) _shared = SharedLooks.GetValue(shareKey, _ => new SharedLook());
         if (!lod) return;
         float r = BoundingRadius();
-        LodDistance = Mathf.Clamp(r * 40f, 150f, 1600f);
+        // Big things are big on screen, but their far model is too: past 8 m across they switch sooner
+        // for their size than a tank does.
+        LodDistance = Mathf.Clamp(r * (r > 8f ? 25f : 40f), 150f, 1600f);
         _nearEnd = LodDistance + r;
         _farBegin = Mathf.Max(LodDistance - r, 1f);
         _far = new MeshInstance3D[Model.Sections.Count];
         _farDirty = new bool[Model.Sections.Count];
+        _chunked = new bool[Model.Sections.Count];
+        foreach (Section s in Model.Sections)
+        {
+            if (s.Cells.Count == 0) continue;
+            Int3 size = s.Max - s.Min;
+            _chunked[s.Id] = Math.Max(size.X, Math.Max(size.Y, size.Z)) >= 2 * ChunkSize && ChunkLodM < LodDistance;
+        }
     }
 
-    /// <summary>Switches the detailed parts under a node off past the far model's distance.</summary>
-    private void ApplyNear(Node n)
+    /// <summary>How far away a section's detailed parts of a tier stop being drawn.</summary>
+    private float NearEnd(int section, Tier tier)
+    {
+        if (!_lod) return 0f;
+        float end = _chunked[section] ? ChunkLodM + ChunkHalfM : _nearEnd;
+        return tier switch
+        {
+            Tier.Small => Mathf.Min(end, SmallRangeM),
+            Tier.Inside => Mathf.Min(end, InsideRangeM),
+            _ => end,
+        };
+    }
+
+    /// <summary>Switches the detailed parts under a node off past <paramref name="end"/> meters.</summary>
+    private void ApplyNear(Node n, float end)
     {
         if (!_lod) return;
         if (n is GeometryInstance3D g)
         {
-            g.VisibilityRangeEnd = _nearEnd * LodScale;
+            g.VisibilityRangeEnd = end * LodScale;
             g.VisibilityRangeEndMargin = 4f;
-            _nearNodes.Add(g);
+            _nearNodes.Add((g, end));
         }
 
-        foreach (Node c in n.GetChildren()) ApplyNear(c);
+        foreach (Node c in n.GetChildren()) ApplyNear(c, end);
     }
 
     private void BuildAllFar()
@@ -97,18 +157,46 @@ public sealed partial class GridView
         if (!_lod) return;
         foreach (Section s in Model.Sections)
         {
+            if (_chunked[s.Id]) continue;
             ArrayMesh mesh = null;
             if (_shared != null && _shared.Far.TryGetValue(s.Id, out ArrayMesh cached)) mesh = cached;
             else
             {
-                mesh = BuildFarMesh(s.Id);
+                mesh = BuildFarMesh(s.Id, Model.Instances);
                 if (_shared != null) _shared.Far[s.Id] = mesh;
             }
 
             SetFar(s.Id, mesh);
         }
 
+        foreach (Chunk c in _chunks.Values)
+        {
+            if (!_chunked[c.Section]) continue;
+            ArrayMesh mesh;
+            if (_shared != null && _shared.ChunkFar.TryGetValue(c.Key, out ArrayMesh cached)) mesh = cached;
+            else
+            {
+                mesh = BuildFarMesh(c.Section, c.Blocks);
+                if (_shared != null) _shared.ChunkFar[c.Key] = mesh;
+            }
+
+            SetChunkFar(c, mesh);
+        }
+
         _farBuiltMs = Time.GetTicksMsec();
+    }
+
+    private void SetChunkFar(Chunk c, ArrayMesh mesh)
+    {
+        if (_chunkFar.Remove(c.Key, out MeshInstance3D old) && GodotObject.IsInstanceValid(old)) old.QueueFree();
+        if (mesh == null) return;
+        var mi = new MeshInstance3D
+        {
+            Name = "FarChunk", Mesh = mesh, MaterialOverride = FarMaterial, CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
+            VisibilityRangeBegin = (ChunkLodM - ChunkHalfM) * LodScale, VisibilityRangeBeginMargin = 4f,
+        };
+        _sections[c.Section].AddChild(mi);
+        _chunkFar[c.Key] = mi;
     }
 
     private void SetFar(int section, ArrayMesh mesh)
@@ -136,43 +224,54 @@ public sealed partial class GridView
     {
         if (!_lod || Mathf.IsEqualApprox(_appliedScale, LodScale)) return;
         _appliedScale = LodScale;
-        _nearNodes.RemoveAll(g => !GodotObject.IsInstanceValid(g));
-        foreach (GeometryInstance3D g in _nearNodes) g.VisibilityRangeEnd = _nearEnd * LodScale;
+        _nearNodes.RemoveAll(n => !GodotObject.IsInstanceValid(n.g));
+        foreach ((GeometryInstance3D g, float end) in _nearNodes) g.VisibilityRangeEnd = end * LodScale;
         foreach (MeshInstance3D f in _far)
             if (f != null && GodotObject.IsInstanceValid(f)) f.VisibilityRangeBegin = _farBegin * LodScale;
+        foreach (MeshInstance3D f in _chunkFar.Values)
+            if (GodotObject.IsInstanceValid(f)) f.VisibilityRangeBegin = (ChunkLodM - ChunkHalfM) * LodScale;
     }
 
-    /// <summary>A section's detailed look changed (damage, repairs): its far model needs redoing at some point.</summary>
-    private void FarChanged(int section)
+    /// <summary>A section's (or one chunk's) detailed look changed (damage, repairs): its far model needs redoing at some point.</summary>
+    private void FarChanged(int section, Chunk chunk)
     {
         if (!_lod || _building) return;
-        _farDirty[section] = true;
+        if (_chunked[section] && chunk != null) _farDirtyChunks.Add(chunk);
+        else _farDirty[section] = true;
         TryRebuildFar();
     }
 
     private void TryRebuildFar()
     {
         if (!GodotObject.IsInstanceValid(Body) || !Body.IsInsideTree()) return;
-        bool seen = Body.GlobalPosition.DistanceTo(WorldQuery.Viewer) > _farBegin - 50f;
-        if (seen && Time.GetTicksMsec() - _farBuiltMs > 3000)
+        if (Time.GetTicksMsec() - _farBuiltMs > 3000)
         {
-            for (int i = 0; i < _farDirty.Length; i++)
-            {
-                if (!_farDirty[i]) continue;
-                _farDirty[i] = false;
-                SetFar(i, BuildFarMesh(i));
-            }
+            // A chunk's far model is small: it's redone whether or not anyone is looking.
+            foreach (Chunk c in _farDirtyChunks) SetChunkFar(c, BuildFarMesh(c.Section, c.Blocks));
+            _farDirtyChunks.Clear();
+            // A whole section's only when it can be seen.
+            if (Body.GlobalPosition.DistanceTo(WorldQuery.Viewer) > _farBegin - 50f)
+                for (int i = 0; i < _farDirty.Length; i++)
+                {
+                    if (!_farDirty[i]) continue;
+                    _farDirty[i] = false;
+                    if (_chunked[i])
+                    {
+                        foreach (Chunk c in _chunks.Values)
+                            if (c.Section == i) SetChunkFar(c, BuildFarMesh(i, c.Blocks));
+                    }
+                    else SetFar(i, BuildFarMesh(i, Model.Instances));
+                }
 
             _farBuiltMs = Time.GetTicksMsec();
-            return;
         }
 
-        if (_farTimer) return;
+        if (_farTimer || (_farDirtyChunks.Count == 0 && !Array.Exists(_farDirty, d => d))) return;
         _farTimer = true;
         Body.GetTree().CreateTimer(3.0).Timeout += () =>
         {
             _farTimer = false;
-            if (GodotObject.IsInstanceValid(Body) && Array.Exists(_farDirty, d => d)) TryRebuildFar();
+            if (GodotObject.IsInstanceValid(Body)) TryRebuildFar();
         };
     }
 
@@ -193,8 +292,11 @@ public sealed partial class GridView
         return new Vector3(p[0], p[1], p[2]);
     }
 
-    /// <summary>The far model of one section: plating as merged flat panels, everything else in simple shapes.</summary>
-    private ArrayMesh BuildFarMesh(int sectionId)
+    /// <summary>
+    /// The far model of one section, or of the given blocks of it (one chunk): plating as merged flat
+    /// panels, everything else in simple shapes.
+    /// </summary>
+    private ArrayMesh BuildFarMesh(int sectionId, IEnumerable<BlockInstance> blocks)
     {
         long started = Perf.Now;
         Section s = Model.Sections[sectionId];
@@ -216,9 +318,10 @@ public sealed partial class GridView
             int axis = Axis(d), uAxis = (axis + 1) % 3, vAxis = (axis + 2) % 3;
             int sign = Get(d, axis);
             var layers = new Dictionary<int, Dictionary<(int, int), int>>();
-            foreach ((Int3 c, BlockInstance b) in s.Cells)
+            foreach (BlockInstance b in blocks)
+            foreach (Int3 c in b.Cells)
             {
-                if (!b.Alive || !BlockModels.IsSurface(b.Def) || grid.CoversFace(c + d, new Int3(-d.X, -d.Y, -d.Z))) continue;
+                if (b.Section != sectionId || !b.Alive || !BlockModels.IsSurface(b.Def) || grid.CoversFace(c + d, new Int3(-d.X, -d.Y, -d.Z))) continue;
                 BlockDef sd = BlockModels.SurfaceDefOf(b.Def);
                 if (!paletteIndex.TryGetValue(sd, out int color))
                 {
@@ -278,9 +381,11 @@ public sealed partial class GridView
 
         // Shaped plating (slopes, corners...) and everything else that can be seen from outside, in their own
         // shapes, leaving out the tiny bits.
-        foreach (BlockInstance b in Model.Instances)
+        foreach (BlockInstance b in blocks)
         {
             if (b.Section != sectionId || !b.Alive || (BlockModels.IsSurface(b.Def) && b.Def.Shape == BlockShape.Cube) || Enclosed(b, grid)) continue;
+            // Small fittings and interior items aren't in the far model at all.
+            if (TierOf(b.Def) != Tier.Normal) continue;
             Transform3D at = Conv.BlockTransform(b.Cell, b.Orientation);
             bool shapedPlate = BlockModels.IsSurface(b.Def);
             foreach ((Mesh mesh, Material mat, Transform3D local, Paint finish) in BlockVisuals.PartsOf(b.Def, CaliberOf(b)))

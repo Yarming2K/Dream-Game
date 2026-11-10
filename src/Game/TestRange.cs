@@ -165,7 +165,11 @@ public partial class TestRange : Node3D
         Input.MouseMode = Input.MouseModeEnum.Captured;
     }
 
-    public override void _ExitTree() => WorldQuery.Reset();
+    public override void _ExitTree()
+    {
+        WorldQuery.Reset();
+        CommandLog.Posted -= OnReport;
+    }
 
     // ---------- World ----------
 

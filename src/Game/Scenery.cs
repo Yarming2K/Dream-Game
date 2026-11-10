@@ -54,7 +54,11 @@ public static class Scenery
             LightEnergy = 1.25f,
             LightColor = new Color(1f, 0.96f, 0.88f),
             ShadowEnabled = true,
-            DirectionalShadowMaxDistance = outdoors ? 220f : 60f,
+            // Two shadow splits instead of four: everything that casts a shadow is drawn once per split, which
+            // with big machines in view was most of the frame.
+            DirectionalShadowMode = DirectionalLight3D.ShadowMode.Parallel2Splits,
+            DirectionalShadowSplit1 = 0.18f,
+            DirectionalShadowMaxDistance = outdoors ? 200f : 60f,
             RotationDegrees = new Vector3(-48f, -35f, 0f),
         };
         parent.AddChild(sun);

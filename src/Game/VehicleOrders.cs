@@ -56,6 +56,7 @@ public partial class VehicleBody
     public void NoteAttack(VehicleBody shooter)
     {
         if (shooter == null || shooter == this || shooter.Faction == Faction) return;
+        if (!UnderFire) ReportUnderFire(shooter);
         LastAttacker = shooter;
         _lastAttackedAt = Time.GetTicksMsec() / 1000.0;
     }
@@ -72,6 +73,7 @@ public partial class VehicleBody
         Order = kind;
         OrderPoint = point;
         OrderTarget = target;
+        ResetProgress();
         Unpark();
         switch (kind)
         {
@@ -111,6 +113,7 @@ public partial class VehicleBody
             case OrderKind.Attack:
                 if (!targetOk)
                 {
+                    ReportGrouped("target-done", "has no target left: holding", CommandLog.Good);
                     GiveOrder(OrderKind.Hold, GlobalPosition);
                     return;
                 }
@@ -121,6 +124,7 @@ public partial class VehicleBody
             case OrderKind.Escort:
                 if (!targetOk)
                 {
+                    ReportGrouped("escort-lost", "lost the unit it was escorting: holding", CommandLog.Warn);
                     GiveOrder(OrderKind.Hold, GlobalPosition);
                     return;
                 }
@@ -140,6 +144,7 @@ public partial class VehicleBody
             case OrderKind.Move:
                 if (AtGoal && GlobalPosition.DistanceTo(OrderPoint) < radius * 1.5f)
                 {
+                    ReportGrouped("arrived", "in position", CommandLog.Good);
                     GiveOrder(OrderKind.Hold, OrderPoint);
                     return;
                 }
@@ -160,5 +165,6 @@ public partial class VehicleBody
         MoveGoal = goal;
         StopToShoot = stop;
         GoalRadius = radius;
+        if (Order != OrderKind.Hold) TrackProgress(goal, radius, stop);
     }
 }

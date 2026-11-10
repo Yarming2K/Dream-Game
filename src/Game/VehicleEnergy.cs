@@ -76,6 +76,7 @@ public partial class VehicleBody
         g.ReloadLeft = ReloadFor(g);
         if (_rng.Randf() < 0.5f) Sfx.At(GetParent<Node3D>(), muzzle, SoundId.LaserZap, -4f, _rng.RandfRange(0.92f, 1.08f), 14f, delayByDistance: false);
         Fired?.Invoke(g);
+        _lastFiredAt = Time.GetTicksMsec() / 1000.0;
         return true;
     }
 }

@@ -19,6 +19,11 @@ namespace DreamGame.Game;
 /// <item>Deploy (on the right) calls in more units, yours or the enemy's, from the examples and your own designs.</item>
 /// </list>
 /// Orders only reach units within the console's range (4 km). The game keeps running while the map is open.
+/// <para>So you can see what's going on: every unit you command has a callsign and a status icon (moving,
+/// in position, closing in, firing, escorting, patrolling, stuck, knocked out), rings when it's firing or
+/// being fired on, and a line with an arrowhead and a marker to where it's going. An order shows a pulse
+/// where you gave it. The unit log (bottom left) lists what your units report: in position, targets
+/// destroyed, under fire, damaged, knocked out, stuck.</para>
 /// </summary>
 public partial class TacticalMap : Control
 {
@@ -58,6 +63,14 @@ public partial class TacticalMap : Control
     private VBoxContainer _deployList;
     private Button _sideButton;
     private readonly List<(string name, Func<Blueprint> make)> _designs = new();
+    private RichTextLabel _log;
+    private int _logShown = -1;
+    private double _logChanged;
+
+    /// <summary>Where orders were just given, for a moment: a pulse on the map.</summary>
+    private readonly List<(Vector3 at, double t, Color c)> _pings = new();
+
+    private static double Now => Time.GetTicksMsec() / 1000.0;
 
     public override void _Ready()
     {
@@ -178,6 +191,7 @@ public partial class TacticalMap : Control
             _sense = 0.5f;
             Sense();
             UpdatePanels();
+            UpdateLog();
         }
 
         _redraw -= dt;
@@ -273,29 +287,53 @@ public partial class TacticalMap : Control
         foreach (VehicleBody v in _selected)
             if (Alive(v)) DrawArc(ToScreen(v.GlobalPosition), v.SightM * _zoom, 0, Mathf.Tau, 64, new Color(Friendly, 0.12f), 1f, true);
 
-        // What each of your units is doing.
+        // What each of your units is doing: a line to where it's going, with an arrowhead and a marker there.
         foreach (VehicleBody v in all)
         {
             if (v.Faction != 0 || v.Order == OrderKind.None) continue;
             Vector2 at = ToScreen(v.GlobalPosition);
             bool picked = _selected.Contains(v);
-            float alpha = picked ? 0.9f : 0.35f;
+            float alpha = picked ? 0.95f : 0.55f;
             switch (v.Order)
             {
                 case OrderKind.Move:
-                case OrderKind.Hold:
-                    if (v.Order == OrderKind.Move) DrawDashedLine(at, ToScreen(v.OrderPoint), new Color(Friendly, alpha), 1.5f, 6f);
+                {
+                    Color c = v.Stuck ? new Color(CommandLog.Warn, alpha) : new Color(Friendly, alpha);
+                    Vector2 to = ToScreen(v.OrderPoint);
+                    DrawDashedLine(at, to, c, picked ? 2f : 1.5f, 6f);
+                    Arrowhead(at, to, c);
+                    DrawArc(to, 5f, 0, Mathf.Tau, 16, c, 1.5f, true);
                     break;
+                }
                 case OrderKind.Attack when Alive(v.OrderTarget):
-                    DrawLine(at, ToScreen(v.OrderTarget.GlobalPosition), new Color(Enemy, alpha), 1.5f, true);
+                {
+                    Vector2 to = ToScreen(v.OrderTarget.GlobalPosition);
+                    var c = new Color(Enemy, alpha);
+                    DrawLine(at, to, c, picked ? 2f : 1.5f, true);
+                    Arrowhead(at, to, c);
+                    Brackets(to, 11f, c);
                     break;
+                }
                 case OrderKind.Escort when Alive(v.OrderTarget):
                     DrawDashedLine(at, ToScreen(v.OrderTarget.GlobalPosition), new Color(0.6f, 0.9f, 1f, alpha), 1.2f, 3f);
                     break;
                 case OrderKind.Patrol:
-                    DrawDashedLine(at, ToScreen(v.OrderPoint), new Color(0.7f, 1f, 0.7f, alpha), 1.2f, 8f);
+                {
+                    var c = new Color(0.7f, 1f, 0.7f, alpha);
+                    Vector2 to = ToScreen(v.OrderPoint);
+                    DrawDashedLine(at, to, c, 1.2f, 8f);
+                    DrawArc(to, 5f, 0, Mathf.Tau, 16, c, 1.2f, true);
                     break;
+                }
             }
+        }
+
+        // A pulse where an order was just given.
+        _pings.RemoveAll(p => Now - p.t > 1.2);
+        foreach ((Vector3 pos, double t, Color c) in _pings)
+        {
+            float k = (float)((Now - t) / 1.2);
+            DrawArc(ToScreen(pos), 6f + 30f * k, 0, Mathf.Tau, 32, new Color(c, 1f - k), 2.5f * (1f - k) + 0.5f, true);
         }
 
         // Units.
@@ -361,6 +399,14 @@ public partial class TacticalMap : Control
             poly = new[] { at + (fwd + right * 0.75f) * s, at + (-fwd + right * 0.75f) * s, at + (-fwd - right * 0.75f) * s, at + (fwd - right * 0.75f) * s };
         }
 
+        // Rings: orange while it's firing, pulsing red while it's under fire.
+        if (v.Faction == 0 && alpha >= 1f)
+        {
+            float pulse = 0.5f + 0.5f * Mathf.Sin((float)Now * 6f);
+            if (v.UnderFire) DrawArc(at, 13f + 3f * pulse, 0, Mathf.Tau, 24, new Color(CommandLog.Bad, 0.35f + 0.45f * pulse), 2f, true);
+            if (v.FiringNow) DrawArc(at, 10f, 0, Mathf.Tau, 20, new Color(1f, 0.7f, 0.3f, 0.85f), 1.5f, true);
+        }
+
         DrawColoredPolygon(poly, col);
         var outline = new Vector2[poly.Length + 1];
         poly.CopyTo(outline, 0);
@@ -373,9 +419,11 @@ public partial class TacticalMap : Control
         float hp = v.Health;
         DrawRect(new Rect2(at + new Vector2(-10, 12), new Vector2(20, 3)), new Color(0, 0, 0, 0.6f * alpha));
         DrawRect(new Rect2(at + new Vector2(-10, 12), new Vector2(20 * hp, 3)), new Color(Ui.Grade(hp, 0.35f, 0.7f), alpha));
-        // Names only when zoomed right in, or for a small pick, so a crowded map stays readable.
-        if (_zoom > 2.5f || (picked && _selected.Count <= 3))
-            DrawString(font, at + new Vector2(-40, 28), v.ShortName, HorizontalAlignment.Center, 80, 12, new Color(1, 1, 1, 0.8f * alpha));
+        // What it's doing, as an icon beside it.
+        if (v.Faction == 0) StatusIcon(v, at + right * 0f + new Vector2(13, -11), alpha);
+        // Names when zoomed in, or for a small pick, so a crowded map stays readable.
+        if (_zoom > 1.6f || (picked && _selected.Count <= 6))
+            DrawString(font, at + new Vector2(-50, 28), v.Faction == 0 ? v.Callsign : v.ShortName, HorizontalAlignment.Center, 100, 12, new Color(1, 1, 1, 0.85f * alpha));
     }
 
     // ------------------------------------------------------------------ input
@@ -480,6 +528,86 @@ public partial class TacticalMap : Control
         GetViewport().SetInputAsHandled();
     }
 
+    /// <summary>An arrowhead at the end of a line from <paramref name="from"/> to <paramref name="to"/>.</summary>
+    private void Arrowhead(Vector2 from, Vector2 to, Color c)
+    {
+        Vector2 d = to - from;
+        if (d.Length() < 18f) return;
+        d = d.Normalized();
+        var side = new Vector2(-d.Y, d.X);
+        Vector2 tip = to - d * 7f;
+        DrawColoredPolygon(new[] { tip, tip - d * 9f + side * 4.5f, tip - d * 9f - side * 4.5f }, c);
+    }
+
+    /// <summary>Corner brackets round a target.</summary>
+    private void Brackets(Vector2 at, float r, Color c)
+    {
+        float l = r * 0.55f;
+        foreach ((float sx, float sy) in new[] { (-1f, -1f), (1f, -1f), (1f, 1f), (-1f, 1f) })
+        {
+            var corner = at + new Vector2(sx * r, sy * r);
+            DrawLine(corner, corner - new Vector2(sx * l, 0), c, 1.5f, true);
+            DrawLine(corner, corner - new Vector2(0, sy * l), c, 1.5f, true);
+        }
+    }
+
+    /// <summary>A small icon for what a unit is doing.</summary>
+    private void StatusIcon(VehicleBody v, Vector2 p, float alpha)
+    {
+        VehicleBody.Doing d = v.Activity;
+        Color c = d switch
+        {
+            VehicleBody.Doing.Stuck => CommandLog.Warn,
+            VehicleBody.Doing.Out => new Color(0.6f, 0.6f, 0.6f),
+            VehicleBody.Doing.Firing or VehicleBody.Doing.Closing => new Color(1f, 0.7f, 0.35f),
+            VehicleBody.Doing.Holding => CommandLog.Good,
+            _ => new Color(0.85f, 0.92f, 1f),
+        };
+        c = new Color(c, alpha);
+        DrawCircle(p, 6.5f, new Color(0.05f, 0.07f, 0.09f, 0.8f * alpha));
+        switch (d)
+        {
+            case VehicleBody.Doing.Moving:
+                DrawColoredPolygon(new[] { p + new Vector2(-2.5f, -3.5f), p + new Vector2(3.5f, 0), p + new Vector2(-2.5f, 3.5f) }, c);
+                break;
+            case VehicleBody.Doing.Holding:
+                DrawRect(new Rect2(p - new Vector2(2.5f, 2.5f), new Vector2(5, 5)), c);
+                break;
+            case VehicleBody.Doing.Closing:
+                DrawArc(p, 3.5f, 0, Mathf.Tau, 12, c, 1.2f, true);
+                DrawLine(p + new Vector2(-5, 0), p + new Vector2(5, 0), c, 1f);
+                DrawLine(p + new Vector2(0, -5), p + new Vector2(0, 5), c, 1f);
+                break;
+            case VehicleBody.Doing.Firing:
+                for (int i = 0; i < 4; i++)
+                {
+                    float a = i * Mathf.Pi / 2f + Mathf.Pi / 4f;
+                    DrawLine(p, p + new Vector2(Mathf.Cos(a), Mathf.Sin(a)) * 4.5f, c, 1.5f);
+                }
+
+                break;
+            case VehicleBody.Doing.Escorting:
+                DrawArc(p, 3.5f, Mathf.Pi, Mathf.Tau, 8, c, 1.5f, true);
+                DrawLine(p + new Vector2(-3.5f, 0), p + new Vector2(0, 4), c, 1.5f);
+                DrawLine(p + new Vector2(3.5f, 0), p + new Vector2(0, 4), c, 1.5f);
+                break;
+            case VehicleBody.Doing.Patrolling:
+                DrawArc(p, 3.5f, 0.3f, Mathf.Tau - 0.6f, 12, c, 1.5f, true);
+                break;
+            case VehicleBody.Doing.Stuck:
+                DrawLine(p + new Vector2(0, -4), p + new Vector2(0, 1), c, 2f);
+                DrawCircle(p + new Vector2(0, 3.2f), 1f, c);
+                break;
+            case VehicleBody.Doing.Out:
+                DrawLine(p + new Vector2(-3, -3), p + new Vector2(3, 3), c, 1.5f);
+                DrawLine(p + new Vector2(3, -3), p + new Vector2(-3, 3), c, 1.5f);
+                break;
+            default:
+                DrawCircle(p, 1.5f, c);
+                break;
+        }
+    }
+
     private void ZoomAt(Vector2 screen, float k)
     {
         Vector2 before = ToWorld2(screen);
@@ -554,7 +682,8 @@ public partial class TacticalMap : Control
         if (enemy != null)
         {
             foreach (VehicleBody v in units) v.GiveOrder(OrderKind.Attack, enemy.GlobalPosition, enemy);
-            Say?.Invoke($"{units.Count} unit(s): attack {enemy.ShortName}");
+            _pings.Add((enemy.GlobalPosition, Now, Enemy));
+            Say?.Invoke($"{Names(units)}: attack the {enemy.ShortName}");
             UpdatePanels();
             return;
         }
@@ -563,7 +692,8 @@ public partial class TacticalMap : Control
         if (friend != null && !_selected.Contains(friend))
         {
             foreach (VehicleBody v in units) v.GiveOrder(OrderKind.Escort, friend.GlobalPosition, friend);
-            Say?.Invoke($"{units.Count} unit(s): escort {friend.ShortName}");
+            _pings.Add((friend.GlobalPosition, Now, new Color(0.6f, 0.9f, 1f)));
+            Say?.Invoke($"{Names(units)}: escort {friend.Callsign}");
             UpdatePanels();
             return;
         }
@@ -590,16 +720,32 @@ public partial class TacticalMap : Control
             going[i].GiveOrder(patrol ? OrderKind.Patrol : OrderKind.Move, new Vector3(s.X, Mathf.Max(h, Ocean.Level), s.Y));
         }
 
-        Say?.Invoke($"{going.Count} unit(s): {(patrol ? "patrol to" : "move to")} there in {Formations.NameOf(_formation).ToLowerInvariant()}" +
-                    (refused > 0 ? $" ({refused} can't go there)" : ""));
+        _pings.Add((dest, Now, patrol ? new Color(0.7f, 1f, 0.7f) : Friendly));
+        float far = going.Max(v => v.GlobalPosition.DistanceTo(dest));
+        Say?.Invoke($"{Names(going)}: {(patrol ? "patrol to" : "move to")} there in {Formations.NameOf(_formation).ToLowerInvariant()}, " +
+                    $"{(far >= 1000 ? $"{far / 1000:0.0} km" : $"{far:0} m")} away" + (refused > 0 ? $" ({refused} can't go there)" : ""));
         UpdatePanels();
     }
+
+    /// <summary>"Warden 1", "Warden 1 and Bulwark 2", "Warden 1, Warden 2 and 4 more".</summary>
+    private static string Names(List<VehicleBody> units) => units.Count switch
+    {
+        1 => units[0].Callsign,
+        2 => $"{units[0].Callsign} and {units[1].Callsign}",
+        3 => $"{units[0].Callsign}, {units[1].Callsign} and {units[2].Callsign}",
+        _ => $"{units[0].Callsign}, {units[1].Callsign} and {units.Count - 2} more",
+    };
 
     private void Hold()
     {
         List<VehicleBody> units = Reachable();
-        foreach (VehicleBody v in units) v.GiveOrder(OrderKind.Hold, v.GlobalPosition);
-        if (units.Count > 0) Say?.Invoke($"{units.Count} unit(s): hold position");
+        foreach (VehicleBody v in units)
+        {
+            v.GiveOrder(OrderKind.Hold, v.GlobalPosition);
+            _pings.Add((v.GlobalPosition, Now, CommandLog.Good));
+        }
+
+        if (units.Count > 0) Say?.Invoke($"{Names(units)}: hold position");
         UpdatePanels();
     }
 
@@ -608,7 +754,7 @@ public partial class TacticalMap : Control
         List<VehicleBody> units = Reachable();
         foreach (VehicleBody v in units) v.Roe = roe;
         if (units.Count > 0)
-            Say?.Invoke($"{units.Count} unit(s): " + roe switch
+            Say?.Invoke($"{Names(units)}: " + roe switch
             {
                 Engagement.FireAtWill => "fire at will",
                 Engagement.ReturnFire => "return fire only",
@@ -668,6 +814,21 @@ public partial class TacticalMap : Control
         _list = Ui.Rich();
         _list.CustomMinimumSize = new Vector2(280, 0);
         lc.AddChild(_list);
+
+        // What your units report, bottom left.
+        var logBox = new PanelContainer { MouseFilter = MouseFilterEnum.Ignore };
+        AddChild(logBox);
+        logBox.SetAnchorsAndOffsetsPreset(LayoutPreset.BottomLeft);
+        logBox.GrowVertical = GrowDirection.Begin;
+        logBox.OffsetLeft = 16;
+        logBox.OffsetBottom = -120;
+        VBoxContainer lb = Ui.Column(4);
+        logBox.AddChild(lb);
+        lb.AddChild(Ui.Caption("Unit reports"));
+        _log = Ui.Rich();
+        _log.CustomMinimumSize = new Vector2(380, 0);
+        _log.MouseFilter = MouseFilterEnum.Ignore;
+        lb.AddChild(_log);
 
         // Orders along the bottom.
         var bar = new PanelContainer { MouseFilter = MouseFilterEnum.Stop };
@@ -781,33 +942,63 @@ public partial class TacticalMap : Control
         }
     }
 
-    private void UpdatePanels()
+    /// <summary>The last few unit reports, newest at the bottom, older ones dimmer.</summary>
+    private void UpdateLog()
     {
-        List<VehicleBody> units = _selected.Where(Alive).ToList();
-        _info.Text = units.Count == 0 ? "No units picked" : units.Count == 1 ? units[0].ShortName : $"{units.Count} units picked";
-        if (units.Count == 0)
+        IReadOnlyList<CommandLog.Entry> all = CommandLog.Entries;
+        if (all.Count == 0)
         {
-            int yours = Vehicles().Count(Commandable), seen = _spotted.Count(s => s.Value.now);
-            _list.Text = $"[color={Ui.Hex(Ui.Dim)}]{yours} of your units, {seen} enemies in sight. Drag a box round some of yours to pick them.[/color]";
+            _log.Text = $"[color={Ui.Hex(Ui.Dim)}]Nothing yet. Your units report here when they arrive, find or lose a target, come under fire or get stuck.[/color]";
             return;
         }
 
-        string Order(VehicleBody v) => v.Order switch
+        var lines = new List<string>();
+        for (int i = Math.Max(0, all.Count - 8); i < all.Count; i++)
         {
-            OrderKind.Move => "moving",
-            OrderKind.Attack => Alive(v.OrderTarget) ? $"attacking {v.OrderTarget.ShortName}" : "attacking",
-            OrderKind.Escort => Alive(v.OrderTarget) ? $"escorting {v.OrderTarget.ShortName}" : "escorting",
-            OrderKind.Patrol => "patrolling",
-            OrderKind.Hold => "holding",
-            _ => "no orders",
-        };
+            CommandLog.Entry e = all[i];
+            double age = Now - e.Time;
+            float fade = age < 30 ? 1f : age < 120 ? 0.7f : 0.5f;
+            int m = (int)(age / 60), sec = (int)(age % 60);
+            string ago = age < 5 ? "now" : m > 0 ? $"{m}m ago" : $"{sec}s ago";
+            // Older reports fade toward grey (the text's colors have no transparency).
+            Color c = e.Color.Lerp(new Color(0.5f, 0.53f, 0.55f), 1f - fade);
+            lines.Add($"[color={Ui.Hex(c)}]{e.Text}[/color]  [color={Ui.Hex(Ui.Dim)}]{ago}[/color]");
+        }
+
+        _log.Text = string.Join("\n", lines);
+    }
+
+    private void UpdatePanels()
+    {
+        List<VehicleBody> units = _selected.Where(Alive).ToList();
+        _info.Text = units.Count == 0 ? "No units picked" : units.Count == 1 ? units[0].Callsign : $"{units.Count} units picked";
+        if (units.Count == 0)
+        {
+            List<VehicleBody> mine = Vehicles().Where(Commandable).ToList();
+            int seen = _spotted.Count(s => s.Value.now);
+            string Count(VehicleBody.Doing d, string what) => mine.Count(v => v.Activity == d) is int n and > 0 ? $"{n} {what}" : null;
+            string summary = string.Join(", ", new[]
+            {
+                Count(VehicleBody.Doing.Moving, "moving"), Count(VehicleBody.Doing.Holding, "in position"), Count(VehicleBody.Doing.Firing, "firing"),
+                Count(VehicleBody.Doing.Closing, "closing in"), Count(VehicleBody.Doing.Escorting, "escorting"), Count(VehicleBody.Doing.Patrolling, "patrolling"),
+                Count(VehicleBody.Doing.Idle, "waiting for orders"),
+            }.Where(x => x != null));
+            int stuck = mine.Count(v => v.Activity == VehicleBody.Doing.Stuck), under = mine.Count(v => v.UnderFire);
+            _list.Text = $"{mine.Count} of your units{(summary.Length > 0 ? ": " + summary : "")}." +
+                         (stuck > 0 ? $"\n[color={Ui.Hex(CommandLog.Warn)}]{stuck} can't get through[/color]" : "") +
+                         (under > 0 ? $"\n[color={Ui.Hex(CommandLog.Bad)}]{under} under fire[/color]" : "") +
+                         $"\n[color={Ui.Hex(Ui.Dim)}]{seen} enemies in sight. Drag a box round some of yours to pick them.[/color]";
+            return;
+        }
+
         string Roe(VehicleBody v) => v.Roe switch { Engagement.FireAtWill => "fire at will", Engagement.ReturnFire => "return fire", _ => "hold fire" };
         var lines = new List<string>();
         foreach (VehicleBody v in units.Take(12))
         {
             string range = InRange(v) ? "" : $"  [color={Ui.Hex(Ui.Warn)}]out of range[/color]";
-            lines.Add($"[b]{v.ShortName}[/b]  [color={Ui.Hex(Ui.Grade(v.Health, 0.35f, 0.7f))}]{v.Health * 100:0}%[/color]  " +
-                      $"[color={Ui.Hex(Ui.Dim)}]{Order(v)} · {Roe(v)}{(v.UnderFire ? " · under fire" : "")}[/color]{range}");
+            Color act = v.Stuck ? CommandLog.Warn : v.KnockedOut ? Ui.Dim : v.UnderFire ? CommandLog.Bad : new Color(0.85f, 0.9f, 0.95f);
+            lines.Add($"[b]{v.Callsign}[/b]  [color={Ui.Hex(Ui.Grade(v.Health, 0.35f, 0.7f))}]{v.Health * 100:0}%[/color]  " +
+                      $"[color={Ui.Hex(act)}]{v.ActivityText}[/color]  [color={Ui.Hex(Ui.Dim)}]{Roe(v)}[/color]{range}");
         }
 
         if (units.Count > 12) lines.Add($"[color={Ui.Hex(Ui.Dim)}]and {units.Count - 12} more[/color]");

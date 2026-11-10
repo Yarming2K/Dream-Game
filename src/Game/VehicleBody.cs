@@ -483,6 +483,7 @@ public partial class VehicleBody : RigidBody3D, IGridHost
 
         UpdateEngineSound();
         View.SyncColliders();
+        MarkerTick();
     }
 
     /// <summary>Freezes an AI ground vehicle that has sat still with its brakes on for a while, and thaws it when it should move.</summary>
@@ -823,6 +824,7 @@ public partial class VehicleBody : RigidBody3D, IGridHost
 
         g.ReloadLeft = ReloadFor(g);
         Fired?.Invoke(g);
+        _lastFiredAt = Time.GetTicksMsec() / 1000.0;
         return true;
     }
 
@@ -906,11 +908,13 @@ public partial class VehicleBody : RigidBody3D, IGridHost
         Unpark();
         if (Model.Blocks.Count == 0)
         {
+            ReportDamage();
             Vanish();
             return;
         }
 
         RefreshStats();
+        ReportDamage();
     }
 
     public void Vanish()

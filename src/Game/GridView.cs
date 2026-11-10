@@ -184,9 +184,9 @@ public sealed partial class GridView
                 nodes.Visual.AddChild(new MeshInstance3D { Mesh = jm, MaterialOverride = jmat, Transform = jx });
             }
 
-            ApplyNear(nodes.Visual);
+            ApplyNear(nodes.Visual, NearEnd(b.Section, Tier.Normal));
             _sections[b.Section].AddChild(nodes.Visual);
-            FarChanged(b.Section);
+            FarChanged(b.Section, chunk);
         }
         else
         {
@@ -223,7 +223,7 @@ public sealed partial class GridView
         if (!_chunkOf.Remove(b, out Chunk chunk)) return;
         chunk.Blocks.Remove(b);
         if (!BlockVisuals.IsAnimated(b.Def)) chunk.VisualDirty = true;
-        else FarChanged(b.Section);
+        else FarChanged(b.Section, chunk);
         TouchNeighbors(b);
         if (b.Def.HasCollider && b.Def.Shape == BlockShape.Cube) chunk.ColliderDirty = true;
         _dirty.Add(chunk);
@@ -277,7 +277,7 @@ public sealed partial class GridView
     {
         _flushQueued = false;
         if (!GodotObject.IsInstanceValid(Body)) return;
-        _nearNodes.RemoveAll(g => !GodotObject.IsInstanceValid(g));
+        _nearNodes.RemoveAll(n => !GodotObject.IsInstanceValid(n.g));
         foreach (Chunk c in _dirty)
         {
             if (c.VisualDirty) RebuildVisual(c);
@@ -308,7 +308,7 @@ public sealed partial class GridView
             foreach (Piece piece in pieces)
             {
                 GeometryInstance3D g = piece.Instance();
-                ApplyNear(g);
+                ApplyNear(g, NearEnd(c.Section, piece.Tier));
                 c.Node.AddChild(g);
             }
 
@@ -316,9 +316,9 @@ public sealed partial class GridView
         }
 
         long started = Perf.Now;
-        FarChanged(c.Section);
+        FarChanged(c.Section, c);
         List<Piece> made = _building && _shared != null ? new List<Piece>() : null;
-        var groups = new Dictionary<(Mesh, Material), List<(Transform3D xf, int o)>>();
+        var groups = new Dictionary<(Mesh, Material, Tier), List<(Transform3D xf, int o)>>();
         var surface = new List<Int3>();
         foreach (BlockInstance b in c.Blocks)
         {
@@ -334,10 +334,13 @@ public sealed partial class GridView
             if (Enclosed(b)) continue;
 
             Transform3D at = Conv.BlockTransform(b.Cell, b.Orientation);
+            Tier blockTier = TierOf(b.Def);
             void AddPart(Mesh mesh, Material own, Transform3D local, Paint finish)
             {
                 Material mat = _livery != null && Liveries.Paints(b.Def, finish) ? Paintwork.Part(b.Def, _livery, finish == Paint.SelfDark, _waterline) : own;
-                if (!groups.TryGetValue((mesh, mat), out List<(Transform3D, int)> list)) groups[(mesh, mat)] = list = new List<(Transform3D, int)>();
+                // Small parts (bolts, rails, handles) and the things inside drop out sooner than the rest.
+                Tier tier = blockTier == Tier.Normal && IsSmall(mesh, local) ? Tier.Small : blockTier;
+                if (!groups.TryGetValue((mesh, mat, tier), out List<(Transform3D, int)> list)) groups[(mesh, mat, tier)] = list = new List<(Transform3D, int)>();
                 list.Add((at * local, b.Orientation));
             }
 
@@ -350,7 +353,7 @@ public sealed partial class GridView
             }
         }
 
-        foreach (((Mesh mesh, Material mat), List<(Transform3D xf, int o)> xfs) in groups)
+        foreach (((Mesh mesh, Material mat, Tier tier), List<(Transform3D xf, int o)> xfs) in groups)
         {
             // Painted parts carry their own position, so each takes the pattern's color where it is.
             bool painted = mat is ShaderMaterial;
@@ -363,11 +366,14 @@ public sealed partial class GridView
 
             var piece = new Piece
             {
-                Res = mm, Mat = mat, ShadowOff = mat is StandardMaterial3D sm && sm.ShadingMode == BaseMaterial3D.ShadingModeEnum.Unshaded,
+                Res = mm, Mat = mat, Tier = tier,
+                // Small parts' and interior items' shadows can't be made out; leaving them out of the shadow
+                // passes saves drawing them again for every shadow split.
+                ShadowOff = tier != Tier.Normal || mat is StandardMaterial3D sm && sm.ShadingMode == BaseMaterial3D.ShadingModeEnum.Unshaded,
             };
             made?.Add(piece);
             GeometryInstance3D g = piece.Instance();
-            ApplyNear(g);
+            ApplyNear(g, NearEnd(c.Section, tier));
             c.Node.AddChild(g);
         }
 
@@ -378,7 +384,7 @@ public sealed partial class GridView
                 var piece = new Piece { Res = BlockVisuals.HullMesh(s), Mat = PlatingMaterial(_surfaceDefs[mat]) };
                 made?.Add(piece);
                 GeometryInstance3D g = piece.Instance();
-                ApplyNear(g);
+                ApplyNear(g, NearEnd(c.Section, Tier.Normal));
                 c.Node.AddChild(g);
             }
 
