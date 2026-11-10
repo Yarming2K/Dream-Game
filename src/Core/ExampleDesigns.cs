@@ -140,9 +140,79 @@ public static class ExampleDesigns
 
     public static IReadOnlyList<Blueprint> All => new[]
     {
-        Warden(), Vanguard(), Jackal(), Hailstorm(), Juggernaut(), Bulwark(), Skyguard(), Corsair(), Trident(), Barracuda(), Kestrel(), Falcon(), Hornet(),
-        Wasp(), Zephyr(), Colossus(),
+        Warden(), Vanguard(), Jackal(), Hailstorm(), Juggernaut(), Bulwark(), Skyguard(), Mole(), Corsair(), Trident(), Barracuda(), Kestrel(), Falcon(),
+        Hornet(), Wasp(), Zephyr(), Colossus(),
     };
+
+    /// <summary>
+    /// Mole: an armoured dozer. A tracked hull with a blade 4.5 m wide across the front (three sections,
+    /// wider than the tracks, so it can drive down into its own cut), a small 37 mm turret to look after
+    /// itself, and the kit for working away from the depot: toolboxes, spare track links and a searchlight.
+    /// K lowers the blade to dig ramps, trenches and firing pits; raised, it pushes earth into berms.
+    /// </summary>
+    public static Blueprint Mole()
+    {
+        var d = new Draft();
+        for (int z = -5; z <= 4; z++)
+        {
+            d.Set(-3, 0, z, "track");
+            d.Set(3, 0, z, "track");
+        }
+
+        // The blade, across the front, its bottom row level with the tracks.
+        foreach (int x in new[] { -3, 0, 3 }) d.Set(x, 0, -7, "dozer_blade");
+
+        // Inside: the driver up front, the engines and fuel behind, ammunition under the turret.
+        d.Set(-1, 1, -5, "driver_seat");
+        d.Set(1, 1, -5, "commander_seat");
+        d.Set(-1, 1, 3, "engine_large");
+        d.Set(1, 1, 3, "engine_large");
+        d.Set(0, 1, 3, "fuel_tank");
+        d.Set(0, 1, 4, "fuel_tank");
+        d.Set(-1, 1, -1, "ammo_ap");
+        d.Set(1, 1, -1, "ammo_he");
+        d.Set(0, 1, -1, "ammo_feed");
+
+        // Armour: a thick sloped front behind the blade, plain sides, a flat deck.
+        d.Fill(-2, 2, 0, 0, -6, -6, "armor_heavy");
+        d.Fill(-3, 3, 1, 1, -6, -6, "armor_heavy_slope");
+        d.Fill(-3, 3, 2, 2, -5, -5, "armor_heavy_shallow");
+        d.Fill(-2, 2, 0, 0, 5, 5, "armor_light");
+        d.Fill(-3, 3, 1, 1, 5, 5, "armor_light");
+        d.Fill(-3, -3, 1, 1, -5, 4, "armor_light");
+        d.Fill(3, 3, 1, 1, -5, 4, "armor_light");
+        d.Set(0, 2, -1, "turret_ring");
+        d.Fill(-3, 3, 2, 2, -4, 5, "armor_light");
+        d.Fill(-2, 2, 0, 1, -5, 4, "frame");
+
+        // A small turret: 37 mm, its gunner, armoured round the front.
+        d.Set(0, 3, -1, "breech_37");
+        for (int z = -2; z >= -4; z--) d.Set(0, 3, z, "barrel");
+        d.Set(1, 3, -1, "ammo_ap");
+        d.Set(-1, 3, -1, "ammo_he");
+        d.Set(0, 3, 0, "gunner_seat");
+        d.Fill(-2, 2, 3, 3, -2, -2, "armor_heavy");
+        d.Fill(-2, -2, 3, 3, -1, 1, "armor_light");
+        d.Fill(2, 2, 3, 3, -1, 1, "armor_light");
+        d.Fill(-1, 1, 3, 3, 1, 1, "armor_light");
+        d.Fill(-2, 2, 4, 4, -2, -2, "armor_heavy_slope");
+        d.Fill(-2, 2, 4, 4, -1, 1, "armor_light");
+
+        // Kit for working in the field.
+        d.Set(0, 5, 0, "hatch");
+        d.Set(1, 5, -1, "periscope");
+        d.Set(-2, 3, -3, "searchlight");
+        foreach (int s in new[] { -1, 1 })
+        {
+            d.Set(3 * s, 2, 2, "spare_tracks", Orient(new Int3(-s, 0, 0), new Int3(0, 0, -1)));
+            foreach (int z in new[] { -3, 0 }) d.Set(4 * s, 1, z, "toolbox", Orient(new Int3(-s, 0, 0), new Int3(0, 0, -1)));
+            d.Set(s, 1, 6, "exhaust", Orient(new Int3(0, 0, -1), new Int3(0, 1, 0)));
+            d.Set(2 * s, 3, 3, "vent");
+        }
+
+        d.Set(-2, 5, 1, "antenna");
+        return d.Build("Mole (armoured dozer)", "olive");
+    }
 
     /// <summary>Medium tank: sloped front, 76 mm gun in a turret with a gunner and commander, ammo stored low in the hull.</summary>
     public static Blueprint Warden() => MediumTank(railgun: false);

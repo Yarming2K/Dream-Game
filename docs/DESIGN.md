@@ -200,6 +200,18 @@ Jets push on their own at any speed. Opening the throttle all the way lights the
 
   The **Juggernaut** is the vehicle answer: a tracked siege mortar carrier with four stabilizers. On the range, your outpost stands east of the depot with the siege fortress behind it; east of the lane, on ground levelled out of the hills, stand the flak tower, the mortar battery and the coastal citadel above the beach. An enemy pillbox and flak nest wait down range.
 
+### Ground you can change
+The first step of terrain and industry: the island's ground is no longer fixed.
+- **Craters.** Any blast near the ground (not flak) digs one: a bowl with half its earth heaped in a rim round it; the rest is thrown far. Size follows the blast and how high above the ground it went off: a 76 mm shell scoops a hollow about 3 m across and 40 cm deep, a 160 mm mortar bomb a pit 9 m across and 1.5 m deep, a bomb one 10 m across and 2 m deep, the 420 mm siege mortar a hole 20 m across and 4 m deep. Nothing digs more than 8 m below the ground as it was (bedrock).
+- **Earth slumps.** It can't stand steeper than about 48°: after every change, any steeper step slides until it can. Earth is never made or lost by digging, piling or slumping (craters throw half theirs away).
+- **What it changes.** Shells, wheels, tracks and gunners' sight lines all use the changed ground at once: a tank in a crater or behind a berm is hull-down, one driving into a crater drops in, a parked vehicle wakes and settles when the ground goes from under it. Anything dug below sea level fills with water. Freshly turned earth is drawn as dark raw soil, on the tactical map too.
+- **Buildings hold their ground.** The ground under buildings and range structures is locked: craters stop at their walls.
+- **The shovel** (4, on foot): left click digs where you look, up to 3.6 m away, and the earth goes on your shovel (2 m³); dig on with it full and it's thrown ahead of the hole as a parapet. Right click piles what you carry where you look. About 0.5 m³ a second: a foxhole in about ten seconds, a pit for a tank in a minute or two.
+- **The dozer blade** (Mobility, 3×2×1): mounted across the front with its bottom row level with the tracks or wheels. K (driver) lowers it: driving forward, it cuts 25 cm below the tracks and heaps the earth just ahead, where the blade cuts it again as it comes on, so a heap builds in front and is pushed along. Every pass goes deeper as the vehicle drives down into its cut: ramps, trenches, firing pits. Raised, it rides 30 cm above the tracks and only shifts earth that's higher than that. Pushing earth drags: 12 kN for every m³ a second it moves, up to 0.4 g, so a big heap slows you to a crawl. The blade takes everything above its edge in the strip it sweeps, the heap it is pushing too, so the heap goes on ahead whole, and what spills off its ends makes berms along the cut. It doesn't collide with the ground (it cuts it), but shells hit it like 35 mm of armor. The builder warns if a blade is too high to reach the ground.
+- **The Mole** (example): an armoured dozer, a tracked hull with three blades 4.5 m across (wider than its tracks, so it can drive down into its own cut), a 37 mm turret, toolboxes, spare links and a searchlight. One waits by the command post.
+- **How it's drawn.** The island is 8 × 8 tiles of 64 m, each its own mesh and height map: a change redoes only the tiles it touches, their collision at once and their meshes a few a frame.
+- Next: resources in the ground, then machines that mine them.
+
 ### Mobility
 - Wheels and track segments both use raycast suspension. Wheels steer; tracks skid-steer.
 - Engine power and vehicle mass set acceleration and top speed.
@@ -314,6 +326,8 @@ Each milestone is playable on its own.
    - **Modern and future** *(built)*: jets with afterburners and the Falcon; power (generators, the fusion reactor, capacitors); railguns, lasers, the CIWS and point defense; vertical launch cells with strike and air-defense missiles; rocket artillery; big blasts with shock waves; the Vanguard, Hailstorm and Trident examples.
    - Not yet: giant aircraft and land battleships. They can be built from the same blocks, but their wings and tracks are still worked out panel by panel, so a giant one costs more to fly than it needs to.
 4. **Terrain + industry:** deformable terrain, mining, machines you design, conveyors, power, assembly bays that print blueprints.
+   - **Ground you can change** *(built)*: craters from blasts, slumping earth, the shovel, the dozer blade and the Mole, locked ground under buildings, flooding below sea level, tiled ground updates.
+   - Next: resources in the ground (surveying, seams), mining machines, moving materials, factories, assembly bays.
 5. **Planet war:** a generated planet, a rival faction that designs its own vehicles, territory, the supply network, research, salvage, captured sites, simplified far-off battles.
 6. **Space:** the system map, capital ships, orbital strikes, landings, scouting, supply between planets.
 7. **Co-op campaign, PvP, configurable factions, Steam (GodotSteam, Workshop).**

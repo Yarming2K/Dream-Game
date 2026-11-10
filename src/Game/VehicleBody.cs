@@ -220,6 +220,8 @@ public partial class VehicleBody : RigidBody3D, IGridHost
 
     public override void _Ready()
     {
+        // A building holds the ground it stands on: craters stop at its walls.
+        if (Analysis.IsBuilding) Terrain.LockUnder(this, Analysis.Min, Analysis.Max);
         _engineSound = Sfx.Loop(this, SoundId.Engine, -14f);
         BlockInstance engine = Model.Instances.FirstOrDefault(b => b.Def.Kind == BlockKind.Engine);
         if (engine != null) _engineSound.Position = Conv.CellPos(engine.Cell);
@@ -438,6 +440,7 @@ public partial class VehicleBody : RigidBody3D, IGridHost
 
         UpdatePark(dt, playerDrives);
         Drive(dt);
+        DozeTick(dt);
         long t1 = Perf.Now;
         Perf.Add(Perf.Vehicles, t0);
         if (IsNaval || PropsAlive > 0) NavalDrive(dt);

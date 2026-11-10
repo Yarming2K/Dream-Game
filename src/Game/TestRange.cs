@@ -998,6 +998,15 @@ public partial class TestRange : Node3D
         else if (e.IsActionPressed("bomb") && Mounted) _bombQueued = true;
         else if (e.IsActionPressed("vtol") && Mounted) _vtolQueued = true;
         else if (e.IsActionPressed("smoke") && Mounted) _smokeQueued = true;
+        else if (e.IsActionPressed("blade") && Mounted)
+        {
+            if (!_mount.HasBlade) Big("No dozer blade on this design");
+            else
+            {
+                _mount.ToggleBlade();
+                Big(_mount.BladeDown ? "Blade down: digging" : "Blade up: pushing earth");
+            }
+        }
         else if (e.IsActionPressed("lights") && Mounted)
         {
             if (!_mount.HasLights) Big("No lights on this design");
@@ -1352,8 +1361,9 @@ public partial class TestRange : Node3D
             "Q cycles AP, HE and FLAK: flak bursts near aircraft, or at the range you're aiming at. Drones are flown by remote: you stay standing where you were.\n\n" +
             "[b][color=#ffb845]On foot[/color][/b]\n" +
             "W A S D move · Shift sprint · Space jump · Mouse look · Right click aim\n" +
-            "1 rifle · 2 AT rocket · 3 welding torch · Left click fire · R reload\n" +
+            "1 rifle · 2 AT rocket · 3 welding torch · 4 shovel · Left click fire · R reload\n" +
             "The torch repairs damaged blocks and rebuilds destroyed ones (blue outlines): aim at them and hold the trigger.\n" +
+            "The shovel digs where you look (left click; you carry the earth, and once full it's thrown ahead as a parapet) and piles it (right click). Blasts dig craters.\n" +
             "E get into the vehicle you're looking at. The supply pad heals you and refills ammo and fuel.\n\n" +
             "[b][color=#ffb845]Range[/color][/b]\n" +
             "L live fire: the parked vehicles' crews shoot back · T reset targets · Backspace respawn · Tab builder · Esc free the mouse\n" +
@@ -1488,6 +1498,10 @@ public partial class TestRange : Node3D
         if (!v.IsNaval && v.Submerged > 0.25f) sb.Append($"[color={Ui.Hex(Ui.Warn)}]Deep water: land vehicles sink. Back out while the engine still runs.[/color]\n");
         if (v.IsUpsideDownOrStuck && (!v.IsAir || v.OnGround)) sb.Append($"[color={Ui.Hex(Ui.Warn)}]Tipped over: press R to get back up.[/color]\n");
         if (_resupplying) sb.Append($"[color={Ui.Hex(Ui.Good)}]Resupplying...[/color]\n");
+        if (v.HasBlade)
+            sb.Append(v.BladeDown
+                ? $"Blade [b]down[/b]{(v.BladeEarthPerS > 0.05f ? $" · moving {v.BladeEarthPerS:0.0} m³ of earth a second" : " · drive forward to dig")}   [color={Ui.Hex(Ui.Dim)}]K raises it[/color]\n"
+                : $"Blade [b]up[/b]{(v.BladeEarthPerS > 0.05f ? $" · pushing {v.BladeEarthPerS:0.0} m³ a second" : "")}   [color={Ui.Hex(Ui.Dim)}]K lowers it to dig[/color]\n");
         {
             int racks = v.Model.Instances.Count(b => b.Alive && b.Def.Id == "smoke_launcher");
             string kit = (racks > 0 ? $"Smoke [b]{v.SmokeReady}[/b]/{racks} [color={Ui.Hex(Ui.Dim)}]Z[/color]   " : "") +
@@ -1681,7 +1695,12 @@ public partial class TestRange : Node3D
 
         CarriedWeapon w = _me.Current;
         _weaponName.Text = w.Name;
-        if (w.IsWelder)
+        if (w.IsShovel)
+        {
+            _weaponAmmo.Text = $"{_me.EarthCarried:0.0} / {PlayerCharacter.CarryM3:0} m³ earth";
+            _weaponReload.Set(_me.EarthCarried, PlayerCharacter.CarryM3, Ui.Accent);
+        }
+        else if (w.IsWelder)
         {
             _weaponAmmo.Text = "Hold to weld";
             _weaponReload.Set(0, 1, Ui.Info);
@@ -1693,12 +1712,21 @@ public partial class TestRange : Node3D
                 w.ReloadLeft > 0 ? Ui.Warn : Ui.Accent);
         }
 
-        string[] names = { "1 Rifle", "2 Rocket", "3 Torch" };
+        string[] names = { "1 Rifle", "2 Rocket", "3 Torch", "4 Shovel" };
         _slots.Text = string.Join("   ", names.Select((s, i) => i == _me.Slot ? $"[{s}]" : s));
 
         (WeldState state, float progress, string block) = _me.WeldStatus;
-        _weldPanel.Visible = w.IsWelder && state != WeldState.Nothing;
-        if (_weldPanel.Visible)
+        if (w.IsShovel)
+        {
+            // The shovel says what it's doing in the same place the torch does.
+            _weldPanel.Visible = _me.ShovelNote.Length > 0;
+            _weldLabel.Text = $"{_me.ShovelNote}   ·   left click digs, right click piles";
+            _weldLabel.AddThemeColorOverride("font_color", _me.ShovelNote.StartsWith("Dig") || _me.ShovelNote.StartsWith("Pil") ? Ui.Info : Ui.Warn);
+            _weldBar.Set(_me.EarthCarried, PlayerCharacter.CarryM3, Ui.Accent);
+        }
+        else _weldPanel.Visible = w.IsWelder && state != WeldState.Nothing;
+
+        if (_weldPanel.Visible && !w.IsShovel)
         {
             string what = block ?? "block";
             (string text, Color c) = state switch

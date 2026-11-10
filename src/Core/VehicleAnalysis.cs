@@ -1075,6 +1075,23 @@ public sealed class VehicleAnalysis
     }
 
     /// <summary>Heavy weapons on a vehicle: land vehicles need stabilizers, aircraft can't fire them at all.</summary>
+    /// <summary>A dozer blade has to reach the ground: its bottom row within a row of the tracks' or wheels'.</summary>
+    private void BladeWarnings()
+    {
+        var blades = Anchors.Where(c => Defs[c].Kind == BlockKind.DozerBlade).ToList();
+        if (blades.Count == 0) return;
+        if (Wheels.Count == 0 || Mode != MobilityMode.Ground)
+        {
+            Warnings.Add(new DesignWarning(Severity.Warning, "Dozer blades only work on a land vehicle with tracks or wheels."));
+            return;
+        }
+
+        int wheelRow = Wheels.Min(w => w.Cell.Y);
+        foreach (Int3 b in blades.Where(b => b.Y > wheelRow + 1))
+            Warnings.Add(new DesignWarning(Severity.Warning, $"The dozer blade at {b} is too high to reach the ground: put its bottom row level with the tracks or wheels."));
+        Warnings.Add(new DesignWarning(Severity.Info, "Dozer blade: K lowers it to dig (25 cm below the tracks; each pass goes deeper) and raises it again to push earth without digging."));
+    }
+
     private void HeavyWarnings()
     {
         GunInfo heavy = Guns.FirstOrDefault(g => g.Valid && g.BreechDef.Breech.Heavy);
@@ -1170,6 +1187,7 @@ public sealed class VehicleAnalysis
         if (IsAir) AirWarnings();
         PowerWarnings();
         HeavyWarnings();
+        BladeWarnings();
         foreach (MissileInfo m in Missiles.Where(m => m.Problem != null))
             Warnings.Add(new DesignWarning(m.Valid ? Severity.Info : Severity.Warning, m.Problem));
 

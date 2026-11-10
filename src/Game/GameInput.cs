@@ -33,6 +33,7 @@ public static class GameInput
         AddKeys("tactical_map", Key.M);
         AddKeys("lights", Key.H);
         AddKeys("smoke", Key.Z);
+        AddKeys("blade", Key.K);
     }
 
     private static void AddKeys(string action, params Key[] keys)

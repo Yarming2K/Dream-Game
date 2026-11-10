@@ -16,8 +16,10 @@ public sealed class CarriedWeapon
     public float Cooldown;
     public float ReloadLeft;
     public int ShotsFired;
-    public bool IsWelder => Spec == null;
-    public string Name => Spec?.Name ?? "Welding Torch";
+    public bool IsShovel;
+    public bool IsWelder => Spec == null && !IsShovel;
+    public bool IsGun => Spec != null;
+    public string Name => IsShovel ? "Shovel" : Spec?.Name ?? "Welding Torch";
 }
 
 /// <summary>
@@ -108,6 +110,7 @@ public partial class PlayerCharacter : CharacterBody3D, ICharacter
         Weapons.Add(new CarriedWeapon { Spec = InfantryWeapons.Rifle, Mag = 30, Reserve = InfantryWeapons.Rifle.Reserve });
         Weapons.Add(new CarriedWeapon { Spec = InfantryWeapons.Rocket, Mag = 1, Reserve = InfantryWeapons.Rocket.Reserve });
         Weapons.Add(new CarriedWeapon());
+        Weapons.Add(new CarriedWeapon { IsShovel = true });
         BuildViewModels();
         SelectSlot(0);
 
@@ -156,7 +159,7 @@ public partial class PlayerCharacter : CharacterBody3D, ICharacter
         Rotation = new Vector3(0, yaw, 0);
         _pitch = 0;
         _head.Rotation = Vector3.Zero;
-        foreach (CarriedWeapon w in Weapons.Where(w => !w.IsWelder))
+        foreach (CarriedWeapon w in Weapons.Where(w => w.IsGun))
         {
             w.Mag = w.Spec.MagSize;
             w.Reserve = w.Spec.Reserve;
@@ -185,12 +188,13 @@ public partial class PlayerCharacter : CharacterBody3D, ICharacter
             return;
         }
 
-        if (e is InputEventMouseButton { ButtonIndex: MouseButton.Right } rb) _aiming = rb.Pressed && !Current.IsWelder;
+        if (e is InputEventMouseButton { ButtonIndex: MouseButton.Right } rb) _aiming = rb.Pressed && Current.IsGun;
         if (e is InputEventKey { Pressed: true, Echo: false } k)
         {
             if (k.PhysicalKeycode == Key.Key1) SelectSlot(0);
             else if (k.PhysicalKeycode == Key.Key2) SelectSlot(1);
             else if (k.PhysicalKeycode == Key.Key3) SelectSlot(2);
+            else if (k.PhysicalKeycode == Key.Key4) SelectSlot(3);
             else if (k.PhysicalKeycode == Key.R) StartReload();
         }
     }
@@ -212,7 +216,7 @@ public partial class PlayerCharacter : CharacterBody3D, ICharacter
     private void StartReload()
     {
         CarriedWeapon w = Current;
-        if (w.IsWelder || w.ReloadLeft > 0 || w.Mag >= w.Spec.MagSize || w.Reserve <= 0) return;
+        if (!w.IsGun || w.ReloadLeft > 0 || w.Mag >= w.Spec.MagSize || w.Reserve <= 0) return;
         w.ReloadLeft = w.Spec.ReloadS;
         Sfx.Play2D(this, SoundId.Reload, -6f, 0.85f);
     }
@@ -305,7 +309,12 @@ public partial class PlayerCharacter : CharacterBody3D, ICharacter
         }
 
         bool trigger = control && Input.IsActionPressed("fire");
-        if (Current.IsWelder)
+        if (Current.IsShovel)
+        {
+            UpdateRepairPreviews(false);
+            ShovelTick(dt, trigger, control && Input.IsMouseButtonPressed(MouseButton.Right));
+        }
+        else if (Current.IsWelder)
         {
             UpdateRepairPreviews(true);
             if (trigger) WeldTick(dt);
@@ -513,7 +522,7 @@ public partial class PlayerCharacter : CharacterBody3D, ICharacter
     public bool RefillAmmo(float dt)
     {
         bool changed = false;
-        foreach (CarriedWeapon w in Weapons.Where(w => !w.IsWelder && w.Reserve < w.Spec.Reserve))
+        foreach (CarriedWeapon w in Weapons.Where(w => w.IsGun && w.Reserve < w.Spec.Reserve))
         {
             w.Reserve = Math.Min(w.Spec.Reserve, w.Reserve + Math.Max(1, (int)(w.Spec.Reserve * dt * 0.3f)));
             changed = true;
@@ -578,7 +587,17 @@ public partial class PlayerCharacter : CharacterBody3D, ICharacter
         _torchLight = new OmniLight3D { LightColor = new Color(0.65f, 0.85f, 1f), OmniRange = 3f, Visible = false };
         torchTip.AddChild(_torchLight);
 
-        foreach ((Node3D model, Node3D muzzle) in new[] { (rifle, rifleMuzzle), (tube, tubeMuzzle), (torch, torchTip) })
+        // Shovel: a wooden haft and a steel blade, held low.
+        var shovel = new Node3D { Position = new Vector3(0.22f, -0.3f, -0.42f), RotationDegrees = new Vector3(-28, 8, 0) };
+        Part(shovel, new CylinderMesh { TopRadius = 0.016f, BottomRadius = 0.018f, Height = 0.75f }, Mat(new Color(0.42f, 0.3f, 0.18f), 0f, 0.8f),
+            new Vector3(0, 0, 0.05f), new Vector3(90, 0, 0));
+        Part(shovel, new BoxMesh { Size = new Vector3(0.17f, 0.012f, 0.21f) }, steel, new Vector3(0, -0.01f, -0.42f));
+        Part(shovel, new BoxMesh { Size = new Vector3(0.1f, 0.03f, 0.03f) }, dark, new Vector3(0, 0, 0.42f));
+        _shovelModel = shovel;
+        var shovelTip = new Node3D { Position = new Vector3(0, 0, -0.5f) };
+        shovel.AddChild(shovelTip);
+
+        foreach ((Node3D model, Node3D muzzle) in new[] { (rifle, rifleMuzzle), (tube, tubeMuzzle), (torch, torchTip), (shovel, shovelTip) })
         {
             model.Visible = false;
             _viewRoot.AddChild(model);
@@ -597,6 +616,6 @@ public partial class PlayerCharacter : CharacterBody3D, ICharacter
         _viewRoot.Position = _viewRoot.Position.Lerp(bob + aimShift, Mathf.Min(1f, dt * 14f));
         if (_rocketTip != null) _rocketTip.Visible = Weapons[1].Mag > 0 && Weapons[1].ReloadLeft <= 0;
         // Reloading dips the weapon.
-        if (!Current.IsWelder && Current.ReloadLeft > 0) _viewRoot.Position = _viewRoot.Position.Lerp(new Vector3(0, -0.12f, 0.05f), Mathf.Min(1f, dt * 10f));
+        if (Current.IsGun && Current.ReloadLeft > 0) _viewRoot.Position = _viewRoot.Position.Lerp(new Vector3(0, -0.12f, 0.05f), Mathf.Min(1f, dt * 10f));
     }
 }

@@ -53,6 +53,7 @@ public partial class TacticalMap : Control
     private bool _dragging, _panning;
     private Vector2 _dragStart, _dragNow;
     private ImageTexture _terrain;
+    private int _terrainVersion = -1;
     private float _redraw, _sense;
     private readonly Dictionary<VehicleBody, (Vector3 pos, double seen, bool now)> _spotted = new();
     private Blueprint _placing;
@@ -84,7 +85,13 @@ public partial class TacticalMap : Control
 
     public void Open()
     {
-        if (_terrain == null) _terrain = BuildTerrain();
+        // The ground may have changed (craters, digging) since the map was last drawn.
+        int version = Terrain.Earth?.Version ?? 0;
+        if (_terrain == null || version != _terrainVersion)
+        {
+            _terrain = BuildTerrain();
+            _terrainVersion = version;
+        }
         Visible = true;
         IGridHost console = ConsoleHost?.Invoke();
         if (console?.Body != null && IsInstanceValid(console.Body))
@@ -242,6 +249,9 @@ public partial class TacticalMap : Control
                 c = h < Terrain.LandHeight - 0.4f ? new Color(0.62f, 0.57f, 0.42f)
                     : land.Lerp(new Color(0.5f, 0.48f, 0.42f), Mathf.Clamp((h - 6f) / 14f, 0, 1));
                 c = new Color(c.R * shade, c.G * shade, c.B * shade);
+                // Craters and diggings show as raw earth.
+                float stirred = Terrain.Earth?.Disturbed[z * f.Width + x] ?? 0f;
+                if (stirred > 0) c = c.Lerp(new Color(0.24f, 0.19f, 0.14f), stirred * 0.7f);
             }
 
             img.SetPixel(x, z, c);

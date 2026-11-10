@@ -27,6 +27,20 @@ public partial class StructureBody : StaticBody3D, IGridHost
     }
 
     public override void _EnterTree() => GridRegistry.Add(this);
+
+    public override void _Ready()
+    {
+        // Walls and bunkers hold the ground under them, like buildings.
+        Model.RecomputeBounds();
+        Int3 min = new(int.MaxValue, 0, int.MaxValue), max = new(int.MinValue, 0, int.MinValue);
+        foreach (Int3 c in Model.Blocks.Keys)
+        {
+            min = Int3.Min(min, c);
+            max = Int3.Max(max, c);
+        }
+
+        if (Model.Blocks.Count > 0) Terrain.LockUnder(this, min, max);
+    }
     public override void _ExitTree()
     {
         _interior?.Clear();

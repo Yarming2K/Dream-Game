@@ -18,7 +18,9 @@ public sealed class HeightField
     public readonly Vector2 Origin;
     public readonly float[] Heights;
     public readonly float Floor;
-    public readonly float MaxHeight;
+
+    /// <summary>The highest point anywhere (it rises when earth is piled up; see <see cref="NoteHeight"/>).</summary>
+    public float MaxHeight { get; private set; }
 
     public HeightField(int width, int depth, float spacing, Vector2 origin, float[] heights, float floor)
     {
@@ -35,6 +37,12 @@ public sealed class HeightField
     }
 
     private float H(int x, int z) => Heights[z * Width + x];
+
+    /// <summary>Call after raising a sample, so ray casts still know how high the ground can reach.</summary>
+    public void NoteHeight(float h)
+    {
+        if (h > MaxHeight) MaxHeight = h;
+    }
 
     /// <summary>Ground height straight below or above a point (the floor outside the grid).</summary>
     public float HeightAt(float x, float z) => Sample(x, z, out _);

@@ -47,6 +47,10 @@ public partial class TestRange
         VehicleBody battery = AddDummy(ExampleDesigns.MortarBattery(), MortarBatteryAt, 0f);
         battery.Faction = 0;
         battery.AddChild(Sign("MORTAR BATTERY\n4 × 160 mm mortars", new Vector3(0, 5f, -6f), 64));
+        // An armoured dozer by the command post, to dig with.
+        VehicleBody mole = AddDummy(ExampleDesigns.Mole(), new Vector3(-28, Ground, 152), 0f);
+        mole.Faction = 0;
+        mole.AddChild(Sign("MOLE  ·  armoured dozer\nE to drive · K lowers the blade", new Vector3(0, 4.2f, 0), 56));
         AddDummy(ExampleDesigns.Pillbox(), new Vector3(-44, Ground, SpawnPoint.Z - 190f), 0f);
         AddDummy(ExampleDesigns.FlakNest(), new Vector3(48, Ground, SpawnPoint.Z - 230f), 30f);
     }

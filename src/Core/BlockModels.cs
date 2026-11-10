@@ -1187,6 +1187,32 @@ public static class BlockModels
                 break;
             }
 
+            case BlockKind.DozerBlade:
+            {
+                // A curved mouldboard with a steel cutting edge, end plates and ribs behind, on two push arms with
+                // rams. The whole blade hangs from one node, which drops when the driver lowers it.
+                k.Node = k.AddNode("Blade", Vector3.Zero);
+                float hx = ext.X * 0.5f, hy = ext.Y * 0.5f;
+                (float y, float z, float tilt)[] curve = { (-0.38f, -0.15f, -32f), (-0.13f, -0.05f, -9f), (0.12f, -0.02f, 10f), (0.36f, -0.1f, 36f) };
+                foreach ((float y, float z, float tilt) in curve)
+                    k.Bevel(new Vector3(ext.X, hy * 0.54f, 0.05f), Paint.Self, new Vector3(0, y * hy / 0.5f, z), 0.01f,
+                        Quaternion.CreateFromAxisAngle(Vector3.UnitX, tilt * MathF.PI / 180f));
+                k.Box(new Vector3(ext.X * 1.01f, 0.06f, 0.09f), Paint.Steel, new Vector3(0, -hy + 0.03f, -0.19f));
+                foreach (float x in new[] { -hx, hx })
+                    k.Box(new Vector3(0.04f, ext.Y * 0.95f, 0.3f), Paint.SelfDark, new Vector3(x, 0, -0.06f));
+                foreach (float x in new[] { -hx * 0.62f, 0f, hx * 0.62f })
+                    k.Box(new Vector3(0.05f, ext.Y * 0.8f, 0.12f), Paint.SelfDark, new Vector3(x, 0, 0.08f));
+                foreach (float x in new[] { -hx * 0.72f, hx * 0.72f })
+                {
+                    k.Box(new Vector3(0.11f, 0.13f, 0.75f), Paint.Dark, new Vector3(x, -hy * 0.45f, 0.42f));
+                    k.Cyl(0.045f, 0.62f, Paint.Steel, new Vector3(x * 0.55f, hy * 0.25f, 0.38f),
+                        Quaternion.CreateFromAxisAngle(Vector3.UnitX, 1.25f), sides: 12);
+                }
+
+                k.Node = -1;
+                break;
+            }
+
             case BlockKind.Workbench:
             {
                 // A heavy bench on legs, a vise at one end, tools hung on a board behind and a lamp over it.

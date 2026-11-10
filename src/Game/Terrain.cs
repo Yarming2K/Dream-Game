@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using Godot;
 
 namespace DreamGame.Game;
@@ -7,6 +9,11 @@ namespace DreamGame.Game;
 /// The test range: an island. A flat firing lane runs down the middle with rolling hills on both sides,
 /// a beach on the east coast slopes into the sea, and the sea surrounds everything (water level is y = 0).
 /// Collision is a heightmap with 1 m spacing, sized 2^n + 1 so the physics engine can use it directly.
+/// <para>The ground can change: blasts dig craters and people and machines dig and pile earth (see
+/// <see cref="DreamGame.Core.Earthworks"/>). It's drawn and collided in 8 × 8 tiles of 64 m, so a change
+/// only redoes the tiles it touches: their height maps at once, their meshes a few a frame. Fresh earth
+/// is drawn dark, and anything dug below sea level fills with water. The ground under buildings is
+/// locked, so a crater stops at their walls.</para>
 /// </summary>
 public static class Terrain
 {
@@ -63,6 +70,23 @@ public static class Terrain
         return t * t * (3f - 2f * t);
     }
 
+    /// <summary>The island's ground as it changes (craters, digging), or null before the range is built.</summary>
+    public static DreamGame.Core.Earthworks Earth { get; private set; }
+
+    /// <summary>The ground changed here (in world meters, x0, z0, x1, z1): vehicles there wake up, the map redraws.</summary>
+    public static event Action<Rect2> Changed;
+
+    /// <summary>Quads per side of one tile of the ground (8 × 8 tiles make the island).</summary>
+    private const int Tile = 64;
+    private const int Tiles = (Samples - 1) / Tile;
+
+    private static HeightMapShape3D[] _shapes;
+    private static MeshInstance3D[] _meshes;
+    private static StaticBody3D _body;
+    private static readonly HashSet<int> _collideDirty = new(), _drawDirty = new();
+    private static float[] _tileData;
+    private static StandardMaterial3D _material;
+
     public static StaticBody3D Build()
     {
         var noise = new FastNoiseLite { Seed = 7, Frequency = 0.012f, FractalOctaves = 4, NoiseType = FastNoiseLite.NoiseTypeEnum.Perlin };
@@ -73,26 +97,136 @@ public static class Terrain
         for (int x = 0; x < n; x++)
             heights[z * n + x] = HeightAt(noise, x - half, z - half);
 
-        // The same grid, for the fast ground tests shells, wheels and gunners use (see WorldQuery).
+        // The same grid, for the fast ground tests shells, wheels and gunners use (see WorldQuery), and the
+        // earthworks that change it.
         WorldQuery.Ground = new DreamGame.Core.HeightField(n, n, 1f, new System.Numerics.Vector2(-half, -half), heights, SeabedDepth);
+        Earth = new DreamGame.Core.Earthworks(WorldQuery.Ground) { Locked = IsLocked };
+        _locked = new bool[n * n];
+        _collideDirty.Clear();
+        _drawDirty.Clear();
 
-        var body = new StaticBody3D { Name = "Terrain", CollisionLayer = GridRegistry.Layers.World, CollisionMask = 0 };
-        body.AddChild(new CollisionShape3D
+        _body = new StaticBody3D { Name = "Terrain", CollisionLayer = GridRegistry.Layers.World, CollisionMask = 0 };
+        _body.AddChild(new TerrainUpdater());
+
+        // The ground in 8 × 8 tiles, each its own height map and mesh, so a crater only redoes the tile (or
+        // the few) it's in.
+        _shapes = new HeightMapShape3D[Tiles * Tiles];
+        _meshes = new MeshInstance3D[Tiles * Tiles];
+        _tileData = new float[(Tile + 1) * (Tile + 1)];
+        _material = GroundMaterial();
+        for (int tz = 0; tz < Tiles; tz++)
+        for (int tx = 0; tx < Tiles; tx++)
         {
-            Shape = new HeightMapShape3D { MapWidth = n, MapDepth = n, MapData = heights },
-        });
+            int t = tz * Tiles + tx;
+            _shapes[t] = new HeightMapShape3D { MapWidth = Tile + 1, MapDepth = Tile + 1, MapData = TileHeights(tx, tz) };
+            _body.AddChild(new CollisionShape3D
+            {
+                Shape = _shapes[t], Position = new Vector3(tx * Tile + Tile / 2f - half, 0, tz * Tile + Tile / 2f - half),
+            });
+            _meshes[t] = new MeshInstance3D { Mesh = BuildTileMesh(tx, tz), MaterialOverride = _material };
+            _body.AddChild(_meshes[t]);
+        }
 
         // An endless flat seabed beyond the heightmap.
-        body.AddChild(new CollisionShape3D { Shape = new WorldBoundaryShape3D(), Position = new Vector3(0, SeabedDepth, 0) });
-
-        body.AddChild(new MeshInstance3D { Mesh = BuildMesh(heights, n), MaterialOverride = GroundMaterial() });
-        body.AddChild(new MeshInstance3D
+        _body.AddChild(new CollisionShape3D { Shape = new WorldBoundaryShape3D(), Position = new Vector3(0, SeabedDepth, 0) });
+        _body.AddChild(new MeshInstance3D
         {
             Mesh = new PlaneMesh { Size = new Vector2(6000, 6000) },
             Position = new Vector3(0, SeabedDepth - 0.03f, 0),
             MaterialOverride = new StandardMaterial3D { AlbedoColor = new Color(0.33f, 0.31f, 0.24f), Roughness = 1f },
         });
-        return body;
+        return _body;
+    }
+
+    private static float[] TileHeights(int tx, int tz)
+    {
+        float[] h = WorldQuery.Ground.Heights;
+        var data = new float[(Tile + 1) * (Tile + 1)];
+        for (int z = 0; z <= Tile; z++)
+        for (int x = 0; x <= Tile; x++)
+            data[z * (Tile + 1) + x] = h[(tz * Tile + z) * Samples + tx * Tile + x];
+        return data;
+    }
+
+    // ------------------------------------------------------------------ changing the ground
+
+    private static bool[] _locked;
+
+    private static bool IsLocked(int x, int z) => _locked != null && _locked[z * Samples + x];
+
+    /// <summary>
+    /// Keeps the ground under a building as it is (craters stop at its walls): every sample under the
+    /// footprint of its bottom row of blocks, at the given place and turn.
+    /// </summary>
+    public static void LockUnder(Node3D body, DreamGame.Core.Int3 min, DreamGame.Core.Int3 max)
+    {
+        if (_locked == null || body == null) return;
+        Transform3D inv = body.GlobalTransform.AffineInverse();
+        float cs = Conv.CS, half = (Samples - 1) * 0.5f;
+        float r = new Vector2((max.X - min.X + 1) * cs, (max.Z - min.Z + 1) * cs).Length() * 0.5f + 1f;
+        Vector3 c = body.GlobalTransform * new Vector3((min.X + max.X) * 0.5f * cs, 0, (min.Z + max.Z) * 0.5f * cs);
+        for (int z = Mathf.Max(0, (int)(c.Z - r + half)); z <= Mathf.Min(Samples - 1, (int)(c.Z + r + half) + 1); z++)
+        for (int x = Mathf.Max(0, (int)(c.X - r + half)); x <= Mathf.Min(Samples - 1, (int)(c.X + r + half) + 1); x++)
+        {
+            Vector3 local = inv * new Vector3(x - half, body.GlobalPosition.Y, z - half);
+            if (local.X >= (min.X - 1f) * cs && local.X <= (max.X + 1f) * cs && local.Z >= (min.Z - 1f) * cs && local.Z <= (max.Z + 1f) * cs)
+                _locked[z * Samples + x] = true;
+        }
+    }
+
+    /// <summary>A blast near the ground: digs the crater it would (nothing if it went off too high).</summary>
+    public static void Blast(Vector3 at, float radius, float damage)
+    {
+        if (Earth == null) return;
+        float ground = WorldQuery.Ground.HeightAt(at.X, at.Z);
+        (float r, float depth) = DreamGame.Core.Earthworks.CraterSize(damage, radius, at.Y - ground);
+        if (r < 0.6f || depth < 0.05f) return;
+        Earth.Crater(new System.Numerics.Vector2(at.X, at.Z), r, depth);
+    }
+
+    /// <summary>
+    /// Takes what changed since the last frame: the height maps of those tiles at once (vehicles drive on
+    /// them), their meshes a few a frame, and tells anyone who cares.
+    /// </summary>
+    internal static void Flush()
+    {
+        if (Earth == null || !Earth.HasDirty) { DrawSome(); return; }
+        DreamGame.Core.GridRect d = Earth.TakeDirty();
+        float half = (Samples - 1) * 0.5f;
+        for (int tz = Math.Max(0, (d.Z0 - 1) / Tile); tz <= Math.Min(Tiles - 1, (d.Z1 + 1) / Tile); tz++)
+        for (int tx = Math.Max(0, (d.X0 - 1) / Tile); tx <= Math.Min(Tiles - 1, (d.X1 + 1) / Tile); tx++)
+        {
+            int t = tz * Tiles + tx;
+            _collideDirty.Add(t);
+            _drawDirty.Add(t);
+        }
+
+        foreach (int t in _collideDirty) _shapes[t].MapData = TileHeights(t % Tiles, t / Tiles);
+        _collideDirty.Clear();
+        DrawSome();
+        var rect = new Rect2(d.X0 - half, d.Z0 - half, d.X1 - d.X0 + 1, d.Z1 - d.Z0 + 1);
+        // Whatever stands there feels the ground go: parked vehicles wake and settle into the new shape.
+        foreach (IGridHost host in GridRegistry.Hosts)
+        {
+            if (host.Body is not RigidBody3D rb || !GodotObject.IsInstanceValid(rb)) continue;
+            Vector3 p = rb.GlobalPosition;
+            if (!rect.Grow(host.Radius + 2f).HasPoint(new Vector2(p.X, p.Z))) continue;
+            if (host is VehicleBody v) v.Unpark();
+            rb.Sleeping = false;
+        }
+
+        Changed?.Invoke(rect);
+    }
+
+    private static void DrawSome()
+    {
+        int done = 0;
+        foreach (int t in _drawDirty.ToArray())
+        {
+            if (done++ >= 4) break;
+            _drawDirty.Remove(t);
+            if (_meshes[t] != null && GodotObject.IsInstanceValid(_meshes[t])) _meshes[t].Mesh = BuildTileMesh(t % Tiles, t / Tiles);
+        }
     }
 
     private static StandardMaterial3D GroundMaterial()
@@ -115,43 +249,51 @@ public static class Terrain
         };
     }
 
-    private static ArrayMesh BuildMesh(float[] h, int n)
+    private static ArrayMesh BuildTileMesh(int tx, int tz)
     {
+        float[] h = WorldQuery.Ground.Heights;
+        float[] stirred = Earth?.Disturbed;
+        int n = Samples, m = Tile + 1;
         float half = (n - 1) * 0.5f;
-        var verts = new Vector3[n * n];
-        var normals = new Vector3[n * n];
-        var colors = new Color[n * n];
+        var verts = new Vector3[m * m];
+        var normals = new Vector3[m * m];
+        var colors = new Color[m * m];
         var grass = new Color(0.36f, 0.4f, 0.24f);
         var dirt = new Color(0.45f, 0.4f, 0.3f);
         var rock = new Color(0.45f, 0.44f, 0.42f);
-        for (int z = 0; z < n; z++)
-        for (int x = 0; x < n; x++)
+        var turned = new Color(0.27f, 0.22f, 0.16f);
+        var sand = new Color(0.64f, 0.58f, 0.43f);
+        var seabed = new Color(0.32f, 0.33f, 0.28f);
+        for (int lz = 0; lz < m; lz++)
+        for (int lx = 0; lx < m; lx++)
         {
-            int i = z * n + x;
+            int x = tx * Tile + lx, z = tz * Tile + lz;
+            int i = z * n + x, li = lz * m + lx;
             float y = h[i];
-            verts[i] = new Vector3(x - half, y, z - half);
+            verts[li] = new Vector3(x - half, y, z - half);
+            // Normals from the whole grid, so tiles meet without a seam.
             float hl = h[z * n + Math.Max(x - 1, 0)], hr = h[z * n + Math.Min(x + 1, n - 1)];
             float hd = h[Math.Max(z - 1, 0) * n + x], hu = h[Math.Min(z + 1, n - 1) * n + x];
             Vector3 nrm = new Vector3(hl - hr, 2f, hd - hu).Normalized();
-            normals[i] = nrm;
+            normals[li] = nrm;
             float slope = 1f - nrm.Y;
             bool lane = MathF.Abs(x - half) < LaneHalfWidth;
             Color c = lane ? dirt.Lerp(grass, 0.35f) : grass.Lerp(dirt, Math.Clamp((y - LandHeight) / 20f, 0, 0.4f));
             c = c.Lerp(rock, Math.Clamp(slope * 6f, 0, 1));
             // Beach sand at the waterline, darker seabed below.
-            var sand = new Color(0.64f, 0.58f, 0.43f);
-            var seabed = new Color(0.32f, 0.33f, 0.28f);
             if (y < LandHeight + 0.8f) c = c.Lerp(sand, Math.Clamp((LandHeight + 0.8f - y) / 1.5f, 0, 1));
             if (y < -1.5f) c = sand.Lerp(seabed, Math.Clamp((-1.5f - y) / 6f, 0, 1));
-            colors[i] = c;
+            // Earth that's been blown up or dug: raw dark soil.
+            if (stirred != null && stirred[i] > 0) c = c.Lerp(turned, stirred[i] * 0.85f);
+            colors[li] = c;
         }
 
-        var idx = new int[(n - 1) * (n - 1) * 6];
+        var idx = new int[Tile * Tile * 6];
         int k = 0;
-        for (int z = 0; z < n - 1; z++)
-        for (int x = 0; x < n - 1; x++)
+        for (int z = 0; z < Tile; z++)
+        for (int x = 0; x < Tile; x++)
         {
-            int a = z * n + x, b = a + 1, c = a + n, d = c + 1;
+            int a = z * m + x, b = a + 1, c = a + m, d = c + 1;
             idx[k++] = a;
             idx[k++] = b;
             idx[k++] = c;
@@ -170,4 +312,10 @@ public static class Terrain
         mesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays);
         return mesh;
     }
+}
+
+/// <summary>Applies the ground's changes once a frame.</summary>
+public partial class TerrainUpdater : Node
+{
+    public override void _PhysicsProcess(double delta) => Terrain.Flush();
 }

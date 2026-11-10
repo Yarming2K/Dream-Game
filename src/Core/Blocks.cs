@@ -94,6 +94,9 @@ public enum BlockKind
 
     /// <summary>An outrigger that braces a stopped land vehicle against the ground, so it can fire heavy weapons.</summary>
     Stabilizer,
+
+    /// <summary>A bulldozer blade: driving forward, it cuts the ground and pushes the earth ahead.</summary>
+    DozerBlade,
 }
 
 /// <summary>What a vertical launch cell holds.</summary>
@@ -1109,6 +1112,13 @@ public static class BlockCatalog
             Description = "Air-burst shells in bulk: 192 for a 128 mm heavy flak gun. If it goes up, so does whatever it's in.",
             MassKg = 6000, Hp = 600, ArmorMm = 10, Watertight = false, ColorR = 0.35f, ColorG = 0.38f, ColorB = 0.42f,
             Metallic = 0.5f, Roughness = 0.5f,
+        },
+        new BlockDef
+        {
+            Id = "dozer_blade", Name = "Dozer Blade (3×2×1)", Category = "Mobility", Kind = BlockKind.DozerBlade, Size = new Int3(3, 2, 1),
+            Description = "A bulldozer blade, on push arms. Mount it across the front, with its bottom row level with the tracks or wheels (put two or three side by side to be wider than the tracks). The driver lowers it with K: driving forward, it then cuts 25 cm below the tracks and shoves the earth ahead in a heap that grows as you go, which slows you. Each pass goes deeper, so you dig ramps, trenches and firing pits. Raised, it rides above the ground and pushes loose earth and heaps without digging. Heavy steel: it's armor too.",
+            MassKg = 900, Hp = 450, ArmorMm = 35, HasCollider = false, Watertight = false,
+            ColorR = 0.62f, ColorG = 0.5f, ColorB = 0.17f, Metallic = 0.65f, Roughness = 0.5f,
         },
         new BlockDef
         {
