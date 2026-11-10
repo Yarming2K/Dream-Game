@@ -479,6 +479,7 @@ public sealed class VehicleAnalysis
             // Railguns fire solid slugs only, rockets are all high explosive, and lasers need no ammo at all.
             if (def.Breech.Rail || def.Breech.Beam) gun.HeRounds = gun.FlakRounds = 0;
             if (def.Breech.Rocket) gun.ApRounds = gun.FlakRounds = 0;
+            if (def.Breech.AntiAir) gun.ApRounds = gun.HeRounds = 0;
             if (def.Breech.Beam) gun.ApRounds = 0;
             gun.Valid = gun.Barrels.Count > 0;
         }
@@ -1103,7 +1104,9 @@ public sealed class VehicleAnalysis
         if (loose > 0)
             Warnings.Add(new DesignWarning(Severity.Warning, $"{loose} block(s) aren't attached to the vehicle (shown in red) and will fall off."));
         foreach (GunInfo g in Guns.Where(g => g.Valid && !g.BreechDef.Breech.Beam && g.ApRounds + g.HeRounds + g.FlakRounds == 0))
-            Warnings.Add(new DesignWarning(Severity.Warning, $"The {g.Label} gun has no ammo. Put a rack touching the breech, or connect racks to it with Ammo Feeds."));
+            Warnings.Add(new DesignWarning(Severity.Warning, g.BreechDef.Breech.AntiAir
+                ? $"The {g.Label} gun has no flak. It fires nothing else: put a Flak Rack or Flak Magazine touching the breech, or connect one with Ammo Feeds."
+                : $"The {g.Label} gun has no ammo. Put a rack touching the breech, or connect racks to it with Ammo Feeds."));
     }
 
     /// <summary>Railguns and lasers need electricity made aboard, and room to store a shot.</summary>
@@ -1190,7 +1193,9 @@ public sealed class VehicleAnalysis
                     ? $"The {g.Label} has no slugs. Put an AP Rack touching the breech, or connect AP racks to it with Ammo Feeds."
                     : spec.Rocket
                         ? $"The {g.Label} have no rockets. Put an HE Rack touching the launcher, or connect HE racks to it with Ammo Feeds."
-                        : $"The {g.Label} gun has no ammo. Put an AP, HE or Flak Rack touching the breech, or connect racks to it with Ammo Feeds."));
+                        : spec.AntiAir
+                            ? $"The {g.Label} gun has no flak. It fires nothing else: put a Flak Rack or Flak Magazine touching the breech, or connect one with Ammo Feeds."
+                            : $"The {g.Label} gun has no ammo. Put an AP, HE or Flak Rack touching the breech, or connect racks to it with Ammo Feeds."));
             if (g.MuzzleBlocked)
                 Warnings.Add(new DesignWarning(Severity.Warning,
                     $"The {g.Label} gun's muzzle is blocked by a block right in front of it. It will shoot itself."));

@@ -215,6 +215,9 @@ public sealed class BreechSpec
     /// <summary>Fires on a high, plunging arc (mortars), not the flat one.</summary>
     public bool HighArc;
 
+    /// <summary>Anti-aircraft only: it fires flak and nothing else, and its gunners only ever shoot at aircraft.</summary>
+    public bool AntiAir;
+
     /// <summary>Lowest it can point (degrees). Mortars can't fire flat.</summary>
     public float MinElevationDeg = Mobility.MinElevationDeg;
 }
@@ -398,6 +401,22 @@ public static class BlockCatalog
         CaliberMm = 420, ShellMassKg = 800f, BaseVelocity = 260, BasePenMm = 80,
         ApDamage = 1500, HeDamage = 6500, HeRadiusM = 13f, ReloadS = 22f, ShellUnits = 32, DragK = 0.00002f,
         MaxElevationDeg = 80f, MinElevationDeg = 40f, HighArc = true, Heavy = true, Label = "420 mm Siege Mortar",
+    };
+
+    /// <summary>Heavy flak: a 128 mm anti-aircraft gun that fills kilometers of sky with huge bursts. Anti-aircraft only, and a heavy weapon.</summary>
+    public static readonly BreechSpec HeavyFlak128 = new()
+    {
+        CaliberMm = 128, ShellMassKg = 26f, BaseVelocity = 560, BasePenMm = 60,
+        ApDamage = 300, HeDamage = 1100, HeRadiusM = 5.5f, ReloadS = 3.5f, ShellUnits = 4, DragK = 0.00004f,
+        MaxElevationDeg = 88f, AntiAir = true, Heavy = true, Label = "128 mm Heavy Flak",
+    };
+
+    /// <summary>Heavy mortar: a 160 mm bomb lobbed high and fast, several kilometers. A heavy weapon.</summary>
+    public static readonly BreechSpec Mortar160 = new()
+    {
+        CaliberMm = 160, ShellMassKg = 40f, BaseVelocity = 220, BasePenMm = 30,
+        ApDamage = 200, HeDamage = 950, HeRadiusM = 6f, ReloadS = 6f, ShellUnits = 4, DragK = 0.00003f,
+        MaxElevationDeg = 85f, MinElevationDeg = 45f, HighArc = true, Heavy = true, Label = "160 mm Heavy Mortar",
     };
 
     /// <summary>Heavy railgun: a 120 mm slug at well over 3 km/s that goes through anything. 150 MJ a shot. A heavy weapon.</summary>
@@ -1068,6 +1087,28 @@ public static class BlockCatalog
             Description = "A heavy weapon: a big beam that burns missiles, bombs and aircraft out of the sky out to three or four kilometers, and anything else it's pointed at. Focusing Lenses in front, and 25 MW while it fires. Full rate from a building; on a land vehicle only stopped and braced.",
             MassKg = 9000, Hp = 700, ArmorMm = 30, Watertight = false,
             ColorR = 0.3f, ColorG = 0.32f, ColorB = 0.36f, Metallic = 0.75f, Roughness = 0.35f,
+        },
+        new BlockDef
+        {
+            Id = "breech_128flak", Name = "128 mm Heavy Flak", Category = "Weapons", Kind = BlockKind.Breech, Breech = HeavyFlak128,
+            Description = "A heavy anti-aircraft gun: flak only, and its gunners only ever shoot at aircraft, out to several kilometers with bursts the size of a house. A long run of Heavy Barrels in front (eight or so), fed from a Flak Magazine. Full rate from a building; on a land vehicle only stopped and braced.",
+            MassKg = 2600, Hp = 500, ArmorMm = 40, Watertight = false,
+            ColorR = 0.3f, ColorG = 0.32f, ColorB = 0.28f, Metallic = 0.8f, Roughness = 0.4f,
+        },
+        new BlockDef
+        {
+            Id = "mortar_160", Name = "160 mm Heavy Mortar", Category = "Weapons", Kind = BlockKind.Breech, Breech = Mortar160,
+            Description = "A heavy mortar: lobs a 40 kg bomb high onto targets several kilometers away, every six seconds. Two Heavy Barrels in front, fed from HE racks or magazines. Full rate from a building; on a land vehicle only stopped and braced.",
+            MassKg = 1800, Hp = 300, ArmorMm = 25, Watertight = false,
+            ColorR = 0.26f, ColorG = 0.28f, ColorB = 0.24f, Metallic = 0.8f, Roughness = 0.45f,
+        },
+        new BlockDef
+        {
+            Id = "magazine_flak", Name = "Flak Magazine (2×2×2)", Category = "Ammo", Kind = BlockKind.AmmoRack, Ammo = AmmoType.Flak, Size = new Int3(2, 2, 2),
+            AmmoUnits = 768,
+            Description = "Air-burst shells in bulk: 192 for a 128 mm heavy flak gun. If it goes up, so does whatever it's in.",
+            MassKg = 6000, Hp = 600, ArmorMm = 10, Watertight = false, ColorR = 0.35f, ColorG = 0.38f, ColorB = 0.42f,
+            Metallic = 0.5f, Roughness = 0.5f,
         },
         new BlockDef
         {

@@ -203,13 +203,13 @@ public partial class Combat : Node3D
         float burstAt = float.PositiveInfinity;
         if (p.FuseM > 0 && p.Travelled + len >= p.FuseM) burstAt = p.FuseM - p.Travelled;
         _near.Clear();
-        WorldQuery.HostsAlong(from, to, 8f, _near);
+        WorldQuery.HostsAlong(from, to, 8f + p.Shell.HeRadiusM, _near);
         foreach (IGridHost h in _near)
         {
             if (h is not VehicleBody v || h == p.Owner || !IsInstanceValid(v) || !v.IsAir || v.OnGround) continue;
             Vector3 c = v.GlobalTransform * v.CenterOfMass;
             float t = Mathf.Clamp((c - from).Dot(dir), 0, len);
-            if ((from + dir * t).DistanceTo(c) <= v.Radius * 0.45f + 3.5f) burstAt = Mathf.Min(burstAt, t);
+            if ((from + dir * t).DistanceTo(c) <= v.Radius * 0.45f + Mathf.Max(3.5f, p.Shell.HeRadiusM * 1.2f)) burstAt = Mathf.Min(burstAt, t);
         }
 
         p.Travelled += len;

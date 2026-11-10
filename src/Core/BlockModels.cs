@@ -355,6 +355,20 @@ public static class BlockModels
                 k.Bolts(10, 0.235f, 0.12f, 0.016f, 0.05f, Paint.Steel);
                 break;
 
+            case BlockKind.Breech when def.Breech.HighArc:
+                // A heavy mortar: a baseplate, a short thick breech in a cradle with recoil buffers, and an elevating screw.
+                k.Bevel(new Vector3(Full, 0.08f, Full), Paint.SelfDark, new Vector3(0, -0.21f, 0), 0.015f);
+                k.Cyl(0.16f, 0.36f, Paint.Self, new Vector3(0, 0.02f, 0.02f), AlongZ, sides: 22);
+                for (int i = 0; i < 3; i++) k.Cyl(0.175f, 0.03f, Paint.SelfDark, new Vector3(0, 0.02f, -0.1f + i * 0.1f), AlongZ, sides: 22);
+                foreach (float x in new[] { -0.2f, 0.2f })
+                {
+                    k.Box(new Vector3(0.05f, 0.3f, 0.3f), Paint.Self, new Vector3(x, -0.04f, 0.02f));
+                    k.Cyl(0.03f, 0.3f, Paint.Steel, new Vector3(x * 0.8f, 0.13f, 0.02f), AlongZ, sides: 10);
+                }
+
+                k.Cyl(0.03f, 0.22f, Paint.Steel, new Vector3(0, -0.1f, 0.2f), sides: 10);
+                break;
+
             case BlockKind.Breech when def.Breech.Rail:
                 // A boxy magnet housing with its coils lit, the two rails leaving the front, and the power feed behind.
                 k.Bevel(new Vector3(Full, 0.42f, Full), Paint.Self, new Vector3(0, -0.04f, 0));

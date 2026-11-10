@@ -27,6 +27,15 @@ public static class Terrain
     public static readonly Vector2 Helipad = new(-62f, 172f);
     public const float HelipadRadius = 11f;
 
+    /// <summary>
+    /// Level ground cut out of the eastern hills for the buildings that stand there: the coastal citadel, the
+    /// mortar battery and the flak tower.
+    /// </summary>
+    public static readonly Vector2 CitadelPad = new(CoastX - 32f, 60f), MortarPad = new(84f, 102f), FlakTowerPad = new(82f, 142f);
+    public const float PadRadius = 15f;
+
+    private static readonly Vector2[] Pads = { CitadelPad, MortarPad, FlakTowerPad };
+
     public static float HeightAt(FastNoiseLite noise, float x, float z)
     {
         float half = (Samples - 1) * 0.5f;
@@ -42,6 +51,8 @@ public static class Terrain
         float strip = (1f - Smooth(StripHalfWidth + 4f, StripHalfWidth + 30f, MathF.Abs(x - StripX))) *
                       (1f - Smooth(StripHalfLength, StripHalfLength + 30f, MathF.Abs(z)));
         float pad = 1f - Smooth(HelipadRadius + 3f, HelipadRadius + 25f, MathF.Sqrt((x - Helipad.X) * (x - Helipad.X) + (z - Helipad.Y) * (z - Helipad.Y)));
+        foreach (Vector2 p in Pads)
+            pad = MathF.Max(pad, 1f - Smooth(PadRadius, PadRadius + 22f, MathF.Sqrt((x - p.X) * (x - p.X) + (z - p.Y) * (z - p.Y))));
         land = LandHeight + (land - LandHeight) * (1f - MathF.Max(strip, pad));
         return SeabedDepth + (land - SeabedDepth) * island;
     }

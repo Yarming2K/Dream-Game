@@ -261,6 +261,16 @@ public partial class VehicleBody
             return _aaHasAim;
         }
 
+        // Heavy flak is for aircraft only: with none up, its crew keep it raised, watching the sky.
+        if (g.Info.BreechDef.Breech.AntiAir)
+        {
+            (Vector3 muzzle, Vector3 dir) = Muzzle(g);
+            var flat = new Vector3(dir.X, 0, dir.Z);
+            flat = flat.LengthSquared() > 0.01f ? flat.Normalized() : -GlobalTransform.Basis.Z;
+            aim = muzzle + flat * 60f + Vector3.Up * 90f;
+            return true;
+        }
+
         aim = _aiAim;
         return _aiHasAim;
     }
@@ -336,7 +346,7 @@ public partial class VehicleBody
         }
 
         GunRt lead = Guns.FirstOrDefault(g => g.Alive && g.Info.GunSection >= 0 && ControllerOf(g)?.Occupant == Occupant.Ai && !PlayerDirects(g) &&
-                                              !OnAirWatch(g) && !OnPdWatch(g));
+                                              !OnAirWatch(g) && !OnPdWatch(g) && !g.Info.BreechDef.Breech.AntiAir);
         if (lead == null)
         {
             _aiHasAim = false;
@@ -369,6 +379,7 @@ public partial class VehicleBody
         {
             if (!g.Alive || g.ReloadLeft > 0 || g.AimError > tolerance) continue;
             if (ControllerOf(g)?.Occupant != Occupant.Ai || PlayerDirects(g) || OnAirWatch(g) || OnPdWatch(g)) continue;
+            if (g.Info.BreechDef.Breech.AntiAir) continue;
             FireGun(g, false, AmmoFor(g));
         }
     }
@@ -474,10 +485,14 @@ public partial class VehicleBody
         // vehicle), nearest first, and only the first few get a line-of-sight check.
         // Air-defense missiles watch the sky as flak guns do, and further out.
         bool flak = HasFlak || HasSams;
-        float skyReach = HasSams ? 6000f : 2500f;
+        // Heavy flak reaches highest of all: its crews pick out bombers 7 km away.
+        float skyReach = HasHeavyFlak ? 7000f : HasSams ? 6000f : 2500f;
         // Big naval guns reach much further than a tank's: their gunners look out to 3 km.
-        // So do railguns and rocket artillery; lasers reach as far as their lenses focus.
-        float reach = Guns.Exists(g => g.Alive && (g.Stats.CaliberMm >= 150f || g.Info.BreechDef.Breech.Rail || g.Info.BreechDef.Breech.Rocket))
+        // So do railguns and rocket artillery; lasers reach as far as their lenses focus. Mortar crews
+        // look out to 4.5 km. Heavy flak doesn't look at the ground at all.
+        float reach = Guns.Exists(g => g.Alive && g.Info.BreechDef.Breech.HighArc) ? 4500f
+            : Guns.Exists(g => g.Alive && !g.Info.BreechDef.Breech.AntiAir &&
+                               (g.Stats.CaliberMm >= 150f || g.Info.BreechDef.Breech.Rail || g.Info.BreechDef.Breech.Rocket))
             ? 3000f
             : Mathf.Max(800f, Guns.Where(g => g.Alive).Select(g => g.Stats.BeamRangeM * 1.3f).DefaultIfEmpty(0).Max());
         _candidates.Clear();

@@ -124,6 +124,21 @@ public static class GunMath
         return true;
     }
 
+    /// <summary>
+    /// The muzzle speed a mortar crew loads for a target: full charge for far targets, fewer propellant bags
+    /// for near ones, so the bomb still comes down steeply (at <paramref name="angleDeg"/>) instead of sailing
+    /// over. Never less than a sixth of full charge.
+    /// </summary>
+    public static float LobSpeed(float fullSpeed, float horizontal, float height, float angleDeg = 70f)
+    {
+        float a = angleDeg * MathF.PI / 180f;
+        float cos = MathF.Cos(a);
+        float rise = horizontal * MathF.Tan(a) - height;
+        if (horizontal < 0.5f || rise <= 0) return fullSpeed;
+        float v = MathF.Sqrt(Gravity * horizontal * horizontal / (2f * cos * cos * rise));
+        return Math.Clamp(v, fullSpeed / 6f, fullSpeed);
+    }
+
     /// <summary>The high, plunging arc to the same point (mortars). False if out of range.</summary>
     public static bool SolveElevationHigh(float speed, float horizontal, float height, out float angle)
     {

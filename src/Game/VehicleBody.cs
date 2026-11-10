@@ -57,6 +57,9 @@ public partial class VehicleBody : RigidBody3D, IGridHost
         /// <summary>Energy weapons: waiting for the capacitors to hold a shot's worth.</summary>
         public bool Charging;
 
+        /// <summary>A mortar's charge for its current target: the muzzle speed it loads (0 = full charge).</summary>
+        public float Lob;
+
         /// <summary>Heavy weapons: waiting for the vehicle to stop and brace.</summary>
         public bool NeedsBrace;
 
@@ -398,7 +401,11 @@ public partial class VehicleBody : RigidBody3D, IGridHost
 
     public bool HasFlak => Guns.Any(g => g.Info.FlakRacks.Count > 0);
 
-    public static float ShellSpeed(GunRt g, AmmoType type) => type == AmmoType.AP ? g.Stats.MuzzleVelocity : g.Stats.HeVelocity;
+    /// <summary>Carries heavy anti-aircraft guns, which fire only flak and only at aircraft.</summary>
+    public bool HasHeavyFlak => Guns.Any(g => g.Alive && g.Info.BreechDef.Breech.AntiAir);
+
+    public static float ShellSpeed(GunRt g, AmmoType type) =>
+        type == AmmoType.AP ? g.Stats.MuzzleVelocity : g.Lob > 0 ? g.Lob : g.Stats.HeVelocity;
 
     public override void _PhysicsProcess(double delta)
     {
@@ -731,8 +738,11 @@ public partial class VehicleBody : RigidBody3D, IGridHost
             Vector3 to = aim - pivot;
             var flat = new Vector3(to.X, 0, to.Z);
             float dist = flat.Length();
-            float v = ShellSpeed(g, AmmoFor(g));
             bool high = g.Info.BreechDef.Breech.HighArc;
+            // Mortar crews load fewer propellant bags for near targets, so the bomb still plunges onto them.
+            g.Lob = 0;
+            float v = ShellSpeed(g, AmmoFor(g));
+            if (high) v = g.Lob = GunMath.LobSpeed(v, dist, to.Y);
             float elev;
             if (!(high ? GunMath.SolveElevationHigh(v, dist, to.Y, out elev) : GunMath.SolveElevation(v, dist, to.Y, out elev))) elev = Mathf.Pi / 4f;
             Vector3 dirW = dist > 0.01f ? flat / dist * Mathf.Cos(elev) + Vector3.Up * Mathf.Sin(elev) : Vector3.Up;
@@ -792,9 +802,9 @@ public partial class VehicleBody : RigidBody3D, IGridHost
         BreechSpec spec = g.Info.BreechDef.Breech;
         if (spec.Beam) return FireBeam(g, byPlayer);
 
-        // Railguns only fire slugs (AP), rocket launchers only high explosive.
-        AmmoType type = spec.Rail ? AmmoType.AP : spec.Rocket ? AmmoType.HE : ammo ?? SelectedAmmo;
-        if (!spec.Rail && !spec.Rocket && Rounds(g, type) == 0) type = ShellTypes.FirstOrDefault(t => Rounds(g, t) > 0, type);
+        // Railguns only fire slugs (AP), rocket launchers only high explosive, heavy flak only flak.
+        AmmoType type = spec.Rail ? AmmoType.AP : spec.Rocket ? AmmoType.HE : spec.AntiAir ? AmmoType.Flak : ammo ?? SelectedAmmo;
+        if (!spec.Rail && !spec.Rocket && !spec.AntiAir && Rounds(g, type) == 0) type = ShellTypes.FirstOrDefault(t => Rounds(g, t) > 0, type);
         if (Rounds(g, type) == 0) return false;
 
         (Vector3 muzzle, Vector3 dir) = Muzzle(g);
@@ -822,7 +832,7 @@ public partial class VehicleBody : RigidBody3D, IGridHost
         BreechSpec spec = g.Info.BreechDef.Breech;
         float speed = ShellSpeed(g, type);
         // Flak is fused to burst at the range of whatever the gun is aimed at; rockets are fused for the ground.
-        float fuse = type == AmmoType.Flak && AimFor(g, out Vector3 aimAt) ? Mathf.Clamp(muzzle.DistanceTo(aimAt), 40f, 4000f) : 0f;
+        float fuse = type == AmmoType.Flak && AimFor(g, out Vector3 aimAt) ? Mathf.Clamp(muzzle.DistanceTo(aimAt), 40f, 8000f) : 0f;
         Vector3 side = dir.Cross(Mathf.Abs(dir.Y) > 0.9f ? Vector3.Right : Vector3.Up).Normalized();
         int rounds = spec.Rocket ? 1 : g.Stats.Burst;
         for (int i = 0; i < rounds; i++)

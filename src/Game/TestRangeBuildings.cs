@@ -18,12 +18,17 @@ public partial class TestRange
 
     private static readonly Vector3 OutpostAt = new(46, Ground, 116);
 
+    /// <summary>The flak tower and the mortar battery stand on ground levelled for them in the eastern hills.</summary>
+    private static readonly Vector3 FlakTowerAt = new(Terrain.FlakTowerPad.X, Ground, Terrain.FlakTowerPad.Y),
+        MortarBatteryAt = new(Terrain.MortarPad.X, Ground, Terrain.MortarPad.Y);
+
     private (IGridHost host, BlockInstance bunk)? _bunk;
     private string _serviceNote = "";
 
     /// <summary>
-    /// Yours: the forward base by the depot, a siege battery behind it, and a coastal fort above the east
-    /// beach. The enemy's: a pillbox and a flak nest down the range.
+    /// Yours: the forward base by the depot, a siege battery behind it, a coastal fort above the east beach,
+    /// and a flak tower and a mortar battery in the hills east of the lane. The enemy's: a pillbox and a flak nest
+    /// down the range.
     /// </summary>
     private void AddBuildings()
     {
@@ -33,9 +38,15 @@ public partial class TestRange
         VehicleBody fortress = AddDummy(ExampleDesigns.SiegeFortress(), OutpostAt + new Vector3(8, 0, 48), 180f);
         fortress.Faction = 0;
         fortress.AddChild(Sign("SIEGE FORTRESS\n420 mm mortar on the roof", new Vector3(0, 10.5f, 0), 70));
-        VehicleBody citadel = AddDummy(ExampleDesigns.CoastalCitadel(), new Vector3(Terrain.CoastX - 32f, Ground, 60), -90f);
+        VehicleBody citadel = AddDummy(ExampleDesigns.CoastalCitadel(), new Vector3(Terrain.CitadelPad.X, Ground, Terrain.CitadelPad.Y), -90f);
         citadel.Faction = 0;
         citadel.AddChild(Sign("COASTAL CITADEL\nheavy railguns, laser tower", new Vector3(0, 19f, 0), 80));
+        VehicleBody tower = AddDummy(ExampleDesigns.FlakTower(), FlakTowerAt, 0f);
+        tower.Faction = 0;
+        tower.AddChild(Sign("FLAK TOWER\n8 × 128 mm heavy flak", new Vector3(0, 13.5f, 0), 80));
+        VehicleBody battery = AddDummy(ExampleDesigns.MortarBattery(), MortarBatteryAt, 0f);
+        battery.Faction = 0;
+        battery.AddChild(Sign("MORTAR BATTERY\n4 × 160 mm mortars", new Vector3(0, 5f, -6f), 64));
         AddDummy(ExampleDesigns.Pillbox(), new Vector3(-44, Ground, SpawnPoint.Z - 190f), 0f);
         AddDummy(ExampleDesigns.FlakNest(), new Vector3(48, Ground, SpawnPoint.Z - 230f), 30f);
     }
