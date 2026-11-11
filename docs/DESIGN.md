@@ -109,6 +109,18 @@ Command the units you aren't driving yourself, from a command ship, a command ve
   - **Drawing:** in batches per kind per 64 m patch; bushes stop being drawn at 260 m, small rocks at 420 m, trees at 1.1 km.
   - **Getting knocked down:** trunks and rocks are solid. A vehicle hitting a tree hard enough (mass × speed over about 18 tonne·m/s for a full-size tree: a tank at walking pace, not a light car) knocks it flat the way it was going. Bushes go flat under anything that drives over them. Blasts throw trees down away from them, and a tree whose ground is blown away falls over.
 
+- **The village** south-east of the lane, on ground levelled for it, joined to the lane by a dirt road that becomes its main street:
+  - two brick houses (one with timber gables), a brick cottage and a timber cottage, facing each other across the street;
+  - a timber barn at the north end;
+  - a brick chapel with a square tower by the crossroads;
+  - low brick garden walls along the street.
+
+  They're built from three new structure blocks:
+  - **Brick:** stops bullets, not shells; blast knocks it down.
+  - **Timber:** light, weak.
+  - **Roof tiles:** for the slopes.
+
+  Each comes in every shape. The paint shader draws them without textures (brick courses with mortar, each brick its own tone; boards with grain and seams; rounded tiles in rows) and weathers them with grime and mud, not chipped paint. The buildings have doors, windows, upper floors, gable roofs and chimneys, and fall apart like anything else built from blocks. Trees keep off the village and the roads.
 - **Ruts.** Wheels and tracks wear the grass under them down to dirt, and on to mud, wherever they drive within sight (600 m of the camera). Tracks wear more than tyres, and heavy machines more than light ones. One tank pass leaves a faint trail; a busy route becomes a dirt track. Wear only changes how the ground looks, so it just redraws its patch, without reshaping the ground or waking vehicles. It's in the rules code with the craters.
 - **Dust and mud.** Moving wheels and tracks throw up a low cloud of dust on dry ground, and clods of mud when it's raining or the ground's rutted, from the back of each side, close to the camera.
 - **Time of day and weather** (F6, F7 on the range; blended over a few seconds).

@@ -80,3 +80,28 @@ public class VegetationTests
         Assert.False(plants[3].Down);
     }
 }
+
+public class VillageTests
+{
+    [Fact]
+    public void EveryVillageBuildingStandsInOnePiece()
+    {
+        foreach (Blueprint bp in ExampleDesigns.Village)
+        {
+            VehicleAnalysis a = VehicleAnalysis.Analyze(bp);
+            GridModel g = GridModel.FromBlueprint(bp);
+            Assert.True(g.InstanceCount > 20, bp.Name);
+            Assert.Empty(Connectivity.FindDetached(g, KeepRule.Anchored));
+            Assert.Contains(bp.Blocks, b => b.Id.StartsWith("roof_tile") || b.Id.StartsWith("brick"));
+        }
+    }
+
+    [Fact]
+    public void AHouseHasARoofDoorAndWindows()
+    {
+        Blueprint bp = ExampleDesigns.Village[0];
+        Assert.Contains(bp.Blocks, b => b.Id == "door");
+        Assert.True(bp.Blocks.Count(b => b.Id == "glazing") >= 8);
+        Assert.True(bp.Blocks.Count(b => b.Id == "roof_tile_slope") >= 40);
+    }
+}

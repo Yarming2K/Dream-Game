@@ -43,6 +43,32 @@ public static class Terrain
 
     private static readonly Vector2[] Pads = { CitadelPad, MortarPad, FlakTowerPad };
 
+    /// <summary>The village: houses, a barn and a chapel along a main street, on ground levelled for them.</summary>
+    public static readonly Vector2 Village = new(97f, -112f);
+    public const float VillageRadius = 44f;
+
+    /// <summary>Dirt roads: from the firing lane out to the village, and its main street.</summary>
+    public static readonly (Vector2 a, Vector2 b)[] Roads =
+    {
+        (new Vector2(40f, -112f), new Vector2(122f, -112f)),
+        (new Vector2(97f, -158f), new Vector2(97f, -66f)),
+    };
+
+    /// <summary>How far a point is from the nearest road's middle line.</summary>
+    public static float RoadDistance(float x, float z)
+    {
+        float best = float.MaxValue;
+        var p = new Vector2(x, z);
+        foreach ((Vector2 a, Vector2 b) in Roads)
+        {
+            Vector2 ab = b - a;
+            float t = Mathf.Clamp((p - a).Dot(ab) / ab.LengthSquared(), 0f, 1f);
+            best = Mathf.Min(best, p.DistanceTo(a + ab * t));
+        }
+
+        return best;
+    }
+
     public static float HeightAt(FastNoiseLite noise, float x, float z)
     {
         float half = (Samples - 1) * 0.5f;
@@ -60,6 +86,7 @@ public static class Terrain
         float pad = 1f - Smooth(HelipadRadius + 3f, HelipadRadius + 25f, MathF.Sqrt((x - Helipad.X) * (x - Helipad.X) + (z - Helipad.Y) * (z - Helipad.Y)));
         foreach (Vector2 p in Pads)
             pad = MathF.Max(pad, 1f - Smooth(PadRadius, PadRadius + 22f, MathF.Sqrt((x - p.X) * (x - p.X) + (z - p.Y) * (z - p.Y))));
+        pad = MathF.Max(pad, 1f - Smooth(VillageRadius, VillageRadius + 30f, MathF.Sqrt((x - Village.X) * (x - Village.X) + (z - Village.Y) * (z - Village.Y))));
         land = LandHeight + (land - LandHeight) * (1f - MathF.Max(strip, pad));
         return SeabedDepth + (land - SeabedDepth) * island;
     }
@@ -362,6 +389,8 @@ void fragment() {
             bool lane = MathF.Abs(x - half) < LaneHalfWidth;
             // How much dirt, rock, sand and churned earth is here (the ground shader paints each).
             float dirt = lane ? 0.65f : Math.Clamp((y - LandHeight) / 20f, 0, 0.4f);
+            // The roads: packed dirt, about 5 m wide.
+            dirt = Math.Max(dirt, 1f - Smooth(2.2f, 3.4f, RoadDistance(x - half, z - half)));
             // Ruts: grass worn to dirt by wheels and tracks, and on to mud.
             float rut = worn != null ? worn[i] : 0f;
             dirt = Math.Max(dirt, rut * 0.9f);

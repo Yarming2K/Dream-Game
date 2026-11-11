@@ -1068,6 +1068,27 @@ public static class BlockCatalog
             MassKg = 260, Hp = 380, ArmorMm = 70, HeVulnerability = 0.7f,
             ColorR = 0.62f, ColorG = 0.61f, ColorB = 0.57f, Metallic = 0f, Roughness = 0.95f,
         },
+        new BlockDef
+        {
+            Id = "brick", Name = "Brick", Category = "Structure", Kind = BlockKind.Armor,
+            Description = "Brick laid in courses: houses, barns, garden walls. Stops bullets, not shells: a tank gun goes through and blast knocks it down (press V for its shapes).",
+            MassKg = 220, Hp = 240, ArmorMm = 35, HeVulnerability = 1.1f,
+            ColorR = 0.55f, ColorG = 0.31f, ColorB = 0.23f, Metallic = 0f, Roughness = 0.95f,
+        },
+        new BlockDef
+        {
+            Id = "timber", Name = "Timber", Category = "Structure", Kind = BlockKind.Armor,
+            Description = "Boarded timber: barns, sheds, floors and gables. Light and weak; little stops anything (press V for its shapes).",
+            MassKg = 60, Hp = 110, ArmorMm = 6, HeVulnerability = 1.4f,
+            ColorR = 0.42f, ColorG = 0.31f, ColorB = 0.21f, Metallic = 0f, Roughness = 0.9f,
+        },
+        new BlockDef
+        {
+            Id = "roof_tile", Name = "Roof Tiles", Category = "Structure", Kind = BlockKind.Armor,
+            Description = "Clay tiles on battens: the sloped roofs of houses (use its slope shapes, V). Light; shells go straight through.",
+            MassKg = 90, Hp = 90, ArmorMm = 4, HeVulnerability = 1.4f,
+            ColorR = 0.5f, ColorG = 0.24f, ColorB = 0.17f, Metallic = 0f, Roughness = 0.85f,
+        },
 
         // Heavy weapons
         new BlockDef
@@ -1295,7 +1316,7 @@ public static class BlockCatalog
         (BlockShape.Half, "half"), (BlockShape.Plate, "plate"), (BlockShape.Octagon, "octagon"),
     };
 
-    private static readonly string[] ShapedBases = { "armor_light", "armor_heavy", "armor_composite", "glazing", "airframe", "concrete" };
+    private static readonly string[] ShapedBases = { "armor_light", "armor_heavy", "armor_composite", "glazing", "airframe", "concrete", "brick", "timber", "roof_tile" };
 
     // After the lists above: static fields are set up in the order they're written.
     private static readonly Dictionary<string, BlockDef> ById = BuildIndex();

@@ -1439,6 +1439,156 @@ public static class ExampleDesigns
     public static IReadOnlyList<Blueprint> Buildings => new[]
         { Pillbox(), FlakNest(), Outpost(), SiegeFortress(), CoastalCitadel(), FlakTower(), MortarBattery() };
 
+    // ------------------------------------------------------------------ the village
+
+    /// <summary>The village's buildings: houses, a barn and a chapel. Civilian structures, no guns.</summary>
+    public static IReadOnlyList<Blueprint> Village => new[]
+    {
+        House("House (brick, two storeys)", 7, 9, 2, "brick", false),
+        House("House (brick and timber)", 6, 8, 2, "brick", true),
+        House("Cottage (brick)", 5, 7, 1, "brick", false),
+        House("Cottage (timber)", 5, 6, 1, "timber", true),
+        Barn(),
+        Chapel(),
+        GardenWall(12),
+    };
+
+    /// <summary>
+    /// A gable roof over walls <paramref name="halfW"/> cells either side of the middle across and
+    /// <paramref name="halfL"/> along, its eaves at height <paramref name="eaves"/>: tiled slopes on the long sides,
+    /// overhanging by a cell, the gable ends filled with <paramref name="gable"/>, tiles along the ridge.
+    /// </summary>
+    private static void GableRoof(Draft d, int halfW, int halfL, int eaves, string gable, string tiles = "roof_tile")
+    {
+        for (int k = 0; k <= halfW + 1; k++)
+        {
+            int y = eaves + 1 + k, left = -halfW - 1 + k, right = halfW + 1 - k;
+            if (left >= right)
+            {
+                d.Fill(0, 0, y, y, -halfL - 1, halfL + 1, tiles + "_half");
+                break;
+            }
+
+            d.FillSlope(left, left, y, y, -halfL - 1, halfL + 1, tiles + "_slope", new Int3(-1, 1, 0));
+            d.FillSlope(right, right, y, y, -halfL - 1, halfL + 1, tiles + "_slope", new Int3(1, 1, 0));
+            if (right - left > 1)
+                foreach (int z in new[] { -halfL, halfL })
+                    d.Fill(left + 1, right - 1, y, y, z, z, gable);
+        }
+    }
+
+    /// <summary>
+    /// A house: a slab floor, walls of <paramref name="wall"/> three metres a storey, windows along the long sides,
+    /// a door in the front (−z) gable end, an upper floor, a tiled gable roof, a chimney.
+    /// </summary>
+    public static Blueprint House(string name, int halfW, int halfL, int storeys, string wall, bool timberGable)
+    {
+        var d = new Draft();
+        int h = storeys * 6;
+        // Openings first, so the walls fill in round them.
+        d.Set(0, 1, -halfL, "door");
+        for (int s = 0; s < storeys; s++)
+        {
+            int y = s * 6 + 3;
+            for (int z = -halfL + 3; z <= halfL - 4; z += 4)
+                foreach (int x in new[] { -halfW, halfW })
+                    d.Fill(x, x, y, y + 1, z, z + 1, "glazing");
+            foreach (int x in new[] { -halfW + 2, halfW - 3 })
+                d.Fill(x, x + 1, y, y + 1, halfL, halfL, "glazing");
+            if (s > 0)
+                foreach (int x in new[] { -halfW + 2, halfW - 3 })
+                    d.Fill(x, x + 1, y, y + 1, -halfL, -halfL, "glazing");
+        }
+
+        d.Fill(-halfW, halfW, 0, 0, -halfL, halfL, "concrete");
+        d.Fill(-halfW, halfW, 1, h, -halfL, -halfL, wall);
+        d.Fill(-halfW, halfW, 1, h, halfL, halfL, wall);
+        d.Fill(-halfW, -halfW, 1, h, -halfL + 1, halfL - 1, wall);
+        d.Fill(halfW, halfW, 1, h, -halfL + 1, halfL - 1, wall);
+        for (int s = 1; s < storeys; s++) d.Fill(-halfW + 1, halfW - 1, s * 6, s * 6, -halfL + 1, halfL - 1, "timber");
+        d.Fill(-halfW + 1, halfW - 1, h, h, -halfL + 1, halfL - 1, "timber");
+        GableRoof(d, halfW, halfL, h, timberGable ? "timber" : wall);
+        // The chimney stack, up through the roof near the back.
+        d.Fill(halfW - 3, halfW - 2, h + 1, h + halfW + 2, halfL - 3, halfL - 2, "brick");
+        d.Set(-halfW + 1, h - 1, -halfL + 1, "lamp");
+        return d.Build(name);
+    }
+
+    /// <summary>A timber barn: wide and tall, double doors at each end, a tiled roof.</summary>
+    public static Blueprint Barn()
+    {
+        var d = new Draft();
+        const int halfW = 8, halfL = 12, h = 9;
+        foreach (int z in new[] { -halfL, halfL })
+            foreach (int x in new[] { -2, 0 })
+                d.Set(x, 1, z, "door");
+        d.Fill(-halfW, halfW, 0, 0, -halfL, halfL, "concrete");
+        d.Fill(-halfW, halfW, 1, h, -halfL, -halfL, "timber");
+        d.Fill(-halfW, halfW, 1, h, halfL, halfL, "timber");
+        d.Fill(-halfW, -halfW, 1, h, -halfL + 1, halfL - 1, "timber");
+        d.Fill(halfW, halfW, 1, h, -halfL + 1, halfL - 1, "timber");
+        // A brick plinth round the bottom.
+        d.Fill(-halfW, -halfW, 1, 1, -halfL + 1, halfL - 1, "brick");
+        d.Fill(halfW, halfW, 1, 1, -halfL + 1, halfL - 1, "brick");
+        d.Fill(-halfW + 1, halfW - 1, h, h, -halfL + 1, halfL - 1, "timber");
+        GableRoof(d, halfW, halfL, h, "timber");
+        return d.Build("Barn (timber)");
+    }
+
+    /// <summary>A brick chapel: a tall nave with long windows, and a square tower at the front with a flat top and parapet.</summary>
+    public static Blueprint Chapel()
+    {
+        var d = new Draft();
+        const int halfW = 6, halfL = 11, h = 11;
+        d.Set(0, 1, -halfL - 5, "door");
+        for (int z = -halfL + 3; z <= halfL - 4; z += 5)
+            foreach (int x in new[] { -halfW, halfW })
+                d.Fill(x, x, 3, 8, z, z + 1, "glazing");
+        d.Fill(-1, 0, 4, 8, halfL, halfL, "glazing");
+        d.Fill(-halfW, halfW, 0, 0, -halfL - 5, halfL, "concrete");
+        d.Fill(-halfW, halfW, 1, h, -halfL, -halfL, "brick");
+        d.Fill(-halfW, halfW, 1, h, halfL, halfL, "brick");
+        d.Fill(-halfW, -halfW, 1, h, -halfL + 1, halfL - 1, "brick");
+        d.Fill(halfW, halfW, 1, h, -halfL + 1, halfL - 1, "brick");
+        d.Fill(-halfW + 1, halfW - 1, h, h, -halfL + 1, halfL - 1, "timber");
+        GableRoof(d, halfW, halfL, h, "brick");
+        // The tower: 3 m square, 12 m tall, a belfry opening each side near the top, a parapet.
+        const int t = 3, top = 24;
+        foreach (int x in new[] { -1, 0 })
+        {
+            d.Fill(x, x, top - 4, top - 2, -halfL - 5, -halfL - 5, "glazing");
+            d.Fill(x, x, top - 4, top - 2, -halfL - 5 + 2 * t - 1, -halfL - 5 + 2 * t - 1, "glazing");
+        }
+
+        d.Fill(-t, t - 1, 1, top, -halfL - 5, -halfL - 5, "brick");
+        d.Fill(-t, t - 1, 1, top, -halfL - 5 + 2 * t - 1, -halfL - 5 + 2 * t - 1, "brick");
+        d.Fill(-t, -t, 1, top, -halfL - 4, -halfL - 5 + 2 * t - 2, "brick");
+        d.Fill(t - 1, t - 1, 1, top, -halfL - 4, -halfL - 5 + 2 * t - 2, "brick");
+        d.Fill(-t + 1, t - 2, top, top, -halfL - 4, -halfL - 5 + 2 * t - 2, "timber");
+        for (int x = -t; x <= t - 1; x += 2)
+        {
+            d.Set(x, top + 1, -halfL - 5, "brick");
+            d.Set(x, top + 1, -halfL - 5 + 2 * t - 1, "brick");
+        }
+
+        for (int z = -halfL - 5; z <= -halfL - 5 + 2 * t - 1; z += 2)
+        {
+            d.Set(-t, top + 1, z, "brick");
+            d.Set(t - 1, top + 1, z, "brick");
+        }
+
+        return d.Build("Chapel (brick)");
+    }
+
+    /// <summary>A garden wall of brick, 1 m high, <paramref name="length"/> cells long, capped.</summary>
+    public static Blueprint GardenWall(int length)
+    {
+        var d = new Draft();
+        d.Fill(0, length - 1, 0, 1, 0, 0, "brick");
+        d.Fill(0, length - 1, 2, 2, 0, 0, "brick_half");
+        return d.Build("Garden wall (brick)");
+    }
+
     /// <summary>
     /// Flak tower: a three-storey concrete keep 12.5 m square and 10 m high, built for one job: shutting the
     /// sky. On each corner of the roof a twin 128 mm heavy flak turret stands on its own raised platform,

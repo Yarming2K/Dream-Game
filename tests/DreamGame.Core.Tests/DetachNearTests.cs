@@ -97,8 +97,13 @@ public class DetachNearTests
         }
 
         Assert.True(quick >= 36, $"only {quick} of 40 answered without the full check");
-        // The full check takes over 100 ms here; forty quick ones should take a few milliseconds in all.
-        Assert.True(sw.Elapsed.TotalMilliseconds < 200, $"{sw.Elapsed.TotalMilliseconds:0} ms for 40 holes");
+        // Forty quick checks take less time than two full ones (each over 100 ms on this ship). Measured against
+        // the full check on the same machine, so a busy test run doesn't make it fail.
+        var full = Stopwatch.StartNew();
+        Connectivity.FindDetached(g, KeepRule.DriverSeat);
+        Connectivity.FindDetached(g, KeepRule.DriverSeat);
+        full.Stop();
+        Assert.True(sw.Elapsed < full.Elapsed, $"{sw.Elapsed.TotalMilliseconds:0} ms for 40 holes vs {full.Elapsed.TotalMilliseconds:0} ms for two full checks");
     }
 }
 

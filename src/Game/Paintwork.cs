@@ -42,6 +42,8 @@ uniform sampler2D grit : source_color, filter_linear_mipmap, repeat_enable;
 // Weathering (the game's look: worn, chipped, dirty). finish: 0 paint, 1 bare metal, 2 rubber, concrete and the like.
 uniform sampler2D wear_tex : filter_linear_mipmap, repeat_enable;
 uniform int finish = 0;
+// Building materials drawn into the surface: 1 brick courses, 2 timber boards, 3 clay roof tiles.
+uniform int masonry = 0;
 instance uniform float wear_amount = 0.7;
 instance uniform float mud_amount = 0.5;
 global uniform float wetness;
@@ -122,6 +124,37 @@ float fbm(vec3 q) {
 	return vnoise(q) * 0.6 + vnoise(q * 2.03 + vec3(17.0, 3.0, 9.0)) * 0.3 + vnoise(q * 4.07 + vec3(-7.0, 11.0, 5.0)) * 0.1;
 }
 
+// Brick laid in courses with mortar (each brick its own tone), boards with grain and seams, or rows of rounded
+// roof tiles, each row laid over the joints of the one below.
+vec3 masonry_color(vec3 col, vec3 p, vec3 n, vec2 uv) {
+	vec3 an = abs(n);
+	if (masonry == 1) {
+		if (an.y > 0.7) {
+			return col * (0.9 + 0.15 * vnoise(p * 9.0));
+		}
+		float row = floor(uv.y / 0.075);
+		float u = uv.x / 0.225 + mod(row, 2.0) * 0.5;
+		vec2 f = vec2(fract(u) * 0.225, fract(uv.y / 0.075) * 0.075);
+		float mortar = 1.0 - smoothstep(0.006, 0.012, min(f.x, f.y));
+		float tone = h01(ivec3(int(floor(u)), int(row), 7));
+		col *= 0.78 + 0.34 * tone;
+		return mix(col, vec3(0.6, 0.58, 0.53), mortar * 0.8);
+	}
+	if (masonry == 2) {
+		float b = uv.x / 0.15;
+		float seam = 1.0 - smoothstep(0.02, 0.06, min(fract(b), 1.0 - fract(b)));
+		float grain = vnoise(vec3(uv.x * 60.0, uv.y * 3.0, floor(b) * 7.0));
+		col *= (0.78 + 0.3 * grain) * (0.9 + 0.2 * h01(ivec3(int(floor(b)), 3, 11)));
+		return col * (1.0 - seam * 0.45);
+	}
+	float u = an.x > an.z ? p.z : p.x;
+	float row = floor(p.y / 0.11);
+	float cu = u / 0.2 + mod(row, 2.0) * 0.5;
+	float curve = sin(fract(cu) * 3.14159);
+	col *= (0.7 + 0.35 * curve) * (0.85 + 0.25 * h01(ivec3(int(floor(cu)), int(row), 5)));
+	return col * (1.0 - 0.3 * (1.0 - smoothstep(0.0, 0.12, fract(p.y / 0.11))));
+}
+
 vec3 pattern_color(vec3 p) {
 	if (pattern <= 1) {
 		return color_a;
@@ -187,6 +220,9 @@ void fragment() {
 			} else if (!per_part && n.y > 0.75) {
 				col = deck_color;
 			}
+		}
+		if (masonry > 0) {
+			col = masonry_color(col, p, n, uv);
 		}
 		if (panel_lines > 0.0) {
 			// Seams between the plates every meter, and streaks of grime running down the sides.
@@ -311,7 +347,9 @@ void fragment() {
         {
             SetLivery(m, l, def, waterline);
             m.SetShaderParameter("use_shade", true);
-            m.SetShaderParameter("panel_lines", def.Kind == BlockKind.Armor ? 1f : 0f);
+            m.SetShaderParameter("panel_lines", def.Kind == BlockKind.Armor && MasonryOf(def) == 0 ? 1f : 0f);
+            m.SetShaderParameter("masonry", MasonryOf(def));
+            m.SetShaderParameter("finish", (int)FinishOf(def));
             // The surface's corner shading averages a bit under 1, as with the plain materials.
             m.SetShaderParameter("darken", HullMesher.ShadeCompensation);
         });
@@ -325,7 +363,12 @@ void fragment() {
             m.SetShaderParameter("darken", dark ? 0.6f : 1f);
         });
 
-    private static Finish FinishOf(BlockDef def) => def.Id.StartsWith("concrete") ? Finish.Other : Finish.Paint;
+    private static string BaseOf(BlockDef def) => def.BaseId ?? def.Id;
+
+    /// <summary>Concrete, brick, timber and tiles aren't painted: they only get dirty.</summary>
+    private static Finish FinishOf(BlockDef def) => BaseOf(def) is "concrete" or "brick" or "timber" or "roof_tile" ? Finish.Other : Finish.Paint;
+
+    private static int MasonryOf(BlockDef def) => BaseOf(def) switch { "brick" => 1, "timber" => 2, "roof_tile" => 3, _ => 0 };
 
     /// <summary>Unpainted hull plating: the block's own color, worn like everything else.</summary>
     public static ShaderMaterial PlainPlating(BlockDef def) =>
@@ -336,9 +379,10 @@ void fragment() {
             m.SetShaderParameter("metal", def.Metallic);
             m.SetShaderParameter("rough", def.Roughness);
             m.SetShaderParameter("use_shade", true);
-            m.SetShaderParameter("panel_lines", def.Kind == BlockKind.Armor && FinishOf(def) == Finish.Paint ? 0.6f : 0f);
+            m.SetShaderParameter("panel_lines", def.Kind == BlockKind.Armor && FinishOf(def) == Finish.Paint && MasonryOf(def) == 0 ? 0.6f : 0f);
             m.SetShaderParameter("darken", HullMesher.ShadeCompensation);
             m.SetShaderParameter("finish", (int)FinishOf(def));
+            m.SetShaderParameter("masonry", MasonryOf(def));
         });
 
     /// <summary>An unpainted part: a color and a finish (painted, bare metal, or rubber and the like).</summary>

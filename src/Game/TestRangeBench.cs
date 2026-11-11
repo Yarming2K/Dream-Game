@@ -34,6 +34,14 @@ public partial class TestRange
                                       string.Join(",", Perf.Names.Select(n => n.Replace(' ', '_') + "_ms")) + "\n");
         for (int i = 0; i < Perf.Names.Length; i++) Perf.Take(i, out _);
         foreach (int s in new[] { 3, (int)(Bench.Seconds / 2), (int)Bench.Seconds - 2 }) _benchShotAt.Add(s);
+        if (Bench.Scene == "village" && Mounted)
+        {
+            _mount.GlobalPosition = new Vector3(Terrain.Village.X - 6f, Ground + 1.5f, Terrain.Village.Y - 5f);
+            _follow = _mount.GlobalPosition;
+            _dist = 38f;
+            for (int i = 0; i < 8; i++) _benchShotAt.Add((int)(BenchWarmup + 1 + i * (Bench.Seconds - BenchWarmup - 2) / 8f));
+        }
+
         if (Bench.Scene == "look")
         {
             // Eight shots on the way round, close in.
@@ -94,6 +102,10 @@ public partial class TestRange
             case "look":
                 _yaw += dt * Mathf.Tau / Mathf.Max(Bench.Seconds - BenchWarmup, 5f);
                 _pitch = -0.32f;
+                break;
+            case "village":
+                _yaw += dt * Mathf.Tau / Mathf.Max(Bench.Seconds - BenchWarmup, 5f);
+                _pitch = -0.38f;
                 break;
             case "drill" or "bigdrill" or "idle":
                 _yaw += dt * 0.08f;

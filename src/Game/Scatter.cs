@@ -114,7 +114,7 @@ void fragment() {
         foreach (Node c in n.GetChildren()) Collect(c);
     }
 
-    /// <summary>Where nothing grows: the firing lane and everything on it, the airstrip, the helipad, the building pads.</summary>
+    /// <summary>Where nothing grows: the firing lane and everything on it, the airstrip, the helipad, the building pads, the village and the roads.</summary>
     private static bool KeepClear(float x, float z)
     {
         if (MathF.Abs(x) < Terrain.LaneHalfWidth + 8f) return true;
@@ -122,7 +122,8 @@ void fragment() {
         if (new Vector2(x, z).DistanceTo(Terrain.Helipad) < Terrain.HelipadRadius + 15f) return true;
         foreach (Vector2 p in new[] { Terrain.CitadelPad, Terrain.MortarPad, Terrain.FlakTowerPad })
             if (new Vector2(x, z).DistanceTo(p) < Terrain.PadRadius + 14f) return true;
-        return false;
+        if (new Vector2(x, z).DistanceTo(Terrain.Village) < Terrain.VillageRadius + 4f) return true;
+        return Terrain.RoadDistance(x, z) < 6f;
     }
 
     // ------------------------------------------------------------------ drawing

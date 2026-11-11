@@ -30,8 +30,34 @@ public partial class TestRange
     /// and a flak tower and a mortar battery in the hills east of the lane. The enemy's: a pillbox and a flak nest
     /// down the range.
     /// </summary>
+    /// <summary>
+    /// The village south-east of the lane: houses facing each other across the main street behind garden walls, a
+    /// chapel by the crossroads, a barn at the north end. All brick, timber and tile: shells go through them and
+    /// knock them down.
+    /// </summary>
+    private void AddVillage()
+    {
+        IReadOnlyList<Blueprint> v = ExampleDesigns.Village;
+        float x = Terrain.Village.X, z = Terrain.Village.Y;
+        (int design, float dx, float dz, float yaw)[] layout =
+        {
+            (0, -13f, -26f, -90f), (1, 13f, -26f, 90f), (2, -13f, 24f, -90f), (3, 13f, 24f, 90f),
+            (4, 15f, 36f, 0f), (5, -21f, 12f, 0f),
+            (6, -6f, -38f, 90f), (6, 6f, -38f, 90f), (6, -6f, 32f, 90f), (6, 6f, 32f, 90f),
+        };
+        foreach ((int design, float dx, float dz, float yaw) in layout)
+        {
+            StructureBody s = StructureBody.Create(v[design], new Transform3D(new Basis(Vector3.Up, Mathf.DegToRad(yaw)), new Vector3(x + dx, Ground, z + dz)), v[design].Name);
+            AddChild(s);
+            _targets.Add(s);
+        }
+
+        AddChild(Sign("VILLAGE", new Vector3(x - 5f, Ground + 4f, z - 6f), 72));
+    }
+
     private void AddBuildings()
     {
+        AddVillage();
         VehicleBody outpost = AddDummy(ExampleDesigns.Outpost(), OutpostAt, 90f);
         outpost.Faction = 0;
         outpost.AddChild(Sign("OUTPOST\nsupplies, repairs, bunks", new Vector3(0, 5.2f, 0), 60));

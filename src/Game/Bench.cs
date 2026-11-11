@@ -17,6 +17,7 @@ namespace DreamGame.Game;
 /// <item>drill / bigdrill: the battle drill (about 100 / 200 vehicles), watched from the depot.</item>
 /// <item>look: the camera circles one machine close up (--design=Warden by default) and takes screenshots all
 /// round, for checking how things look.</item>
+/// <item>village: the Warden at the village crossroads, the camera circling wide to take in the houses.</item>
 /// </list>
 /// </summary>
 public static class Bench
@@ -30,7 +31,7 @@ public static class Bench
 
     public static bool Active => Scene != null;
 
-    public static readonly string[] Scenes = { "idle", "deck", "jet", "drill", "bigdrill", "look" };
+    public static readonly string[] Scenes = { "idle", "deck", "jet", "drill", "bigdrill", "look", "village" };
 
     public static void Parse(string[] args)
     {
