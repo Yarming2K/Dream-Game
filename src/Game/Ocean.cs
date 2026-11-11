@@ -19,6 +19,11 @@ uniform vec4 deep_color : source_color = vec4(0.03, 0.13, 0.21, 1.0);
 uniform sampler2D depth_tex : hint_depth_texture, filter_linear_mipmap;
 // How rough the sea is (the weather sets it): 1 is a calm day.
 global uniform float sea_state;
+uniform sampler2D ripples : hint_normal, filter_linear_mipmap, repeat_enable;
+uniform sampler2D foam_tex : filter_linear_mipmap, repeat_enable;
+
+varying vec2 wxz;
+varying float crest;
 
 vec3 waves(vec2 p) {
 	// Height, d/dx, d/dz of three rolling swells.
@@ -39,6 +44,8 @@ void vertex() {
 	vec3 world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 	vec3 w = waves(world.xz);
 	VERTEX.y += w.x;
+	wxz = world.xz;
+	crest = w.x / max(0.36 * sea_state, 0.01);
 	NORMAL = normalize(vec3(-w.y, 1.0, -w.z));
 }
 
@@ -49,6 +56,18 @@ void fragment() {
 	float thickness = clamp(VERTEX.z - behind.z, 0.0, 200.0);
 	float deep = clamp(thickness / 7.0, 0.0, 1.0);
 	float foam = (1.0 - smoothstep(0.0, 0.7, thickness)) * 0.65;
+	float speck = texture(foam_tex, wxz * 0.09).r;
+	// Surf: bands of foam rolling in over the shallows.
+	float surf = (1.0 - smoothstep(0.3, 3.0, thickness)) * smoothstep(0.6, 0.9, sin(thickness * 2.6 - TIME * 1.5) * 0.5 + 0.5);
+	foam = max(foam, surf * (0.4 + 0.5 * speck));
+	// Whitecaps on the crests when the sea is rough.
+	float caps = smoothstep(0.55, 0.85, crest) * clamp(sea_state - 1.2, 0.0, 1.0) * smoothstep(0.45, 0.7, speck);
+	foam = max(foam, caps * 0.8);
+	// Ripples: two layers of fine waves drifting different ways.
+	vec3 r1 = texture(ripples, wxz * 0.045 + TIME * vec2(0.012, 0.007)).rgb;
+	vec3 r2 = texture(ripples, wxz * 0.12 - TIME * vec2(0.009, 0.014)).rgb;
+	NORMAL_MAP = normalize(mix(r1, r2, 0.5) * 2.0 - 1.0) * 0.5 + 0.5;
+	NORMAL_MAP_DEPTH = 0.35 + 0.25 * sea_state;
 	float facing = clamp(dot(NORMAL, VIEW), 0.0, 1.0);
 	float fresnel = pow(1.0 - facing, 4.0);
 	vec3 col = mix(shallow_color.rgb, deep_color.rgb, deep);
@@ -63,6 +82,16 @@ void fragment() {
     public static MeshInstance3D Build()
     {
         var mat = new ShaderMaterial { Shader = new Shader { Code = WaterCode } };
+        mat.SetShaderParameter("ripples", new NoiseTexture2D
+        {
+            Width = 512, Height = 512, Seamless = true, AsNormalMap = true, BumpStrength = 6f, GenerateMipmaps = true,
+            Noise = new FastNoiseLite { NoiseType = FastNoiseLite.NoiseTypeEnum.SimplexSmooth, Frequency = 0.02f, FractalOctaves = 4, Seed = 9 },
+        });
+        mat.SetShaderParameter("foam_tex", new NoiseTexture2D
+        {
+            Width = 256, Height = 256, Seamless = true, GenerateMipmaps = true,
+            Noise = new FastNoiseLite { NoiseType = FastNoiseLite.NoiseTypeEnum.Cellular, Frequency = 0.05f, FractalOctaves = 2, Seed = 13 },
+        });
         // Fine near the island, coarse far away (the far sea is mostly seen at a grazing angle).
         var root = new MeshInstance3D
         {
