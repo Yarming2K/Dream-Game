@@ -197,6 +197,14 @@ Blasts of 7 m and up (reactors, strike missiles, magazines) get the full treatme
 ### Jets
 Jets push on their own at any speed. Opening the throttle all the way lights the **afterburners**: 60% more thrust for three and a half times the fuel, a long bright flame and a note on the HUD. Every jet shows its exhaust, and how it looks follows the throttle: at cruise only a faint glow and a shimmer of hot air behind the nozzle; at full power a short pale blue-white cone; on afterburner a long yellow-orange plume with bright shock diamonds pulsing in its core, coming in over half a second rather than all at once. The flame is soft (it fades at its edges and toward its tip and flickers), and the heat haze bends whatever is behind it. The **Falcon** is the example jet fighter: swept wings with strakes along the nose, two jets in the tail, wing-root cannon and radar missiles.
 
+**Planned (after graphics pass 1): faster by design, not by stacking.** Going faster should come from building better, not from bolting on more engines. Three parts:
+
+1. **Jets built from parts**, in a line like a gun: an intake (simple, or a heavier ramp intake for high speed), an optional front fan (a turbofan: more push at low speed and far less fuel, lower top speed), compressor stages (more thrust and better economy each, with diminishing returns), turbine stages that drive them (too few and the engine runs hot and loses power), an optional afterburner section (longer: bigger boost, thirstier), and a nozzle (fixed and cheap, or variable: heavier, but needed to go supersonic and for the full afterburner). A well-built engine gives more thrust per tonne and per litre than a pile of simple ones, and every extra engine adds drag. The builder shows thrust, fuel use, heat and top speed as parts go on. The nozzle petals open when the afterburner lights. The single jet block stays as a ready-made engine.
+2. **Streamlining.** Drag depends on the shape facing the wind: flat faces cost the most, slopes about half, nose cones and fairings much less, plus a little for surface area. Top speed is where thrust meets drag, and drag grows with the square of speed, so a clean shape is worth as much as a lot of extra thrust. Applies to every aircraft, and later to ships and fast ground vehicles.
+3. **Engine tuning and heat.** Each engine has a setting: normal, military or emergency power. Emergency gives about 15% more thrust, but the engine heats up; run it too long and it loses power, then takes damage, then can catch fire.
+
+Later, with research and industry: better turbine alloys that run hotter (more thrust per stage), and ramjets that do nothing standing still but push hard at high speed.
+
 ### Damage
 - **AP rounds** trace through the block grid. Each block's armor is scaled by the impact angle (`thickness / cos(angle)`). If penetration is greater, the block takes damage and the shell keeps going with the remaining penetration. At steep angles, shells ricochet.
 - **HE rounds** explode on impact. Damage falls off with distance, and armor reduces it.
@@ -363,6 +371,16 @@ The goal is hundreds of vehicles and thousands of shells in the air at once, on 
 - **Level of detail:** full block simulation near players, with gunners thinking less often, simpler far models and lighter effects further out (see *Big battles*). Far-off battles beyond the map will use the core stat math with no physics.
 
 ## Roadmap
+
+### What's next, in order
+1. **Graphics pass 1: models, effects and environment** *(in progress)*. Done: weathering on everything, the Blender part library, trees, bushes and rocks you can knock down, time of day and weather, ground and roads, the village, a livelier sea, tyre ruts, the new jet exhaust, and the frame-rate fixes from the first PC benchmarks. Still to do: the full check on the owner's PC and fixing what it finds, then the remaining frame-rate work (simpler collision shapes, cheaper ship floating).
+2. **Game mechanics**: jets built from parts, streamlining, engine tuning and heat (see Jets).
+3. **Campaign planning**: what the campaign is, built on the environment from pass 1.
+4. **Campaign building**: industry and the planet war (milestones 4 and 5 below).
+5. **If we're in a good spot**: multiplayer (co-op first) and easier creation, somewhere between campaign planning and graphics pass 2.
+6. **Graphics pass 2: explosions, satisfying destruction and UI**, when the campaign starts to need more UI.
+
+### Milestones
 
 Each milestone is playable on its own.
 
