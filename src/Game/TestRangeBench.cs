@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -44,6 +45,13 @@ public partial class TestRange
             }
         }
         GD.Print($"[bench] {Bench.Scene} for {Bench.Seconds:0} s · window {GetWindow().Size.X}×{GetWindow().Size.Y} · {Display.Describe()} · results in {_benchDir}");
+
+        if (_atmosphere != null)
+        {
+            Atmosphere.Time? t = Enum.TryParse(Bench.Time, true, out Atmosphere.Time tt) ? tt : null;
+            Atmosphere.Weather? w = Enum.TryParse(Bench.Weather, true, out Atmosphere.Weather ww) ? ww : null;
+            if (t != null || w != null) _atmosphere.Set(t, w);
+        }
 
         if (Bench.Scene is "drill" or "bigdrill")
         {

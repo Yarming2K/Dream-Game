@@ -30,6 +30,8 @@ public static class GameInput
         AddKeys("vtol", Key.V);
         AddKeys("perf_overlay", Key.F3);
         AddKeys("render_scale", Key.F4);
+        AddKeys("time_of_day", Key.F6);
+        AddKeys("weather", Key.F7);
         AddKeys("battle_drill", Key.F8);
         AddKeys("tactical_map", Key.M);
         AddKeys("lights", Key.H);

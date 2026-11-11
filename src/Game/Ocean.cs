@@ -17,6 +17,8 @@ render_mode blend_mix, depth_draw_always, cull_disabled, specular_schlick_ggx;
 uniform vec4 shallow_color : source_color = vec4(0.18, 0.46, 0.47, 1.0);
 uniform vec4 deep_color : source_color = vec4(0.03, 0.13, 0.21, 1.0);
 uniform sampler2D depth_tex : hint_depth_texture, filter_linear_mipmap;
+// How rough the sea is (the weather sets it): 1 is a calm day.
+global uniform float sea_state;
 
 vec3 waves(vec2 p) {
 	// Height, d/dx, d/dz of three rolling swells.
@@ -24,7 +26,7 @@ vec3 waves(vec2 p) {
 	vec2 d2 = normalize(vec2(-0.4, 1.0));
 	vec2 d3 = normalize(vec2(0.7, -0.7));
 	float f1 = 0.11, f2 = 0.2, f3 = 0.45;
-	float a1 = 0.22, a2 = 0.1, a3 = 0.04;
+	float a1 = 0.22 * sea_state, a2 = 0.1 * sea_state, a3 = 0.04 * sea_state;
 	float s1 = dot(p, d1) * f1 + TIME * 1.0;
 	float s2 = dot(p, d2) * f2 + TIME * 1.6;
 	float s3 = dot(p, d3) * f3 + TIME * 2.4;

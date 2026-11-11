@@ -34,6 +34,8 @@ render_mode cull_disabled;
 uniform bool leaves = true;
 uniform sampler2D clumps : filter_linear_mipmap, repeat_enable;
 uniform sampler2D grain : filter_linear_mipmap, repeat_enable;
+global uniform float wind;
+global uniform float wetness;
 
 varying vec3 wpos;
 varying vec2 tint;
@@ -43,7 +45,7 @@ void vertex() {
 	// Sway: each plant at its own pace, the tips most.
 	vec3 base = MODEL_MATRIX[3].xyz;
 	float phase = base.x * 0.31 + base.z * 0.17 + INSTANCE_CUSTOM.y * 6.28;
-	float sway = COLOR.a * (sin(TIME * 1.3 + phase) * 0.6 + sin(TIME * 2.9 + phase * 1.7) * 0.25);
+	float sway = COLOR.a * wind * (sin(TIME * (0.9 + wind * 0.6) + phase) * 0.6 + sin(TIME * 2.9 + phase * 1.7) * 0.25);
 	VERTEX.x += sway * 0.18;
 	VERTEX.z += sway * 0.1;
 	wpos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
@@ -73,7 +75,7 @@ void fragment() {
 		col *= 0.7 + 0.5 * g;
 		ROUGHNESS = 0.95;
 	}
-	ALBEDO = col;
+	ALBEDO = col * (1.0 - 0.25 * wetness);
 }
 ";
 

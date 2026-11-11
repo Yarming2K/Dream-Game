@@ -240,6 +240,7 @@ render_mode cull_disabled;
 uniform sampler2D blotch : filter_linear_mipmap, repeat_enable;
 uniform sampler2D grain : filter_linear_mipmap, repeat_enable;
 uniform float land = 3.0;
+global uniform float wetness;
 
 varying vec3 wpos;
 varying vec3 wnrm;
@@ -298,6 +299,10 @@ void fragment() {
 	turned = mix(turned, vec3(0.33, 0.27, 0.19), smoothstep(0.72, 0.8, speck) * 0.7);
 	col = mix(col, turned, smoothstep(0.1, 0.5, COLOR.a + (fine - 0.5) * 0.3));
 
+	// Rain darkens the ground and makes it shine, most where it's flat.
+	float wetnow = wetness * (0.6 + 0.4 * smoothstep(0.85, 0.98, wnrm.y));
+	col *= 1.0 - 0.35 * wetnow;
+	rough = mix(rough, 0.3, wetnow * 0.75);
 	ALBEDO = col;
 	ROUGHNESS = rough;
 	METALLIC = 0.0;

@@ -26,6 +26,7 @@ public static class Bench
     public static string Out;
     public static bool FullRes;
     public static string DesignName;
+    public static string Time, Weather;
 
     public static bool Active => Scene != null;
 
@@ -53,6 +54,12 @@ public static class Bench
                     break;
                 case "design":
                     DesignName = value;
+                    break;
+                case "time":
+                    Time = value;
+                    break;
+                case "weather":
+                    Weather = value;
                     break;
             }
         }

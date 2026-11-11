@@ -109,6 +109,16 @@ Command the units you aren't driving yourself, from a command ship, a command ve
   - **Drawing:** in batches per kind per 64 m patch; bushes stop being drawn at 260 m, small rocks at 420 m, trees at 1.1 km.
   - **Getting knocked down:** trunks and rocks are solid. A vehicle hitting a tree hard enough (mass × speed over about 18 tonne·m/s for a full-size tree: a tank at walking pace, not a light car) knocks it flat the way it was going. Bushes go flat under anything that drives over them. Blasts throw trees down away from them, and a tree whose ground is blown away falls over.
 
+- **Time of day and weather** (F6, F7 on the range; blended over a few seconds).
+  - **Sky:** a sky of its own, with a gradient, a glow round the sun, clouds that drift and are lit from the sun's side, stars at night, and the far sea in haze below the horizon.
+  - **Times:** morning (low warm sun from the east), noon, evening (low orange sun in the west) and night (a dim blue moon, stars, dark haze; headlights and lamps matter).
+  - **Weather:**
+    - **Clear.**
+    - **Overcast:** grey sky, weak sun, more haze, more wind and swell.
+    - **Rain:** streaks falling round the camera. The ground, paint and leaves get wet over about twenty seconds (darker and shinier) and dry over a minute. Strong wind in the trees and a rough sea.
+    - **Fog:** thick haze, still air, a flat sea.
+  - **Shared settings:** wetness, wind and sea state are shared shader settings that the ground, paint, trees and sea all read. Benchmark runs take `--time=` and `--weather=`.
+
 ### Style rules
 What every part should follow, so a design reads as one machine however odd it is:
 1. **Flat faces, chamfered edges.** Curves only where something turns or holds pressure: wheels, barrels, tanks, rotors, round hulls.

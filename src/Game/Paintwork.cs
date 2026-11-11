@@ -44,6 +44,7 @@ uniform sampler2D wear_tex : filter_linear_mipmap, repeat_enable;
 uniform int finish = 0;
 instance uniform float wear_amount = 0.7;
 instance uniform float mud_amount = 0.5;
+global uniform float wetness;
 
 varying vec3 lpos;
 varying vec3 lnrm;
@@ -201,6 +202,11 @@ void fragment() {
 			float shade = use_shade ? COLOR.r : 1.0;
 			weather(col, m, r, p, n, 1.0 - COLOR.a, wear_amount, mud_amount, shade);
 		}
+	}
+	if (!glass) {
+		// Rain: darker, glossier paint.
+		col *= 1.0 - 0.18 * wetness;
+		r = mix(r, 0.22, wetness * 0.6);
 	}
 	col *= g;
 	if (use_shade) {

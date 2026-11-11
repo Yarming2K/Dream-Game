@@ -46,6 +46,7 @@ public partial class TestRange : Node3D
     private VehicleBody _lock;
 
     private Godot.Environment _env;
+    private Atmosphere _atmosphere;
     private float _airFogDensity;
     private Color _airFogColor;
     private ColorRect _underwaterTint;
@@ -119,6 +120,15 @@ public partial class TestRange : Node3D
         _env = Scenery.AddSkyAndSun(this, true);
         _airFogDensity = _env.FogDensity;
         _airFogColor = _env.FogLightColor;
+        // Time of day and weather (F6, F7): its own sky, the sun or moon, fog, wind, rain.
+        _atmosphere = new Atmosphere { Name = "Atmosphere" };
+        AddChild(_atmosphere);
+        foreach (Node n in GetChildren())
+            if (n is DirectionalLight3D sunLight)
+            {
+                _atmosphere.Setup(_env, sunLight);
+                break;
+            }
         AddChild(Terrain.Build());
         AddChild(Ocean.Build());
         AddRamps();
@@ -972,6 +982,12 @@ public partial class TestRange : Node3D
         bool under = cam.GlobalPosition.Y < Ocean.Level - 0.05f;
         _underwaterTint.Visible = under;
         float height = Mathf.Max(0f, cam.GlobalPosition.Y - 20f);
+        if (_atmosphere != null)
+        {
+            _airFogDensity = _atmosphere.FogDensity;
+            _airFogColor = _atmosphere.FogColor;
+        }
+
         _env.FogDensity = under ? 0.075f : _airFogDensity / (1f + height / 150f);
         _env.FogLightColor = under ? new Color(0.05f, 0.22f, 0.26f) : _airFogColor;
         _env.FogSkyAffect = under ? 1f : 0.3f;
@@ -1093,6 +1109,16 @@ public partial class TestRange : Node3D
         }
         else if (e.IsActionPressed("live_fire")) ToggleLiveFire();
         else if (e.IsActionPressed("battle_drill")) ToggleDrill();
+        else if (e.IsActionPressed("time_of_day") && _atmosphere != null)
+        {
+            _atmosphere.NextTime();
+            Big(_atmosphere.Describe());
+        }
+        else if (e.IsActionPressed("weather") && _atmosphere != null)
+        {
+            _atmosphere.NextWeather();
+            Big(_atmosphere.Describe());
+        }
         else if (e.IsActionPressed("perf_overlay")) _perf.Toggle();
         else if (e.IsActionPressed("to_builder")) ExitRequested?.Invoke();
         else if (e.IsActionPressed("help")) _help.Visible = !_help.Visible;
@@ -1438,6 +1464,7 @@ public partial class TestRange : Node3D
             "L live fire: the parked vehicles' crews shoot back · T reset targets · Backspace respawn · Tab builder · Esc free the mouse\n" +
             "M tactical map (fleet command), from a vehicle with a command console or at the command post by the depot: pick units, right click to attack, escort or move them in formation; J jumps into one; Deploy calls more in\n" +
             "F8 battle drill: two armies (about 100 vehicles; again for about 200, again to clear) fight across the range · F3 performance readout · F4 full-resolution 3D on or off\n" +
+            "F6 time of day (morning, noon, evening, night) · F7 weather (clear, overcast, rain, fog)\n" +
             "[color=#73f27f]PEN[/color] got through · [color=#ff6b61]NO PEN[/color] armor stopped it (angled armor counts as thicker) · " +
             "[color=#ffcc66]RICOCHET[/color] bounced off a steep angle";
         helpCol.AddChild(text);
