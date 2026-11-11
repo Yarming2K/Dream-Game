@@ -4,6 +4,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text;
+using DreamGame.Core;
 using Godot;
 
 namespace DreamGame.Game;
@@ -74,7 +75,9 @@ public partial class TestRange
     private void BenchTick(float dt)
     {
         if (_benchDone) return;
+        float before = _benchT;
         _benchT += dt;
+        if (Bench.Scene == "look" && before < 6f && _benchT >= 6f) DumpSections();
         // Keep the game from waiting on a click to capture the mouse.
         _holdFire = true;
 
@@ -93,7 +96,8 @@ public partial class TestRange
             case "jet" when Mounted:
                 // Take off down the runway, climb to about 400 m, then circle.
                 float alt = _mount.GlobalPosition.Y;
-                _mount.SetAirThrottle(0.9f);
+                // Afterburners lit for a stretch in the middle (the halfway screenshot shows the flame).
+                _mount.SetAirThrottle(_benchT > Bench.Seconds * 0.35f && _benchT < Bench.Seconds * 0.65f ? 1f : 0.9f);
                 if (_benchT < 6f) _pitch = 0.02f;
                 else if (alt < 400f) _pitch = 0.22f;
                 else _pitch = 0.0f;
@@ -177,6 +181,57 @@ public partial class TestRange
         if (shot == "") _benchRows.Add((_benchT, fps, perf, heavyText));
 
         if (_benchT >= Bench.Seconds) BenchFinish();
+    }
+
+    /// <summary>
+    /// What's drawn for each section of the machine being looked at (tree.txt next to the screenshots): its
+    /// turn, where it is, and every mesh under it with its size, place and switch distances. For tracking
+    /// down parts that don't show up.
+    /// </summary>
+    private void DumpSections()
+    {
+        VehicleBody v = _vehicle;
+        if (v == null || !IsInstanceValid(v)) return;
+        var s = new StringBuilder();
+        Camera3D cam = GetViewport().GetCamera3D();
+        s.AppendLine($"{v.Name} at {v.GlobalPosition}, camera at {cam?.GlobalPosition}, LodDistance {v.View.LodDistance:0}, LodScale {GridView.LodScale}");
+        foreach (VehicleBody.GunRt g in v.Guns)
+            s.AppendLine($"gun section {g.Info.Section} -> {g.Info.GunSection}: alive {g.Alive}, barrels {g.Barrels}, pitch {g.Pitch}, aim error {g.AimError}");
+        var sectionNodes = new HashSet<Node>(v.Model.Sections.Select(x => (Node)v.View.SectionNode(x.Id)));
+        foreach (Section sec in v.Model.Sections.Take(12))
+        {
+            Node3D n = v.View.SectionNode(sec.Id);
+            Transform3D x = n.GlobalTransform;
+            s.AppendLine($"section {sec.Id} {sec.Kind} parent {sec.Parent} angle {sec.Angle} cells {sec.Cells.Count} | node {n.Name} visible {n.Visible}/{n.IsVisibleInTree()} " +
+                         $"at {x.Origin} det {x.Basis.Determinant():0.###} children {n.GetChildCount()}");
+            int shown = 0;
+            void Walk(Node node, string indent)
+            {
+                foreach (Node c in node.GetChildren())
+                {
+                    if (shown++ > 40) return;
+                    string line = $"{indent}{c.GetClass()} {c.Name}";
+                    if (c is GeometryInstance3D gi)
+                    {
+                        line += $" visible {gi.Visible}/{gi.IsVisibleInTree()} range {gi.VisibilityRangeBegin:0}-{gi.VisibilityRangeEnd:0} shadow {gi.CastShadow} " +
+                                $"mat {gi.MaterialOverride?.GetType().Name ?? "-"}";
+                        if (gi is MeshInstance3D mi && mi.Mesh != null)
+                        {
+                            Aabb box = mi.GlobalTransform * mi.Mesh.GetAabb();
+                            int verts = mi.Mesh is ArrayMesh am && am.GetSurfaceCount() > 0 ? am.SurfaceGetArrayLen(0) : -1;
+                            line += $" mesh {mi.Mesh.GetType().Name} surfaces {mi.Mesh.GetSurfaceCount()} verts {verts} box {box.Position} size {box.Size}";
+                        }
+                    }
+
+                    s.AppendLine(line);
+                    if (!sectionNodes.Contains(c)) Walk(c, indent + "  ");
+                }
+            }
+
+            Walk(n, "    ");
+        }
+
+        File.WriteAllText(Path.Combine(_benchDir, "tree.txt"), s.ToString());
     }
 
     private void BenchFinish()

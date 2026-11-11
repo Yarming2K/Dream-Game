@@ -41,6 +41,7 @@ $runs = @(
     @("look-colossus", "look", 30, "--design=Colossus"),
     @("look-falcon", "look", 30, "--design=Falcon"),
     @("idle", "idle", 40, ""),
+    @("jet", "jet", 40, ""),
     @("village", "village", 40, ""),
     @("evening", "village", 30, "--time=evening"),
     @("night", "look", 30, "--design=Warden --time=night"),
