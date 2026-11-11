@@ -33,6 +33,16 @@ public partial class TestRange
                                       string.Join(",", Perf.Names.Select(n => n.Replace(' ', '_') + "_ms")) + "\n");
         for (int i = 0; i < Perf.Names.Length; i++) Perf.Take(i, out _);
         foreach (int s in new[] { 3, (int)(Bench.Seconds / 2), (int)Bench.Seconds - 2 }) _benchShotAt.Add(s);
+        if (Bench.Scene == "look")
+        {
+            // Eight shots on the way round, close in.
+            for (int i = 0; i < 8; i++) _benchShotAt.Add((int)(BenchWarmup + 1 + i * (Bench.Seconds - BenchWarmup - 2) / 8f));
+            if (Mounted)
+            {
+                Rect2 plan = _mount.Plan;
+                _dist = Mathf.Max(6f, Mathf.Max(plan.Size.X, plan.Size.Y) * 1.1f);
+            }
+        }
         GD.Print($"[bench] {Bench.Scene} for {Bench.Seconds:0} s · window {GetWindow().Size.X}×{GetWindow().Size.Y} · {Display.Describe()} · results in {_benchDir}");
 
         if (Bench.Scene is "drill" or "bigdrill")
@@ -72,6 +82,10 @@ public partial class TestRange
                 else if (alt < 400f) _pitch = 0.22f;
                 else _pitch = 0.0f;
                 if (alt > 150f) _yaw -= dt * 0.12f;
+                break;
+            case "look":
+                _yaw += dt * Mathf.Tau / Mathf.Max(Bench.Seconds - BenchWarmup, 5f);
+                _pitch = -0.32f;
                 break;
             case "drill" or "bigdrill" or "idle":
                 _yaw += dt * 0.08f;

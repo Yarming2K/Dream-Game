@@ -15,6 +15,8 @@ namespace DreamGame.Game;
 /// <item>deck: the Colossus at the anchorage with the camera circling it; live fire from 5 s.</item>
 /// <item>jet: the Falcon takes off, climbs to about 400 m and circles over the sea.</item>
 /// <item>drill / bigdrill: the battle drill (about 100 / 200 vehicles), watched from the depot.</item>
+/// <item>look: the camera circles one machine close up (--design=Warden by default) and takes screenshots all
+/// round, for checking how things look.</item>
 /// </list>
 /// </summary>
 public static class Bench
@@ -23,10 +25,11 @@ public static class Bench
     public static float Seconds = 40f;
     public static string Out;
     public static bool FullRes;
+    public static string DesignName;
 
     public static bool Active => Scene != null;
 
-    public static readonly string[] Scenes = { "idle", "deck", "jet", "drill", "bigdrill" };
+    public static readonly string[] Scenes = { "idle", "deck", "jet", "drill", "bigdrill", "look" };
 
     public static void Parse(string[] args)
     {
@@ -48,6 +51,9 @@ public static class Bench
                 case "fullres":
                     FullRes = true;
                     break;
+                case "design":
+                    DesignName = value;
+                    break;
             }
         }
     }
@@ -55,7 +61,7 @@ public static class Bench
     /// <summary>The design the scene starts in.</summary>
     public static Blueprint Design()
     {
-        string name = Scene switch { "deck" => "Colossus", "jet" => "Falcon", _ => "Warden" };
+        string name = DesignName ?? Scene switch { "deck" => "Colossus", "jet" => "Falcon", _ => "Warden" };
         return ExampleDesigns.All.First(b => b.Name.StartsWith(name, StringComparison.Ordinal));
     }
 
@@ -63,7 +69,7 @@ public static class Bench
     public static string Folder()
     {
         string dir = string.IsNullOrEmpty(Out) ? ProjectSettings.GlobalizePath("user://bench") : Out;
-        dir = System.IO.Path.Combine(dir, $"{Scene}-{DateTime.Now:yyyyMMdd-HHmmss}");
+        dir = System.IO.Path.Combine(dir, $"{Scene}{(DesignName != null ? "-" + DesignName : "")}-{DateTime.Now:yyyyMMdd-HHmmss}");
         System.IO.Directory.CreateDirectory(dir);
         return dir;
     }

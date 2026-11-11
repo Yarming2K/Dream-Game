@@ -101,8 +101,10 @@ public sealed partial class GridView
     /// <param name="livery">The paint job (null or factory for the blocks' own colors).</param>
     /// <param name="waterline">For ships: the waterline's height in the vehicle's frame, for the ship paint rules.</param>
     public GridView(PhysicsBody3D body, GridModel model, Func<Int3, float> caliberOf = null, object shareKey = null, bool lod = false,
-        Livery livery = null, float? waterline = null)
+        Livery livery = null, float? waterline = null, float wear = 0.7f, float mud = 0.5f)
     {
+        _wear = wear;
+        _mud = mud;
         Body = body;
         Model = model;
         _caliberOf = caliberOf;
@@ -307,7 +309,7 @@ public sealed partial class GridView
         {
             foreach (Piece piece in pieces)
             {
-                GeometryInstance3D g = piece.Instance();
+                GeometryInstance3D g = Weathered(piece.Instance());
                 ApplyNear(g, NearEnd(c.Section, piece.Tier));
                 c.Node.AddChild(g);
             }
@@ -372,7 +374,7 @@ public sealed partial class GridView
                 ShadowOff = tier != Tier.Normal || mat is StandardMaterial3D sm && sm.ShadingMode == BaseMaterial3D.ShadingModeEnum.Unshaded,
             };
             made?.Add(piece);
-            GeometryInstance3D g = piece.Instance();
+            GeometryInstance3D g = Weathered(piece.Instance());
             ApplyNear(g, NearEnd(c.Section, tier));
             c.Node.AddChild(g);
         }
@@ -383,13 +385,27 @@ public sealed partial class GridView
                 if (s.Indices.Count == 0) continue;
                 var piece = new Piece { Res = BlockVisuals.HullMesh(s), Mat = PlatingMaterial(_surfaceDefs[mat]) };
                 made?.Add(piece);
-                GeometryInstance3D g = piece.Instance();
+                GeometryInstance3D g = Weathered(piece.Instance());
                 ApplyNear(g, NearEnd(c.Section, Tier.Normal));
                 c.Node.AddChild(g);
             }
 
         if (made != null) _shared.Chunks[c.Key] = made;
         Perf.Add(Perf.Visuals, started);
+    }
+
+    private readonly float _wear, _mud;
+
+    /// <summary>How worn and how muddy this machine is (the shader's per-instance settings).</summary>
+    private GeometryInstance3D Weathered(GeometryInstance3D g)
+    {
+        if (g.MaterialOverride is ShaderMaterial)
+        {
+            g.SetInstanceShaderParameter("wear_amount", _wear);
+            g.SetInstanceShaderParameter("mud_amount", _mud);
+        }
+
+        return g;
     }
 
     /// <summary>What's in a cell of a section (for working out joints), or null.</summary>

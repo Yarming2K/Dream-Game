@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
@@ -84,6 +85,23 @@ public class HullMesherTests
         AssertWatertight(s);
         float vol = Volume(s);
         Assert.InRange(vol, Cs * Cs * Cs * 0.97f, Cs * Cs * Cs);
+    }
+
+    [Fact]
+    public void ChamfersAreMarkedAsEdges()
+    {
+        var g = new Grid();
+        g.Armor.Add(Int3.Zero);
+        g.Armor.Add(new Int3(1, 0, 0));
+        HullMesher.Surface s = Mesh(g);
+        Assert.Equal(s.Positions.Count, s.Edge.Count);
+        // Chamfer strips and corner triangles are marked; the flat faces aren't.
+        for (int i = 0; i < s.Positions.Count; i++)
+        {
+            Vector3 n = s.Normals[i];
+            bool flat = MathF.Abs(n.X) > 0.99f || MathF.Abs(n.Y) > 0.99f || MathF.Abs(n.Z) > 0.99f;
+            Assert.Equal(flat ? 0f : 1f, s.Edge[i]);
+        }
     }
 
     [Fact]

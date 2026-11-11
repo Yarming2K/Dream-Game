@@ -90,11 +90,6 @@ public static class BlockVisuals
         Material("def:" + def.Id, new Color(def.ColorR, def.ColorG, def.ColorB), def.Metallic, def.Roughness,
             def.Shape != BlockShape.Cube);
 
-    private static StandardMaterial3D Dark => Material("dark", new Color(0.13f, 0.13f, 0.13f), 0.8f, 0.4f);
-    private static StandardMaterial3D Rubber => Material("rubber", new Color(0.06f, 0.06f, 0.06f), 0f, 0.95f);
-    private static StandardMaterial3D Steel => Material("steel", new Color(0.55f, 0.56f, 0.58f), 0.9f, 0.3f);
-    private static StandardMaterial3D Brass => Material("brass", new Color(0.78f, 0.6f, 0.25f), 0.9f, 0.3f);
-    private static StandardMaterial3D RedTip => Material("redtip", new Color(0.75f, 0.12f, 0.08f), 0.4f, 0.5f);
 
     private static StandardMaterial3D Glow(Color c, float energy)
     {
@@ -222,16 +217,20 @@ public static class BlockVisuals
         var st = new SurfaceTool();
         st.Begin(Mesh.PrimitiveType.Triangles);
 
+        // Vertex alpha marks the chamfers (0) from the faces (1): the paint wears through on the edges first.
+        var faceColor = new Color(1, 1, 1, 1);
+        var edgeColor = new Color(1, 1, 1, 0);
+        Color current = faceColor;
         void Tri(Vector3 n, Vector3 p0, Vector3 p1, Vector3 p2)
         {
             // Clockwise when seen from outside, which is what Godot treats as the front face.
             if ((p1 - p0).Cross(p2 - p0).Dot(n) > 0) (p1, p2) = (p2, p1);
-            st.SetNormal(n);
-            st.AddVertex(p0);
-            st.SetNormal(n);
-            st.AddVertex(p1);
-            st.SetNormal(n);
-            st.AddVertex(p2);
+            foreach (Vector3 p in new[] { p0, p1, p2 })
+            {
+                st.SetColor(current);
+                st.SetNormal(n);
+                st.AddVertex(p);
+            }
         }
 
         void Quad(Vector3 n, Vector3 a, Vector3 c1, Vector3 c2, Vector3 d)
@@ -260,6 +259,7 @@ public static class BlockVisuals
         }
 
         // Twelve edge chamfers.
+        current = edgeColor;
         for (int k = 0; k < 3; k++)
         {
             int a = (k + 1) % 3, c = (k + 2) % 3;
@@ -377,15 +377,17 @@ public static class BlockVisuals
         return m;
     }
 
+    // Every part goes through the weathering shader except glass and lights.
     private static Material PaintOf(BlockDef def, in ModelPart p) => p.Paint switch
     {
-        Paint.Self => MaterialOf(def),
-        Paint.SelfDark => Material("darker:" + def.Id, new Color(def.ColorR * 0.6f, def.ColorG * 0.6f, def.ColorB * 0.6f), def.Metallic, def.Roughness + 0.05f),
-        Paint.Dark => Dark,
-        Paint.Steel => Steel,
-        Paint.Brass => Brass,
-        Paint.Red => RedTip,
-        Paint.Rubber => Rubber,
+        Paint.Self when def.Glass => MaterialOf(def),
+        Paint.Self => Paintwork.PlainPart(def, false),
+        Paint.SelfDark => Paintwork.PlainPart(def, true),
+        Paint.Dark => Paintwork.PlainPart("dark", new Color(0.13f, 0.13f, 0.13f), 0.8f, 0.4f, Paintwork.Finish.Metal),
+        Paint.Steel => Paintwork.PlainPart("steel", new Color(0.55f, 0.56f, 0.58f), 0.9f, 0.3f, Paintwork.Finish.Metal),
+        Paint.Brass => Paintwork.PlainPart("brass", new Color(0.78f, 0.6f, 0.25f), 0.9f, 0.3f, Paintwork.Finish.Metal),
+        Paint.Red => Paintwork.PlainPart("redtip", new Color(0.75f, 0.12f, 0.08f), 0.4f, 0.5f, Paintwork.Finish.Paint),
+        Paint.Rubber => Paintwork.PlainPart("rubber", new Color(0.06f, 0.06f, 0.06f), 0f, 0.95f, Paintwork.Finish.Other),
         Paint.Glass => Material("glass", new Color(0.1f, 0.16f, 0.2f), 0.3f, 0.06f),
         _ => Glow(new Color(p.GlowColor.X, p.GlowColor.Y, p.GlowColor.Z), p.GlowEnergy),
     };
@@ -427,18 +429,7 @@ public static class BlockVisuals
     // ---------------------------------------------------------------- hull surfaces
 
     /// <summary>The material for a merged hull surface: the block's own, shaded by the surface's vertex colors.</summary>
-    public static StandardMaterial3D SurfaceMaterial(BlockDef def)
-    {
-        string key = "surface:" + def.Id;
-        if (Materials.TryGetValue(key, out StandardMaterial3D m)) return m;
-        m = (StandardMaterial3D)MaterialOf(def).Duplicate();
-        m.VertexColorUseAsAlbedo = true;
-        float k = HullMesher.ShadeCompensation;
-        m.AlbedoColor = new Color(Mathf.Min(1f, def.ColorR * k), Mathf.Min(1f, def.ColorG * k), Mathf.Min(1f, def.ColorB * k));
-        m.CullMode = BaseMaterial3D.CullModeEnum.Back;
-        Materials[key] = m;
-        return m;
-    }
+    public static ShaderMaterial SurfaceMaterial(BlockDef def) => Paintwork.PlainPlating(def);
 
     /// <summary>Turns a merged hull surface into a mesh (the core winds triangles the other way round from Godot).</summary>
     public static ArrayMesh HullMesh(HullMesher.Surface s)
@@ -452,7 +443,7 @@ public static class BlockVisuals
             verts[i] = s.Positions[i].G();
             normals[i] = s.Normals[i].G();
             float k = s.Shade[i];
-            colors[i] = new Color(k, k, k);
+            colors[i] = new Color(k, k, k, 1f - s.Edge[i]);
         }
 
         var idx = new int[s.Indices.Count];

@@ -46,6 +46,9 @@ public static class HullMesher
 
         /// <summary>Per-vertex brightness (corner shading times panel tint), around 0.5 to 1.05.</summary>
         public readonly List<float> Shade = new();
+
+        /// <summary>Per vertex: 1 on the chamfered edges (where paint wears through first), 0 on the faces.</summary>
+        public readonly List<float> Edge = new();
         public readonly List<int> Indices = new();
         public int Triangles => Indices.Count / 3;
     }
@@ -189,7 +192,7 @@ public static class HullMesher
                     var strip = new[] { Pn(-a), Pn(a), Pe(a), Pe(-a) };
                     var sao = new[] { Ao(c, n, e, -a), Ao(c, n, e, a), Ao(c, e, n, a), Ao(c, e, n, -a) };
                     // Chamfers are where paint wears first: a little lighter.
-                    Quad(surf, strip, Vector3.Normalize(nv + ev), sao, tint * EdgeWear, weathering);
+                    Quad(surf, strip, Vector3.Normalize(nv + ev), sao, tint * EdgeWear, weathering, edge: 1f);
 
                     foreach (Int3 s in new[] { -a, a })
                     {
@@ -198,7 +201,7 @@ public static class HullMesher
                         {
                             // An outside corner where three chamfers meet.
                             if (DirIndex(e) < DirIndex(s) && DirIndex(n) < DirIndex(s))
-                                Triangle(surf, new[] { Pn(s), Pe(s), Corner(s, n, e) }, Vector3.Normalize(nv + ev + sv), tint * EdgeWear, weathering);
+                                Triangle(surf, new[] { Pn(s), Pe(s), Corner(s, n, e) }, Vector3.Normalize(nv + ev + sv), tint * EdgeWear, weathering, edge: 1f);
                         }
                         else if (S(c + s) && !Edge(c + s, n, e))
                         {
@@ -234,6 +237,7 @@ public static class HullMesher
                 surf.Positions.Add(w);
                 surf.Normals.Add(n);
                 surf.Shade.Add(Clamp1(k * (weathering ? Weathering(w) : 1f)));
+                surf.Edge.Add(0f);
             }
 
             for (int i = 1; i + 1 < f.Points.Count; i++) AddTri(surf, i0, i0 + i, i0 + i + 1, n);
@@ -253,7 +257,7 @@ public static class HullMesher
     /// <summary>How much lighter chamfered edges are than the faces beside them.</summary>
     private const float EdgeWear = 1.1f;
 
-    private static void Quad(Surface s, Vector3[] p, Vector3 n, float[] ao, float tint, bool weathering)
+    private static void Quad(Surface s, Vector3[] p, Vector3 n, float[] ao, float tint, bool weathering, float edge = 0f)
     {
         int i0 = s.Positions.Count;
         for (int i = 0; i < 4; i++)
@@ -261,6 +265,7 @@ public static class HullMesher
             s.Positions.Add(p[i]);
             s.Normals.Add(n);
             s.Shade.Add(Clamp1(ao[i] * tint * (weathering ? Weathering(p[i]) : 1f)));
+            s.Edge.Add(edge);
         }
 
         // Split along the diagonal that keeps corner shading smooth.
@@ -285,18 +290,20 @@ public static class HullMesher
         s.Positions.Add(mid / poly.Count);
         s.Normals.Add(n);
         s.Shade.Add(Clamp1(ao / poly.Count * tint * (weathering ? Weathering(mid / poly.Count) : 1f)));
+        s.Edge.Add(0f);
         foreach ((Vector3 p, float a) in poly)
         {
             s.Positions.Add(p);
             s.Normals.Add(n);
             s.Shade.Add(Clamp1(a * tint * (weathering ? Weathering(p) : 1f)));
+            s.Edge.Add(0f);
         }
 
         for (int i = 0; i < poly.Count; i++)
             AddTri(s, i0, i0 + 1 + i, i0 + 1 + (i + 1) % poly.Count, n);
     }
 
-    private static void Triangle(Surface s, Vector3[] p, Vector3 n, float tint, bool weathering)
+    private static void Triangle(Surface s, Vector3[] p, Vector3 n, float tint, bool weathering, float edge = 0f)
     {
         int i0 = s.Positions.Count;
         for (int i = 0; i < 3; i++)
@@ -304,6 +311,7 @@ public static class HullMesher
             s.Positions.Add(p[i]);
             s.Normals.Add(n);
             s.Shade.Add(Clamp1(tint * (weathering ? Weathering(p[i]) : 1f)));
+            s.Edge.Add(edge);
         }
 
         AddTri(s, i0, i0 + 1, i0 + 2, n);

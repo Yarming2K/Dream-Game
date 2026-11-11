@@ -39,6 +39,11 @@ uniform bool glass = false;
 uniform vec3 glass_color : source_color = vec3(0.14, 0.19, 0.22);
 uniform vec3 frame_color : source_color = vec3(0.2, 0.2, 0.2);
 uniform sampler2D grit : source_color, filter_linear_mipmap, repeat_enable;
+// Weathering (the game's look: worn, chipped, dirty). finish: 0 paint, 1 bare metal, 2 rubber, concrete and the like.
+uniform sampler2D wear_tex : filter_linear_mipmap, repeat_enable;
+uniform int finish = 0;
+instance uniform float wear_amount = 0.7;
+instance uniform float mud_amount = 0.5;
 
 varying vec3 lpos;
 varying vec3 lnrm;
@@ -64,6 +69,52 @@ float vnoise(vec3 q) {
 	float a = mix(mix(h01(i), h01(i + ivec3(1, 0, 0)), f.x), mix(h01(i + ivec3(0, 1, 0)), h01(i + ivec3(1, 1, 0)), f.x), f.y);
 	float b = mix(mix(h01(i + ivec3(0, 0, 1)), h01(i + ivec3(1, 0, 1)), f.x), mix(h01(i + ivec3(0, 1, 1)), h01(i + ivec3(1, 1, 1)), f.x), f.y);
 	return mix(a, b, f.z);
+}
+
+// A noise texture wrapped round a point from all three sides, blended by the surface's facing.
+float tri(vec3 p, vec3 n, float s) {
+	vec3 w = n * n;
+	w *= w;
+	w /= (w.x + w.y + w.z);
+	return texture(wear_tex, p.zy * s).r * w.x + texture(wear_tex, p.xz * s).r * w.y + texture(wear_tex, p.xy * s).r * w.z;
+}
+
+// Wear and tear on top of the paint: chipped edges down to primer and bare steel, dirt in the creases, rust
+// running down the sides, sun-faded tops and mud thrown up low down. The chamfered edges (marked by the
+// meshes, 1 - vertex alpha) are where it chips first.
+void weather(inout vec3 col, inout float m, inout float r, vec3 p, vec3 n, float edge, float wear, float mud, float shade) {
+	float fine = tri(p, n, 2.3);
+	float coarse = tri(p + vec3(5.3, 1.7, 9.1), n, 0.37);
+	if (finish == 0) {
+		float chip = edge * smoothstep(0.66 - wear * 0.3, 0.7 - wear * 0.24, fine)
+			+ smoothstep(0.9 - wear * 0.05, 0.93 - wear * 0.04, fine * 0.5 + coarse * 0.5);
+		chip = clamp(chip, 0.0, 1.0);
+		float deep = smoothstep(0.72, 0.84, fine);
+		col = mix(col, mix(vec3(0.3, 0.19, 0.13), vec3(0.4, 0.39, 0.37), deep), chip);
+		m = mix(m, 0.8, chip * deep);
+		r = mix(r, 0.4, chip * deep);
+		// Paint bleached by the sun on top.
+		float top = smoothstep(0.6, 0.95, n.y) * wear * 0.22;
+		col = mix(col, vec3(dot(col, vec3(0.333))) * 1.1, top);
+	}
+	// Uneven grime, heavier in the creases.
+	col *= mix(1.0, 0.8 + 0.32 * coarse, wear * 0.6);
+	col *= mix(1.0, smoothstep(0.5, 0.95, shade), wear * 0.45);
+	if (finish <= 1) {
+		// Rust streaks running down from edges and fittings.
+		float streak = vnoise(vec3(p.x * 8.0, p.y * 0.55, p.z * 8.0)) * vnoise(vec3(p.x * 2.1, p.y * 0.22 + 3.0, p.z * 2.1));
+		float rust = smoothstep(0.3, 0.48, streak) * (1.0 - abs(n.y)) * wear;
+		col = mix(col, vec3(0.29, 0.14, 0.06), rust * 0.55);
+		r = mix(r, 0.85, rust * 0.5);
+	}
+	if (mud > 0.0) {
+		// Thick at the bottom, splashed higher up.
+		float low = clamp((0.95 - p.y) / 0.95, 0.0, 1.0);
+		float caked = smoothstep(0.38, 0.62, low + (coarse - 0.5) * 0.9 + (fine - 0.5) * 0.25) * mud;
+		col = mix(col, vec3(0.15, 0.12, 0.08), caked * 0.9);
+		r = mix(r, 0.96, caked);
+		m = mix(m, 0.0, caked);
+	}
 }
 
 float fbm(vec3 q) {
@@ -146,6 +197,10 @@ void fragment() {
 			col *= mix(1.0, 0.86 + 0.14 * streak, (1.0 - an.y) * panel_lines);
 		}
 		col *= darken;
+		if (wear_amount > 0.0) {
+			float shade = use_shade ? COLOR.r : 1.0;
+			weather(col, m, r, p, n, 1.0 - COLOR.a, wear_amount, mud_amount, shade);
+		}
 	}
 	col *= g;
 	if (use_shade) {
@@ -200,11 +255,28 @@ void fragment() {
         _ => 1,
     };
 
+    private static NoiseTexture2D _wear;
+
+    /// <summary>The blotchy noise the weathering cuts its chips, grime and mud from (seamless, made at start-up).</summary>
+    private static NoiseTexture2D WearTexture => _wear ??= new NoiseTexture2D
+    {
+        Width = 512, Height = 512, Seamless = true, GenerateMipmaps = true,
+        Noise = new FastNoiseLite
+        {
+            NoiseType = FastNoiseLite.NoiseTypeEnum.SimplexSmooth, Frequency = 0.012f, FractalType = FastNoiseLite.FractalTypeEnum.Fbm,
+            FractalOctaves = 6, FractalGain = 0.55f, Seed = 7,
+        },
+    };
+
+    /// <summary>What a surface is, for weathering: paint chips, bare metal only rusts, rubber and concrete just get dirty.</summary>
+    public enum Finish { Paint = 0, Metal = 1, Other = 2 }
+
     private static ShaderMaterial Make(string key, bool twoSided, System.Action<ShaderMaterial> setup, bool glass = false)
     {
         if (Cache.TryGetValue(key, out ShaderMaterial m)) return m;
         m = new ShaderMaterial { Shader = ShaderFor(twoSided, glass) };
         m.SetShaderParameter("grit", BlockVisuals.GritTexture);
+        m.SetShaderParameter("wear_tex", WearTexture);
         setup(m);
         return Cache[key] = m;
     }
@@ -246,6 +318,39 @@ void fragment() {
             m.SetShaderParameter("per_part", true);
             m.SetShaderParameter("darken", dark ? 0.6f : 1f);
         });
+
+    private static Finish FinishOf(BlockDef def) => def.Id.StartsWith("concrete") ? Finish.Other : Finish.Paint;
+
+    /// <summary>Unpainted hull plating: the block's own color, worn like everything else.</summary>
+    public static ShaderMaterial PlainPlating(BlockDef def) =>
+        Make($"plainplate:{def.Id}", false, m =>
+        {
+            m.SetShaderParameter("color_a", new Color(def.ColorR, def.ColorG, def.ColorB));
+            m.SetShaderParameter("pattern", 1);
+            m.SetShaderParameter("metal", def.Metallic);
+            m.SetShaderParameter("rough", def.Roughness);
+            m.SetShaderParameter("use_shade", true);
+            m.SetShaderParameter("panel_lines", def.Kind == BlockKind.Armor && FinishOf(def) == Finish.Paint ? 0.6f : 0f);
+            m.SetShaderParameter("darken", HullMesher.ShadeCompensation);
+            m.SetShaderParameter("finish", (int)FinishOf(def));
+        });
+
+    /// <summary>An unpainted part: a color and a finish (painted, bare metal, or rubber and the like).</summary>
+    public static ShaderMaterial PlainPart(string key, Color color, float metallic, float roughness, Finish finish) =>
+        Make($"plainpart:{key}", true, m =>
+        {
+            m.SetShaderParameter("color_a", new Color(color.R, color.G, color.B));
+            m.SetShaderParameter("pattern", 1);
+            m.SetShaderParameter("metal", metallic);
+            m.SetShaderParameter("rough", roughness);
+            m.SetShaderParameter("per_part", true);
+            m.SetShaderParameter("finish", (int)finish);
+        });
+
+    /// <summary>A block's own unpainted look for its parts.</summary>
+    public static ShaderMaterial PlainPart(BlockDef def, bool dark) =>
+        PlainPart((dark ? "dark:" : "self:") + def.Id, new Color(def.ColorR, def.ColorG, def.ColorB) * (dark ? 0.6f : 1f), def.Metallic,
+            def.Roughness + (dark ? 0.05f : 0f), FinishOf(def));
 
     /// <summary>Glazing: dark glass in frames, the frames in the paint job's main color (or dark steel unpainted).</summary>
     public static ShaderMaterial Glass(BlockDef def, Livery l, bool plating) =>

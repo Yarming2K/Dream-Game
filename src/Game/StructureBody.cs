@@ -20,7 +20,7 @@ public partial class StructureBody : StaticBody3D, IGridHost
         s.CollisionLayer = GridRegistry.Layers.Structures;
         s.CollisionMask = 0;
         s.Model = GridModel.FromBlueprint(bp);
-        s.View = new GridView(s, s.Model, shareKey: bp, lod: true);
+        s.View = new GridView(s, s.Model, shareKey: bp, lod: true, wear: 0.5f, mud: 0.25f);
         s.Radius = s.View.BoundingRadius();
         s.Transform = where;
         return s;

@@ -102,6 +102,14 @@ What every part should follow, so a design reads as one machine however odd it i
 4. **Parts show how they attach:** axles, collars, mounts, shafts.
 5. **Muted, real-world colors** for structure; bright colors only for lamps, markings and paint jobs.
 6. **People-sized cues** (hatches, ladders, railings, handles) so the scale reads.
+7. **Gritty realism** (chosen from a three-way look-test: gritty, clean and stylised, modern military). Machines look used:
+   - **Chipped paint:** it wears through on the chamfered edges first, down to red-brown primer and then bare steel, with a scatter of chips elsewhere.
+   - **Grime** in the creases, uneven and patchy.
+   - **Rust** streaking down the sides from edges and fittings.
+   - **Sun-bleached** tops.
+   - **Mud** caked low down and splashed higher.
+
+   Bare metal (barrels, tracks) only rusts and gets dirty; rubber and concrete only get dirty. How worn and how muddy is set per machine: tanks are the muddiest, aircraft barely muddy, ships never (anti-fouling below the waterline), buildings a little dusty. It's all one shader on top of the paint job: the meshes mark their chamfers, and the wear is cut from a seamless noise texture, so it costs no extra draw calls or files.
 
 ### Guns (built from components)
 A gun is a **breech** with **barrel** segments in a line in front of it. Parts attached around the breech change how it performs:
