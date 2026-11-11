@@ -91,6 +91,48 @@ public sealed class Earthworks
         Field = field;
         Original = (float[])field.Heights.Clone();
         Disturbed = new float[field.Heights.Length];
+        Worn = new float[field.Heights.Length];
+    }
+
+    // ------------------------------------------------------------------ wear from wheels and tracks
+
+    /// <summary>
+    /// How worn each sample is by wheels and tracks, 0 to 1: grass rubbed down to dirt, then to mud. It only
+    /// changes how the ground looks, not its shape.
+    /// </summary>
+    public readonly float[] Worn;
+
+    private GridRect _wornDirty = GridRect.Empty;
+
+    /// <summary>Samples whose wear has visibly changed since the last call (then forgets them).</summary>
+    public GridRect TakeWornDirty()
+    {
+        GridRect d = _wornDirty;
+        _wornDirty = GridRect.Empty;
+        return d;
+    }
+
+    /// <summary>
+    /// Wheels or tracks passing over the ground round <paramref name="at"/> wear it a little (more in the middle).
+    /// Only changes big enough to see (a tenth at a time) are reported for redrawing.
+    /// </summary>
+    public void Trample(Vector2 at, float radius, float amount)
+    {
+        int x0 = Math.Max(0, (int)MathF.Floor((at.X - radius - Field.Origin.X) / S));
+        int x1 = Math.Min(W - 1, (int)MathF.Ceiling((at.X + radius - Field.Origin.X) / S));
+        int z0 = Math.Max(0, (int)MathF.Floor((at.Y - radius - Field.Origin.Y) / S));
+        int z1 = Math.Min(D - 1, (int)MathF.Ceiling((at.Y + radius - Field.Origin.Y) / S));
+        for (int z = z0; z <= z1; z++)
+        for (int x = x0; x <= x1; x++)
+        {
+            float dx = Field.Origin.X + x * S - at.X, dz = Field.Origin.Y + z * S - at.Y;
+            float d = MathF.Sqrt(dx * dx + dz * dz);
+            if (d > radius + S * 0.5f) continue;
+            int i = z * W + x;
+            float was = Worn[i];
+            Worn[i] = MathF.Min(1f, was + amount * Math.Clamp(1.2f - d / MathF.Max(radius, 0.01f), 0.2f, 1f));
+            if ((int)(was * 10f) != (int)(Worn[i] * 10f)) _wornDirty = _wornDirty.Union(new GridRect(x, z, x, z));
+        }
     }
 
     /// <summary>Every sample changed since the last call (then forgets them).</summary>

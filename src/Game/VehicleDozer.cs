@@ -140,4 +140,43 @@ public partial class VehicleBody
 
         return (x0, x1, z0);
     }
+
+    private float _rutTimer;
+
+    /// <summary>
+    /// A few times a second, the wheels and tracks touching the island wear its grass down (more for heavier
+    /// machines; tracks more than tyres): busy routes become dirt tracks, then mud.
+    /// </summary>
+    private void RutTick(float dt)
+    {
+        _rutTimer += dt;
+        if (_rutTimer < 0.25f) return;
+        float step = _rutTimer;
+        _rutTimer = 0;
+        if (Terrain.Earth == null || Wheels.Count == 0 || IsNaval) return;
+        Vector3 vel = LinearVelocity;
+        float speed = vel.Length();
+        // Only where someone could see it.
+        if (speed < 1.2f || GlobalPosition.DistanceTo(WorldQuery.Viewer) > 600f) return;
+        float weight = Mathf.Clamp(Mass / 25000f, 0.3f, 2f);
+        var flat = new Vector3(vel.X, 0, vel.Z);
+        int stamps = Mathf.Clamp((int)(flat.Length() * step / 0.6f), 1, 12);
+        foreach (WheelRt w in Wheels)
+        {
+            if (!w.Contact) continue;
+            // Only bare ground: not ramps, decks or the airstrip's concrete.
+            float ground = WorldQuery.Ground.HeightAt(w.HitPos.X, w.HitPos.Z);
+            if (Mathf.Abs(w.HitPos.Y - ground) > 0.25f) continue;
+            bool track = w.Kind == BlockKind.Track;
+            // Stamped along the stretch it rolled since last time, so the rut is unbroken. A heavy tank's single
+            // pass shows; a few passes make a dirt track, many make mud.
+            // Every road wheel along a track rolls over the same strip: the wear is shared between them.
+            float each = (track ? 0.14f : 0.07f) * weight / Mathf.Max(1f, Wheels.Count / 4f);
+            for (int k = 0; k < stamps; k++)
+            {
+                Vector3 p = w.HitPos - flat * step * (k / (float)stamps);
+                Terrain.Earth.Trample(new System.Numerics.Vector2(p.X, p.Z), track ? 0.5f : 0.3f, each);
+            }
+        }
+    }
 }

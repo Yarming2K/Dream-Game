@@ -109,6 +109,7 @@ Command the units you aren't driving yourself, from a command ship, a command ve
   - **Drawing:** in batches per kind per 64 m patch; bushes stop being drawn at 260 m, small rocks at 420 m, trees at 1.1 km.
   - **Getting knocked down:** trunks and rocks are solid. A vehicle hitting a tree hard enough (mass × speed over about 18 tonne·m/s for a full-size tree: a tank at walking pace, not a light car) knocks it flat the way it was going. Bushes go flat under anything that drives over them. Blasts throw trees down away from them, and a tree whose ground is blown away falls over.
 
+- **Ruts.** Wheels and tracks wear the grass under them down to dirt, and on to mud, wherever they drive within sight (600 m of the camera). Tracks wear more than tyres, and heavy machines more than light ones. One tank pass leaves a faint trail; a busy route becomes a dirt track. Wear only changes how the ground looks, so it just redraws its patch, without reshaping the ground or waking vehicles. It's in the rules code with the craters.
 - **Time of day and weather** (F6, F7 on the range; blended over a few seconds).
   - **Sky:** a sky of its own, with a gradient, a glow round the sun, clouds that drift and are lit from the sun's side, stars at night, and the far sea in haze below the horizon.
   - **Times:** morning (low warm sun from the east), noon, evening (low orange sun in the west) and night (a dim blue moon, stars, dark haze; headlights and lamps matter).

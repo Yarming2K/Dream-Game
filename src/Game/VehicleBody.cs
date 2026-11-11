@@ -451,6 +451,7 @@ public partial class VehicleBody : RigidBody3D, IGridHost
         UpdatePark(dt, playerDrives);
         Drive(dt);
         DozeTick(dt);
+        RutTick(dt);
         long t1 = Perf.Now;
         Perf.Add(Perf.Vehicles, t0);
         if (IsNaval || PropsAlive > 0) NavalDrive(dt);

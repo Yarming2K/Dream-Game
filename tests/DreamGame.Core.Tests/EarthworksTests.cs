@@ -162,6 +162,26 @@ public class EarthworksTests
     }
 
     [Fact]
+    public void TracksWearTheGroundWithoutShapingIt()
+    {
+        Earthworks e = Flat();
+        float[] before = (float[])e.Field.Heights.Clone();
+        for (int pass = 0; pass < 30; pass++) e.Trample(new Vector2(2, 3), 0.6f, 0.05f);
+        int mid = (3 + 32) * e.Field.Width + (2 + 32);
+        Assert.InRange(e.Worn[mid], 0.9f, 1f);
+        Assert.Equal(0f, e.Worn[(20 + 32) * e.Field.Width + 32]);
+        Assert.Equal(before, e.Field.Heights);
+        // Only the look changed: no reshaping to redo, just a patch to redraw.
+        Assert.True(e.TakeDirty().IsEmpty);
+        GridRect redraw = e.TakeWornDirty();
+        Assert.False(redraw.IsEmpty);
+        Assert.True(e.TakeWornDirty().IsEmpty);
+        // A light pass that doesn't change it visibly isn't redrawn.
+        e.Trample(new Vector2(-10, -10), 0.6f, 0.01f);
+        Assert.True(e.TakeWornDirty().IsEmpty);
+    }
+
+    [Fact]
     public void ABladeHoldsItsHeapInFront()
     {
         Earthworks e = Flat();

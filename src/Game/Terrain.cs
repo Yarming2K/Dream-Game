@@ -190,6 +190,16 @@ public static class Terrain
     /// </summary>
     internal static void Flush()
     {
+        // Wear from wheels and tracks only changes the look: those tiles are just redrawn.
+        if (Earth != null)
+        {
+            DreamGame.Core.GridRect w = Earth.TakeWornDirty();
+            if (!w.IsEmpty)
+                for (int tz = Math.Max(0, (w.Z0 - 1) / Tile); tz <= Math.Min(Tiles - 1, (w.Z1 + 1) / Tile); tz++)
+                for (int tx = Math.Max(0, (w.X0 - 1) / Tile); tx <= Math.Min(Tiles - 1, (w.X1 + 1) / Tile); tx++)
+                    _drawDirty.Add(tz * Tiles + tx);
+        }
+
         if (Earth == null || !Earth.HasDirty) { DrawSome(); return; }
         DreamGame.Core.GridRect d = Earth.TakeDirty();
         float half = (Samples - 1) * 0.5f;
@@ -330,6 +340,7 @@ void fragment() {
     {
         float[] h = WorldQuery.Ground.Heights;
         float[] stirred = Earth?.Disturbed;
+        float[] worn = Earth?.Worn;
         int n = Samples, m = Tile + 1;
         float half = (n - 1) * 0.5f;
         var verts = new Vector3[m * m];
@@ -351,9 +362,12 @@ void fragment() {
             bool lane = MathF.Abs(x - half) < LaneHalfWidth;
             // How much dirt, rock, sand and churned earth is here (the ground shader paints each).
             float dirt = lane ? 0.65f : Math.Clamp((y - LandHeight) / 20f, 0, 0.4f);
+            // Ruts: grass worn to dirt by wheels and tracks, and on to mud.
+            float rut = worn != null ? worn[i] : 0f;
+            dirt = Math.Max(dirt, rut * 0.9f);
             float rock = Math.Clamp(slope * 6f, 0, 1);
             float sand = y < -1.5f ? 1f : Math.Clamp((LandHeight + 0.8f - y) / 1.5f, 0, 1);
-            float turned = stirred != null ? stirred[i] * 0.85f : 0f;
+            float turned = Math.Max(stirred != null ? stirred[i] * 0.85f : 0f, (rut - 0.5f) * 0.6f);
             colors[li] = new Color(dirt, rock, sand, turned);
         }
 
