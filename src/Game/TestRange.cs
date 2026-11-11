@@ -165,6 +165,7 @@ public partial class TestRange : Node3D
         SpawnVehicle();
         EnterVehicle(_vehicle, SeatRole.Driver);
         Input.MouseMode = Input.MouseModeEnum.Captured;
+        if (Bench.Active) BenchStart();
     }
 
     public override void _ExitTree()
@@ -864,6 +865,7 @@ public partial class TestRange : Node3D
     public override void _Process(double delta)
     {
         float dt = (float)delta;
+        if (Bench.Active) BenchTick(dt);
         if (Mounted)
         {
             Vector3 target = _mount.GlobalTransform * _mount.CenterOfMass + Vector3.Up * 2f;

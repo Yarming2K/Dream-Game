@@ -14,9 +14,21 @@ public partial class Main : Node
     {
         GameInput.Register();
         Sfx.SetupBuses();
+        Bench.Parse(OS.GetCmdlineUserArgs());
+        Display.FullRes = Bench.FullRes;
         Window w = GetWindow();
         Display.Fit(w);
         w.SizeChanged += () => Display.Fit(w);
+        if (Bench.Active)
+        {
+            // A benchmark run goes straight to the range and quits when it's done.
+            _range = new TestRange();
+            _range.Setup(Bench.Design());
+            _range.ExitRequested += () => GetTree().Quit();
+            AddChild(_range);
+            return;
+        }
+
         _builder = new Builder();
         _builder.TestDriveRequested += bp => Callable.From(() => StartTestDrive(bp)).CallDeferred();
         AddChild(_builder);
