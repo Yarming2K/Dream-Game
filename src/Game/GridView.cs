@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using DreamGame.Core;
 using Godot;
 
@@ -35,9 +36,23 @@ public sealed partial class GridView
         public (int, Int3) Key;
         public Node3D Node;
         public readonly HashSet<BlockInstance> Blocks = new();
-        public readonly List<(CollisionShape3D shape, Transform3D local)> Colliders = new();
-        public bool VisualDirty, ColliderDirty;
+        public bool VisualDirty;
     }
+
+    /// <summary>The blocks whose collision is merged into boxes together (see <see cref="ColliderBoxes"/>).</summary>
+    private sealed class ColliderGroup
+    {
+        public int Section;
+        public readonly HashSet<BlockInstance> Blocks = new();
+        public readonly List<(CollisionShape3D shape, Transform3D local)> Colliders = new();
+    }
+
+    private readonly Dictionary<(int, Int3), ColliderGroup> _colGroups = new();
+    private readonly Dictionary<BlockInstance, ColliderGroup> _colOf = new();
+    private readonly HashSet<ColliderGroup> _colDirty = new();
+
+    /// <summary>Per section: big enough that its slopes collide as whole cells and its boxes merge over bigger groups.</summary>
+    private bool[] _bigCollision;
 
     public readonly PhysicsBody3D Body;
     public readonly GridModel Model;
@@ -112,6 +127,10 @@ public sealed partial class GridView
         _waterline = _livery != null ? waterline : null;
         _sections = new Node3D[model.Sections.Count];
         _syncedAngle = new float[model.Sections.Count];
+        _bigCollision = new bool[model.Sections.Count];
+        foreach (Section s in model.Sections)
+            _bigCollision[s.Id] = s.Cells.Count > 0 && ColliderBoxes.IsBig(s.Min, s.Max);
+        _heavyCollision = _bigCollision.Any(x => x);
         _toBody = new Transform3D[model.Sections.Count];
         foreach (Section s in model.Sections)
         {
@@ -134,11 +153,8 @@ public sealed partial class GridView
     public (int batches, int shapes, int animated) Stats()
     {
         int batches = 0, shapes = 0;
-        foreach (Chunk c in _chunks.Values)
-        {
-            batches += c.Node?.GetChildCount() ?? 0;
-            shapes += c.Colliders.Count;
-        }
+        foreach (Chunk c in _chunks.Values) batches += c.Node?.GetChildCount() ?? 0;
+        foreach (ColliderGroup g in _colGroups.Values) shapes += g.Colliders.Count;
 
         foreach (BlockNodes n in _nodes.Values)
             if (n.Collider != null) shapes++;
@@ -195,19 +211,24 @@ public sealed partial class GridView
             chunk.VisualDirty = true;
         }
 
-        if (b.Def.HasCollider && b.Def.Shape != BlockShape.Cube)
+        bool big = _bigCollision[b.Section];
+        if (ColliderBoxes.Merges(b.Def, big))
+        {
+            var gk = (b.Section, ColliderBoxes.GroupOf(b.Cell, big));
+            if (!_colGroups.TryGetValue(gk, out ColliderGroup g)) _colGroups[gk] = g = new ColliderGroup { Section = b.Section };
+            g.Blocks.Add(b);
+            _colOf[b] = g;
+            _colDirty.Add(g);
+        }
+        else if (b.Def.HasCollider)
         {
             nodes.Collider = new CollisionShape3D { Shape = BlockVisuals.ShapeOf(b.Def) };
             nodes.Collider.Transform = SectionToBody(b.Section) * Conv.BlockTransform(b.Cell, b.Orientation);
             Body.AddChild(nodes.Collider);
         }
-        else if (b.Def.HasCollider)
-        {
-            chunk.ColliderDirty = true;
-        }
 
         if (nodes.Visual != null || nodes.Collider != null) _nodes[b] = nodes;
-        if (chunk.VisualDirty || chunk.ColliderDirty) _dirty.Add(chunk);
+        if (chunk.VisualDirty) _dirty.Add(chunk);
     }
 
     public void RemoveBlock(BlockInstance b)
@@ -222,12 +243,22 @@ public sealed partial class GridView
             }
         }
 
-        if (!_chunkOf.Remove(b, out Chunk chunk)) return;
+        if (_colOf.Remove(b, out ColliderGroup group))
+        {
+            group.Blocks.Remove(b);
+            _colDirty.Add(group);
+        }
+
+        if (!_chunkOf.Remove(b, out Chunk chunk))
+        {
+            QueueFlush();
+            return;
+        }
+
         chunk.Blocks.Remove(b);
         if (!BlockVisuals.IsAnimated(b.Def)) chunk.VisualDirty = true;
         else FarChanged(b.Section, chunk);
         TouchNeighbors(b);
-        if (b.Def.HasCollider && b.Def.Shape == BlockShape.Cube) chunk.ColliderDirty = true;
         _dirty.Add(chunk);
         QueueFlush();
     }
@@ -283,11 +314,12 @@ public sealed partial class GridView
         foreach (Chunk c in _dirty)
         {
             if (c.VisualDirty) RebuildVisual(c);
-            if (c.ColliderDirty) RebuildColliders(c);
-            c.VisualDirty = c.ColliderDirty = false;
+            c.VisualDirty = false;
         }
 
         _dirty.Clear();
+        foreach (ColliderGroup g in _colDirty) RebuildColliders(g);
+        _colDirty.Clear();
     }
 
     private void RebuildVisual(Chunk c)
@@ -507,61 +539,30 @@ public sealed partial class GridView
     }
 
     /// <summary>Merges the chunk's solid cells into boxes: runs along X, then rows along Z, then layers along Y.</summary>
-    private void RebuildColliders(Chunk c)
+    private void RebuildColliders(ColliderGroup g)
     {
-        foreach ((CollisionShape3D shape, _) in c.Colliders)
+        foreach ((CollisionShape3D shape, _) in g.Colliders)
         {
             if (!GodotObject.IsInstanceValid(shape)) continue;
             Body.RemoveChild(shape);
             shape.QueueFree();
         }
 
-        c.Colliders.Clear();
-        var solid = new HashSet<Int3>();
-        foreach (BlockInstance b in c.Blocks)
-            if (b.Alive && b.Def.HasCollider && b.Def.Shape == BlockShape.Cube)
-                foreach (Int3 cell in b.Cells) solid.Add(cell);
+        g.Colliders.Clear();
+        var solid = new List<Int3>();
+        foreach (BlockInstance b in g.Blocks)
+            if (b.Alive)
+                solid.AddRange(b.Cells);
         if (solid.Count == 0) return;
-
-        var cells = new List<Int3>(solid);
-        cells.Sort((a, b) => a.Y != b.Y ? a.Y.CompareTo(b.Y) : a.Z != b.Z ? a.Z.CompareTo(b.Z) : a.X.CompareTo(b.X));
-        var used = new HashSet<Int3>();
-        bool Free(Int3 p) => solid.Contains(p) && !used.Contains(p);
-        Transform3D toBody = SectionToBody(c.Section);
-        foreach (Int3 start in cells)
+        Transform3D toBody = SectionToBody(g.Section);
+        foreach ((Int3 min, Int3 size) in ColliderBoxes.Merge(solid))
         {
-            if (used.Contains(start)) continue;
-            int dx = 1;
-            while (Free(start + new Int3(dx, 0, 0))) dx++;
-            int dz = 1;
-            while (RowFree(start + new Int3(0, 0, dz), dx)) dz++;
-            int dy = 1;
-            while (LayerFree(start + new Int3(0, dy, 0), dx, dz)) dy++;
-            for (int x = 0; x < dx; x++)
-            for (int y = 0; y < dy; y++)
-            for (int z = 0; z < dz; z++)
-                used.Add(start + new Int3(x, y, z));
-
-            var size = new Vector3(dx, dy, dz) * Conv.CS;
-            Vector3 center = (start.G() + new Vector3(dx - 1, dy - 1, dz - 1) * 0.5f) * Conv.CS;
+            Vector3 extent = new Vector3(size.X, size.Y, size.Z) * Conv.CS;
+            Vector3 center = (min.G() + new Vector3(size.X - 1, size.Y - 1, size.Z - 1) * 0.5f) * Conv.CS;
             var local = new Transform3D(Basis.Identity, center);
-            var shape = new CollisionShape3D { Shape = new BoxShape3D { Size = size }, Transform = toBody * local };
+            var shape = new CollisionShape3D { Shape = new BoxShape3D { Size = extent }, Transform = toBody * local };
             Body.AddChild(shape);
-            c.Colliders.Add((shape, local));
-        }
-
-        bool RowFree(Int3 from, int len)
-        {
-            for (int x = 0; x < len; x++)
-                if (!Free(from + new Int3(x, 0, 0))) return false;
-            return true;
-        }
-
-        bool LayerFree(Int3 from, int lenX, int lenZ)
-        {
-            for (int z = 0; z < lenZ; z++)
-                if (!RowFree(from + new Int3(0, 0, z), lenX)) return false;
-            return true;
+            g.Colliders.Add((shape, local));
         }
     }
 
@@ -629,9 +630,22 @@ public sealed partial class GridView
     /// moves, so this only happens once a section has turned a few degrees.
     /// </summary>
     private bool[] _syncDirty;
+    private bool _heavyCollision;
+    private ulong _lastSyncMs;
+    private const ulong HeavySyncMs = 400;
 
     public void SyncColliders(bool force = false)
     {
+        // Every collider move makes the physics engine rebuild the body's whole shape. A big machine has hundreds
+        // of boxes and dozens of turrets tracking targets, so it catches its turret colliders up a few times a
+        // second instead of nearly every step (they trail the guns by a fraction of a second; nothing notices).
+        if (!force && _heavyCollision)
+        {
+            ulong now = Time.GetTicksMsec();
+            if (now - _lastSyncMs < HeavySyncMs) return;
+            _lastSyncMs = now;
+        }
+
         _syncDirty ??= new bool[Model.Sections.Count];
         bool[] dirty = _syncDirty;
         System.Array.Clear(dirty);
@@ -647,11 +661,11 @@ public sealed partial class GridView
         }
 
         if (!any) return;
-        foreach (Chunk c in _chunks.Values)
+        foreach (ColliderGroup g in _colGroups.Values)
         {
-            if (!dirty[c.Section]) continue;
-            Transform3D toBody = SectionToBody(c.Section);
-            foreach ((CollisionShape3D shape, Transform3D local) in c.Colliders)
+            if (!dirty[g.Section]) continue;
+            Transform3D toBody = SectionToBody(g.Section);
+            foreach ((CollisionShape3D shape, Transform3D local) in g.Colliders)
                 if (GodotObject.IsInstanceValid(shape)) shape.Transform = toBody * local;
         }
 
