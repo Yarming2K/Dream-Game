@@ -355,20 +355,23 @@ public sealed partial class GridView
             }
         }
 
+        // Every part that shares a material and a detail tier is baked into one mesh, already in place: one draw
+        // call per material (and one per shadow split) instead of one per kind of part. A battleship near the camera
+        // was about 2,700 batches this way.
+        var byMaterial = new Dictionary<(Material, Tier), List<(Mesh, List<(Transform3D, int)>)>>();
         foreach (((Mesh mesh, Material mat, Tier tier), List<(Transform3D xf, int o)> xfs) in groups)
         {
-            // Painted parts carry their own position, so each takes the pattern's color where it is.
-            bool painted = mat is ShaderMaterial;
-            var mm = new MultiMesh { TransformFormat = MultiMesh.TransformFormatEnum.Transform3D, UseCustomData = painted, Mesh = mesh, InstanceCount = xfs.Count };
-            for (int i = 0; i < xfs.Count; i++)
-            {
-                mm.SetInstanceTransform(i, xfs[i].xf);
-                if (painted) mm.SetInstanceCustomData(i, Paintwork.PartData(xfs[i].xf, xfs[i].o));
-            }
+            if (!byMaterial.TryGetValue((mat, tier), out var list)) byMaterial[(mat, tier)] = list = new List<(Mesh, List<(Transform3D, int)>)>();
+            list.Add((mesh, xfs));
+        }
 
+        foreach (((Material mat, Tier tier), var parts) in byMaterial)
+        {
+            ArrayMesh baked = Bake(parts);
+            if (baked == null) continue;
             var piece = new Piece
             {
-                Res = mm, Mat = mat, Tier = tier,
+                Res = baked, Mat = mat, Tier = tier,
                 // Small parts' and interior items' shadows can't be made out; leaving them out of the shadow
                 // passes saves drawing them again for every shadow split.
                 ShadowOff = tier != Tier.Normal || mat is StandardMaterial3D sm && sm.ShadingMode == BaseMaterial3D.ShadingModeEnum.Unshaded,
@@ -395,6 +398,87 @@ public sealed partial class GridView
     }
 
     private readonly float _wear, _mud;
+
+    private static readonly Dictionary<Mesh, (Vector3[] v, Vector3[] n, Color[] c, int[] i)> BakeData = new();
+
+    /// <summary>A mesh's vertices, normals, colours and triangles (all its surfaces together), kept for baking.</summary>
+    private static (Vector3[] v, Vector3[] n, Color[] c, int[] i) DataOf(Mesh mesh)
+    {
+        if (BakeData.TryGetValue(mesh, out var d)) return d;
+        var v = new List<Vector3>();
+        var n = new List<Vector3>();
+        var c = new List<Color>();
+        var idx = new List<int>();
+        for (int s = 0; s < mesh.GetSurfaceCount(); s++)
+        {
+            Godot.Collections.Array arr = mesh.SurfaceGetArrays(s);
+            Vector3[] sv = arr[(int)Mesh.ArrayType.Vertex].AsVector3Array();
+            Vector3[] sn = arr[(int)Mesh.ArrayType.Normal].AsVector3Array();
+            Color[] sc = arr[(int)Mesh.ArrayType.Color].VariantType == Variant.Type.Nil ? Array.Empty<Color>() : arr[(int)Mesh.ArrayType.Color].AsColorArray();
+            int[] si = arr[(int)Mesh.ArrayType.Index].VariantType == Variant.Type.Nil ? Array.Empty<int>() : arr[(int)Mesh.ArrayType.Index].AsInt32Array();
+            int b = v.Count;
+            v.AddRange(sv);
+            for (int k = 0; k < sv.Length; k++)
+            {
+                n.Add(k < sn.Length ? sn[k] : Vector3.Up);
+                c.Add(k < sc.Length ? sc[k] : Colors.White);
+            }
+
+            if (si.Length == 0)
+                for (int k = 0; k < sv.Length; k++) idx.Add(b + k);
+            else
+                foreach (int k in si) idx.Add(b + k);
+        }
+
+        return BakeData[mesh] = (v.ToArray(), n.ToArray(), c.ToArray(), idx.ToArray());
+    }
+
+    /// <summary>Copies every placed instance of each mesh into one mesh in the section's frame.</summary>
+    private static ArrayMesh Bake(List<(Mesh mesh, List<(Transform3D xf, int o)> xfs)> parts)
+    {
+        int nv = 0, ni = 0;
+        foreach ((Mesh mesh, List<(Transform3D, int)> xfs) in parts)
+        {
+            var d = DataOf(mesh);
+            nv += d.v.Length * xfs.Count;
+            ni += d.i.Length * xfs.Count;
+        }
+
+        if (nv == 0 || ni == 0) return null;
+        var verts = new Vector3[nv];
+        var norms = new Vector3[nv];
+        var cols = new Color[nv];
+        var idx = new int[ni];
+        int vo = 0, io = 0;
+        foreach ((Mesh mesh, List<(Transform3D xf, int o)> xfs) in parts)
+        {
+            var d = DataOf(mesh);
+            foreach ((Transform3D xf, _) in xfs)
+            {
+                Basis nb = xf.Basis.Inverse().Transposed();
+                for (int k = 0; k < d.v.Length; k++)
+                {
+                    verts[vo + k] = xf * d.v[k];
+                    norms[vo + k] = (nb * d.n[k]).Normalized();
+                    cols[vo + k] = d.c[k];
+                }
+
+                for (int k = 0; k < d.i.Length; k++) idx[io + k] = vo + d.i[k];
+                vo += d.v.Length;
+                io += d.i.Length;
+            }
+        }
+
+        var arrays = new Godot.Collections.Array();
+        arrays.Resize((int)Mesh.ArrayType.Max);
+        arrays[(int)Mesh.ArrayType.Vertex] = verts;
+        arrays[(int)Mesh.ArrayType.Normal] = norms;
+        arrays[(int)Mesh.ArrayType.Color] = cols;
+        arrays[(int)Mesh.ArrayType.Index] = idx;
+        var mesh2 = new ArrayMesh();
+        mesh2.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays);
+        return mesh2;
+    }
 
     /// <summary>How worn and how muddy this machine is (the shader's per-instance settings).</summary>
     private GeometryInstance3D Weathered(GeometryInstance3D g)

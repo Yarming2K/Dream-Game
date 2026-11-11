@@ -64,7 +64,7 @@ public sealed partial class GridView
 
         public GeometryInstance3D Instance() => Res is MultiMesh mm
             ? new MultiMeshInstance3D { Multimesh = mm, MaterialOverride = Mat, CastShadow = ShadowOff ? GeometryInstance3D.ShadowCastingSetting.Off : GeometryInstance3D.ShadowCastingSetting.On }
-            : new MeshInstance3D { Mesh = (Mesh)Res, MaterialOverride = Mat };
+            : new MeshInstance3D { Mesh = (Mesh)Res, MaterialOverride = Mat, CastShadow = ShadowOff ? GeometryInstance3D.ShadowCastingSetting.Off : GeometryInstance3D.ShadowCastingSetting.On };
     }
 
     private sealed class SharedLook
