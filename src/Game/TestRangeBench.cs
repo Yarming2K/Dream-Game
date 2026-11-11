@@ -196,9 +196,17 @@ public partial class TestRange
         Camera3D cam = GetViewport().GetCamera3D();
         s.AppendLine($"{v.Name} at {v.GlobalPosition}, camera at {cam?.GlobalPosition}, LodDistance {v.View.LodDistance:0}, LodScale {GridView.LodScale}");
         foreach (VehicleBody.GunRt g in v.Guns)
-            s.AppendLine($"gun section {g.Info.Section} -> {g.Info.GunSection}: alive {g.Alive}, barrels {g.Barrels}, pitch {g.Pitch}, aim error {g.AimError}");
+            s.AppendLine($"gun {g.Stats.CaliberMm:0} mm, section {g.Info.Section} -> {g.Info.GunSection}: alive {g.Alive}, barrels {g.Barrels}, pitch {g.Pitch}, aim error {g.AimError}");
         var sectionNodes = new HashSet<Node>(v.Model.Sections.Select(x => (Node)v.View.SectionNode(x.Id)));
-        foreach (Section sec in v.Model.Sections.Take(12))
+        // The hull, then the turrets and guns of the first few weapons (the Colossus has 125 sections).
+        var ids = new List<int> { 0 };
+        foreach (VehicleBody.GunRt g in v.Guns.OrderByDescending(g => g.Stats.CaliberMm).Take(4))
+        {
+            if (!ids.Contains(g.Info.Section)) ids.Add(g.Info.Section);
+            if (g.Info.GunSection >= 0 && !ids.Contains(g.Info.GunSection)) ids.Add(g.Info.GunSection);
+        }
+
+        foreach (Section sec in ids.Select(i => v.Model.Sections[i]))
         {
             Node3D n = v.View.SectionNode(sec.Id);
             Transform3D x = n.GlobalTransform;
