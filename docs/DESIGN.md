@@ -150,9 +150,9 @@ What every part should follow, so a design reads as one machine however odd it i
 
    **Part library (Blender).** Detailed meshes for the most visible parts are made by a Blender script (`tools/blender/parts_library.py`, run with `blender -b -P tools/blender/parts_library.py -- models/parts.glb`) and exported to `models/parts.glb`: so far:
    - **Running gear:** tyres with chevron tread, pressed-steel rims, hubs with wheel nuts, road wheels with lightening holes, cast track shoes with grousers and pins (also used for spare tracks).
-   - **Guns:** double-baffle muzzle brakes.
+   - **Guns:** double-baffle muzzle brakes; breech blocks with a breech ring, recoil cylinders, trunnions and an operating lever.
    - **Fittings:** cast round hatches with a hinge, handle and bolted ring; periscope heads with a rain hood; headlight buckets; stowage bins with lids and bands; flared smoke-grenade cups; exhaust silencers.
-   - **Aircraft:** whole twisted propeller blades.
+   - **Aircraft:** whole twisted propeller blades; helicopter rotor blades with a root cuff and tip cap; jet engine casings with bands and stringers, and petal nozzles.
 
    A library mesh can replace several simple pieces at once (a blade's two halves, a hatch and its hinge), fitted to a box of its own. Block models still describe every part as a simple shape, and can tag it with a library mesh's name. When the library's there, the detailed mesh is drawn in its place, fitted to the shape's size, and detail the mesh already has is left out; without it, the simple shapes are drawn. Godot makes each mesh's detail levels when it imports the file. Far models always use the simple shapes. The meshes mark their bevels for the weathering. A test checks that every name a block asks for is in the library.
 

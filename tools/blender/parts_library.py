@@ -282,14 +282,83 @@ def prop_blade():
     ob = new_obj("prop_blade", bm)
     return finish(ob, 0.0)
 
-PARTS = [tire, rim, hub, track_wheel, track_link, muzzle_brake, hatch, periscope, headlight, toolbox, smoke_tube, muffler, prop_blade]
+def jet_engine():
+    # A jet engine's casing (axis Z): three raised bands and stringers along it.
+    ob = new_obj("jet_engine", cylinder(0.235, 0.45, 40))
+    attach(ob, join(*[cylinder(0.24, 0.02, 40, z=z) for z in (-0.15, 0.0, 0.15)]))
+    attach(ob, ring_of(8, 0.232, lambda: box(0.012, 0.014, 0.42), phase=math.pi / 8))
+    return finish(ob, 0.003, 1, 35)
+
+def jet_nozzle():
+    # A convergent nozzle: wide at the front (-Z), narrowing aft, made of overlapping petals, hollow.
+    ob = new_obj("jet_nozzle", cylinder(0.19, 0.12, 32, r2=0.15))
+    cut(ob, cylinder(0.13, 0.2, 32))
+    def petal():
+        b = box(0.012, 0.06, 0.11)
+        bmesh.ops.transform(b, matrix=Matrix.Rotation(math.radians(-18), 4, "Y"), verts=b.verts)
+        return b
+    attach(ob, ring_of(16, 0.172, petal))
+    return finish(ob, 0.003, 1, 35)
+
+def rotor_blade():
+    # A helicopter blade along -Y (the game's +Z): root cuff at +Y, a straight aerofoil, a squared tip cap.
+    bm = bmesh.new()
+    rings, M, N = [], 18, 24
+    for i in range(N + 1):
+        t = i / N
+        c, th = (0.2, 0.07) if t < 0.06 else (0.34, 0.05 * (1 - 0.3 * t))
+        twist = -0.08 * t
+        ring = []
+        for j in range(M):
+            phi = j / M * math.tau
+            x = 0.5 * c * math.cos(phi)
+            z = 0.5 * th * math.sin(phi) + 0.1 * th * (1 - (2 * x / c) ** 2)
+            xr, zr = x * math.cos(twist) - z * math.sin(twist), x * math.sin(twist) + z * math.cos(twist)
+            ring.append(bm.verts.new((xr, 0.5 - t, zr)))
+        rings.append(ring)
+    for i in range(N):
+        for j in range(M):
+            a, b = rings[i][j], rings[i][(j + 1) % M]
+            c2, d = rings[i + 1][(j + 1) % M], rings[i + 1][j]
+            bm.faces.new((a, b, c2, d))
+    bm.faces.new(list(reversed(rings[0])))
+    bm.faces.new(rings[-1])
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    ob = new_obj("rotor_blade", bm)
+    attach(ob, box(0.24, 0.1, 0.07, at=(0, 0.45, 0)))
+    attach(ob, box(0.345, 0.04, 0.052, at=(0, -0.48, 0)))
+    return finish(ob, 0.0)
+
+def breech():
+    # A gun's breech: a cast block, the breech ring the barrel screws into (front, +Y), recoil cylinders on top,
+    # trunnions each side, the breech-block face and operating lever behind.
+    ob = new_obj("breech", box(0.46, 0.46, 0.36, at=(0, 0, -0.02)))
+    ring = cylinder(0.17, 0.08, 32)
+    bmesh.ops.transform(ring, matrix=Matrix.Translation((0, 0.21, 0)) @ Matrix.Rotation(math.pi / 2, 4, "X"), verts=ring.verts)
+    attach(ob, ring)
+    for x in (-0.12, 0.12):
+        rc = cylinder(0.034, 0.46, 16)
+        bmesh.ops.transform(rc, matrix=Matrix.Translation((x, 0.0, 0.19)) @ Matrix.Rotation(math.pi / 2, 4, "X"), verts=rc.verts)
+        attach(ob, rc)
+    for x in (-0.245, 0.245):
+        tr = cylinder(0.055, 0.05, 20)
+        bmesh.ops.transform(tr, matrix=Matrix.Translation((x, 0.02, -0.02)) @ Matrix.Rotation(math.pi / 2, 4, "Y"), verts=tr.verts)
+        attach(ob, tr)
+    attach(ob, box(0.3, 0.04, 0.24, at=(0, -0.235, -0.02)))
+    lever = box(0.03, 0.16, 0.03)
+    bmesh.ops.transform(lever, matrix=Matrix.Translation((0.2, -0.2, -0.08)) @ Matrix.Rotation(math.radians(30), 4, "X"), verts=lever.verts)
+    attach(ob, lever)
+    return finish(ob, 0.006, 2, 35)
+
+PARTS = [tire, rim, hub, track_wheel, track_link, muzzle_brake, hatch, periscope, headlight, toolbox, smoke_tube, muffler, prop_blade,
+         jet_engine, jet_nozzle, rotor_blade, breech]
 made = [f() for f in PARTS]
 
 # Spread out for the preview only; reset before export.
 if PREVIEW:
     for i, ob in enumerate(made):
-        row, col = divmod(i, 7)
-        ob.location = ((col - 3) * 0.7, row * 0.9, 0.35)
+        row, col = divmod(i, 9)
+        ob.location = ((col - 4) * 0.6, row * 1.2, 0.35)
     mat = bpy.data.materials.new("show"); mat.use_nodes = True
     nt = mat.node_tree; bsdf = nt.nodes["Principled BSDF"]
     attr = nt.nodes.new("ShaderNodeVertexColor"); attr.layer_name = "Col"

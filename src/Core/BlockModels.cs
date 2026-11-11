@@ -63,6 +63,7 @@ public static class PartLibrary
     {
         "tire", "rim", "hub", "track_wheel", "track_link", "muzzle_brake",
         "hatch", "periscope", "headlight", "toolbox", "smoke_tube", "muffler", "prop_blade",
+        "jet_engine", "jet_nozzle", "rotor_blade", "breech",
     };
 
     /// <summary>Marks detail that a library part already has, so it's left out when the library is there.</summary>
@@ -474,6 +475,7 @@ public static class BlockModels
             {
                 float r = BarrelRadius(def.Breech?.CaliberMm ?? caliberMm);
                 k.Bevel(new Vector3(Full, 0.44f, Full), Paint.Self, new Vector3(0, -0.03f, 0));
+                k.Lib("breech");
                 k.Cyl(MathF.Min(r * 1.6f, 0.24f), 0.1f, Paint.Steel, new Vector3(0, 0, -0.27f), AlongZ, sides: 24);
                 float rx = MathF.Min(r * 1.25f + 0.04f, 0.2f);
                 foreach (float x in new[] { -rx, rx }) k.Cyl(0.032f, 0.44f, Paint.Steel, new Vector3(x, 0.21f, -0.02f), AlongZ, sides: 10);
@@ -665,10 +667,12 @@ public static class BlockModels
 
             case BlockKind.JetEngine:
                 k.Cyl(0.24f, Full * 0.9f, Paint.Self, new Vector3(0, 0, 0.01f), AlongZ, sides: 24);
+                k.Lib("jet_engine");
                 k.Torus(0.215f, 0.035f, Paint.Steel, new Vector3(0, 0, -0.23f), AlongZ);
                 k.Cyl(0.2f, 0.02f, Paint.Dark, new Vector3(0, 0, -0.215f), AlongZ, sides: 24);
                 k.Cyl(0.06f, 0.08f, Paint.Steel, new Vector3(0, 0, -0.24f), NoseZ, 0.01f, 12);
                 k.Cyl(0.19f, 0.12f, Paint.Dark, new Vector3(0, 0, 0.29f), TailZ, 0.15f, 20);
+                k.Lib("jet_nozzle");
                 k.GlowCyl(0.12f, 0.02f, new Vector3(1f, 0.55f, 0.2f), 2.5f, new Vector3(0, 0, 0.33f), AlongZ);
                 // The exhaust flame, a meter long at full throttle (stretched further on afterburner).
                 k.Node = k.AddNode("Flame", new Vector3(0, 0, 0.34f));
@@ -688,8 +692,11 @@ public static class BlockModels
                 for (int i = 0; i < 4; i++)
                 {
                     Quaternion q = Rot(Vector3.UnitY, i * MathF.PI / 2);
+                    // One whole blade from the library in place of the two halves.
                     k.Box(new Vector3(0.34f, 0.05f, rr * 0.5f), Paint.Self, Vector3.Transform(new Vector3(0, 0, rr * 0.27f), q), q);
+                    k.Lib("rotor_blade", new Vector3(0.34f, 0.05f, rr * 0.98f), new Vector3(0, 0, rr * 0.24f));
                     k.Box(new Vector3(0.3f, 0.045f, rr * 0.46f), Paint.Self, Vector3.Transform(new Vector3(0, 0, rr * 0.75f), q), q);
+                    k.Covered();
                     k.Box(new Vector3(0.3f, 0.05f, 0.2f), Paint.Brass, Vector3.Transform(new Vector3(0, 0, rr * 0.97f), q), q);
                 }
 
