@@ -411,7 +411,11 @@ public partial class Combat : Node3D
         else if (radius >= BigBlastM) Effects.BigExplosion(this, center, radius);
         else Effects.Explosion(this, center, radius);
         // A blast near the ground digs a crater (flak bursts high, and doesn't).
-        if (!flak) Terrain.Blast(center, radius, damage);
+        if (!flak)
+        {
+            Terrain.Blast(center, radius, damage);
+            Scatter.Instance?.Blast(center, radius, damage);
+        }
         Blast?.Invoke(center, radius, damage);
         var destroyedAll = new List<OrderedHit>();
         int hurtCount = 0;

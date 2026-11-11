@@ -85,7 +85,7 @@ public static class Terrain
     private static StaticBody3D _body;
     private static readonly HashSet<int> _collideDirty = new(), _drawDirty = new();
     private static float[] _tileData;
-    private static StandardMaterial3D _material;
+    private static ShaderMaterial _material;
 
     public static StaticBody3D Build()
     {
@@ -229,24 +229,96 @@ public static class Terrain
         }
     }
 
-    private static StandardMaterial3D GroundMaterial()
+    // The ground's look. Each point of the mesh says how much of it is dirt (r), rock (g), sand (b) and earth
+    // churned up by shells or dug (a); grass is what's left. The shader paints each layer from noise in world
+    // space: dry and green patches of grass with bare spots, pebbly dirt, rock with strata and cracks, sand with a
+    // wet band at the waterline, dark clods of turned earth.
+    private const string GroundCode = @"
+shader_type spatial;
+render_mode cull_disabled;
+
+uniform sampler2D blotch : filter_linear_mipmap, repeat_enable;
+uniform sampler2D grain : filter_linear_mipmap, repeat_enable;
+uniform float land = 3.0;
+
+varying vec3 wpos;
+varying vec3 wnrm;
+
+void vertex() {
+	wpos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+	wnrm = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz);
+}
+
+float tri(vec3 p, vec3 n) {
+	vec3 w = n * n;
+	w /= (w.x + w.y + w.z);
+	return texture(grain, p.zy).r * w.x + texture(grain, p.xz).r * w.y + texture(grain, p.xy).r * w.z;
+}
+
+void fragment() {
+	vec2 p = wpos.xz;
+	float big = texture(blotch, p * 0.0035).r;
+	float mid = texture(blotch, p * 0.027 + vec2(0.37, 0.71)).r;
+	float fine = texture(grain, p * 0.31).r;
+	float speck = texture(grain, p * 1.9 + vec2(0.11, 0.53)).r;
+	float edge = (mid - 0.5) * 0.45 + (fine - 0.5) * 0.2;
+
+	// Grass: green and dry patches, a speckle of blades, the odd bare spot.
+	vec3 grass = mix(vec3(0.21, 0.27, 0.11), vec3(0.37, 0.36, 0.17), smoothstep(0.3, 0.75, big));
+	grass = mix(grass, grass * vec3(1.15, 1.08, 0.85), smoothstep(0.45, 0.8, mid) * 0.6);
+	grass *= 0.82 + 0.3 * speck;
+	vec3 dirt = vec3(0.37, 0.31, 0.22) * (0.78 + 0.35 * fine);
+	dirt = mix(dirt, vec3(0.55, 0.52, 0.47), smoothstep(0.78, 0.86, speck) * 0.6);
+	float bare = smoothstep(0.7, 0.8, mid * 0.65 + fine * 0.35);
+	vec3 col = mix(grass, dirt, bare * 0.7);
+	float rough = 0.92;
+
+	float wd = smoothstep(0.25, 0.65, COLOR.r + edge);
+	col = mix(col, dirt, wd);
+
+	// Rock on the slopes: strata and cracks, wrapped round from all sides.
+	float rk = tri(wpos * vec3(0.18, 0.7, 0.18), wnrm);
+	vec3 rock = vec3(0.43, 0.41, 0.37) * (0.62 + 0.55 * rk);
+	rock *= 1.0 - smoothstep(0.82, 0.92, 1.0 - tri(wpos * 0.9, wnrm)) * 0.45;
+	float wr = smoothstep(0.3, 0.6, COLOR.g + edge * 0.6);
+	col = mix(col, rock, wr);
+	rough = mix(rough, 0.82, wr);
+
+	// Sand at the shore, darker and shinier where the sea wets it, then the seabed.
+	vec3 sand = vec3(0.62, 0.56, 0.42) * (0.88 + 0.18 * fine);
+	float wet = 1.0 - smoothstep(0.15, 0.7, wpos.y);
+	sand = mix(sand, vec3(0.4, 0.36, 0.27) * (0.9 + 0.15 * fine), wet);
+	float ws = smoothstep(0.2, 0.6, COLOR.b + edge * 0.5);
+	col = mix(col, sand, ws);
+	rough = mix(rough, mix(0.86, 0.45, wet), ws);
+	col = mix(col, vec3(0.27, 0.28, 0.23), smoothstep(-1.5, -7.0, wpos.y));
+
+	// Churned earth: dark soil with lighter clods.
+	vec3 turned = vec3(0.19, 0.15, 0.1) * (0.72 + 0.45 * fine);
+	turned = mix(turned, vec3(0.33, 0.27, 0.19), smoothstep(0.72, 0.8, speck) * 0.7);
+	col = mix(col, turned, smoothstep(0.1, 0.5, COLOR.a + (fine - 0.5) * 0.3));
+
+	ALBEDO = col;
+	ROUGHNESS = rough;
+	METALLIC = 0.0;
+}
+";
+
+    private static ShaderMaterial GroundMaterial()
     {
-        var ramp = new Gradient();
-        ramp.SetColor(0, new Color(0.82f, 0.82f, 0.82f));
-        ramp.SetColor(1, new Color(1f, 1f, 1f));
-        return new StandardMaterial3D
+        var m = new ShaderMaterial { Shader = new Shader { Code = GroundCode } };
+        m.SetShaderParameter("blotch", new NoiseTexture2D
         {
-            VertexColorUseAsAlbedo = true,
-            Roughness = 0.95f,
-            CullMode = BaseMaterial3D.CullModeEnum.Disabled,
-            AlbedoTexture = new NoiseTexture2D
-            {
-                Width = 512, Height = 512, Seamless = true, ColorRamp = ramp,
-                Noise = new FastNoiseLite { Frequency = 0.03f, FractalOctaves = 5 },
-            },
-            Uv1Triplanar = true,
-            Uv1Scale = new Vector3(0.08f, 0.08f, 0.08f),
-        };
+            Width = 512, Height = 512, Seamless = true, GenerateMipmaps = true,
+            Noise = new FastNoiseLite { NoiseType = FastNoiseLite.NoiseTypeEnum.SimplexSmooth, Frequency = 0.008f, FractalOctaves = 5, Seed = 3 },
+        });
+        m.SetShaderParameter("grain", new NoiseTexture2D
+        {
+            Width = 512, Height = 512, Seamless = true, GenerateMipmaps = true,
+            Noise = new FastNoiseLite { NoiseType = FastNoiseLite.NoiseTypeEnum.Cellular, Frequency = 0.03f, FractalOctaves = 3, Seed = 11 },
+        });
+        m.SetShaderParameter("land", LandHeight);
+        return m;
     }
 
     private static ArrayMesh BuildTileMesh(int tx, int tz)
@@ -258,12 +330,6 @@ public static class Terrain
         var verts = new Vector3[m * m];
         var normals = new Vector3[m * m];
         var colors = new Color[m * m];
-        var grass = new Color(0.36f, 0.4f, 0.24f);
-        var dirt = new Color(0.45f, 0.4f, 0.3f);
-        var rock = new Color(0.45f, 0.44f, 0.42f);
-        var turned = new Color(0.27f, 0.22f, 0.16f);
-        var sand = new Color(0.64f, 0.58f, 0.43f);
-        var seabed = new Color(0.32f, 0.33f, 0.28f);
         for (int lz = 0; lz < m; lz++)
         for (int lx = 0; lx < m; lx++)
         {
@@ -278,14 +344,12 @@ public static class Terrain
             normals[li] = nrm;
             float slope = 1f - nrm.Y;
             bool lane = MathF.Abs(x - half) < LaneHalfWidth;
-            Color c = lane ? dirt.Lerp(grass, 0.35f) : grass.Lerp(dirt, Math.Clamp((y - LandHeight) / 20f, 0, 0.4f));
-            c = c.Lerp(rock, Math.Clamp(slope * 6f, 0, 1));
-            // Beach sand at the waterline, darker seabed below.
-            if (y < LandHeight + 0.8f) c = c.Lerp(sand, Math.Clamp((LandHeight + 0.8f - y) / 1.5f, 0, 1));
-            if (y < -1.5f) c = sand.Lerp(seabed, Math.Clamp((-1.5f - y) / 6f, 0, 1));
-            // Earth that's been blown up or dug: raw dark soil.
-            if (stirred != null && stirred[i] > 0) c = c.Lerp(turned, stirred[i] * 0.85f);
-            colors[li] = c;
+            // How much dirt, rock, sand and churned earth is here (the ground shader paints each).
+            float dirt = lane ? 0.65f : Math.Clamp((y - LandHeight) / 20f, 0, 0.4f);
+            float rock = Math.Clamp(slope * 6f, 0, 1);
+            float sand = y < -1.5f ? 1f : Math.Clamp((LandHeight + 0.8f - y) / 1.5f, 0, 1);
+            float turned = stirred != null ? stirred[i] * 0.85f : 0f;
+            colors[li] = new Color(dirt, rock, sand, turned);
         }
 
         var idx = new int[Tile * Tile * 6];

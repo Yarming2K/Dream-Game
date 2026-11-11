@@ -128,6 +128,8 @@ public partial class TestRange : Node3D
         AddAirfield();
         AddPopupTargets();
         RegisterProps(this);
+        // Trees, bushes and rocks (added after the props, so wheels don't try to drive up the trunks).
+        AddChild(new Scatter { Name = "Scatter" });
         _combat = new Combat { Name = "Combat" };
         AddChild(_combat);
         _combat.Event += OnCombatEvent;

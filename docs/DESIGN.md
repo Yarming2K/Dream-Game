@@ -94,6 +94,21 @@ Command the units you aren't driving yourself, from a command ship, a command ve
   - On the map each unit is drawn at its real size from above (a ship's outline, a building's footprint), but never smaller than an icon you can click.
 - What's next for command: zones and objectives to fight over, enemy commanders that give their own orders, and supply.
 
+### The island's ground and growth
+- **Ground.** One shader paints the island from layers each point of the ground carries:
+  - **Grass:** green and dry patches, a speckle of blades, the odd bare spot.
+  - **Dirt:** pebbly, on the firing lane and higher up.
+  - **Rock:** with strata and cracks on the slopes.
+  - **Sand:** at the shore, with a dark wet band where the sea reaches it, then the seabed.
+  - **Churned earth:** dark soil with clods wherever shells landed or someone dug.
+
+  All of it comes from noise in world space, so nothing tiles or needs image files.
+- **Trees, bushes and rocks.**
+  - **Where they grow:** woods in clumps (pines higher up, broadleaf lower down), bushes round their edges and scattered in the open, rocks and boulders on the slopes. Nothing on the beach, the firing lane, the airstrip, the helipad or the building pads. The placement is in the rules code and seeded, so every player's island is the same.
+  - **Models:** made in Blender (`tools/blender/env_library.py`, to `models/env.glb`): trunks with bark ridges, leaves on cards that the shader cuts into clusters and sways in the wind, rocks with lichen.
+  - **Drawing:** in batches per kind per 64 m patch; bushes stop being drawn at 260 m, small rocks at 420 m, trees at 1.1 km.
+  - **Getting knocked down:** trunks and rocks are solid. A vehicle hitting a tree hard enough (mass × speed over about 18 tonne·m/s for a full-size tree: a tank at walking pace, not a light car) knocks it flat the way it was going. Bushes go flat under anything that drives over them. Blasts throw trees down away from them, and a tree whose ground is blown away falls over.
+
 ### Style rules
 What every part should follow, so a design reads as one machine however odd it is:
 1. **Flat faces, chamfered edges.** Curves only where something turns or holds pressure: wheels, barrels, tanks, rotors, round hulls.
