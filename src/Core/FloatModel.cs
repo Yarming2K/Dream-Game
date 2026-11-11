@@ -45,8 +45,14 @@ public sealed class FloatModel
     private readonly Int3 _min, _dims;
     private readonly short[] _compAt;
 
-    /// <summary>Sizes bricks so a design of <paramref name="cells"/> cells makes roughly 2,500 of them at most.</summary>
-    public static int BrickSizeFor(int cells) => Math.Clamp((int)MathF.Round(MathF.Cbrt(cells / 2500f)), 1, 12);
+    /// <summary>
+    /// Sizes bricks so a design of <paramref name="cells"/> cells makes roughly 2,500 of them at most, and a boat
+    /// of more than a few hundred cells uses 1 m bricks rather than one per half-metre cell. Each brick is worked
+    /// out every physics step: a patrol boat on half-metre bricks cost as much as a battleship, and ten of them in
+    /// a battle were most of the "Ships" time.
+    /// </summary>
+    public static int BrickSizeFor(int cells) =>
+        cells < 600 ? 1 : Math.Clamp(Math.Max(2, (int)MathF.Round(MathF.Cbrt(cells / 2500f))), 1, 12);
 
     public FloatModel(IEnumerable<(Int3 cell, float volume)> solids, List<Compartment> comps, int brickSize = 0)
     {

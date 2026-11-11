@@ -568,11 +568,13 @@ public partial class VehicleBody : RigidBody3D, IGridHost
             FuelL = Mathf.Max(0, FuelL - burn);
         }
 
-        // Out in the open, with nothing but the ground under it, the wheels test the island's height grid
-        // directly; near other vehicles, buildings or ramps they ask the physics engine.
-        bool open = WorldQuery.Ground != null && OnlyGroundNear();
-        PhysicsDirectSpaceState3D space = open ? null : GetWorld3D().DirectSpaceState;
-        if (!open && _wheelQuery == null)
+        // A wheel tests the island's height grid directly unless something else (another machine, a ramp, a
+        // house) is close enough that its ray could meet it: then it asks the physics engine, which costs far
+        // more. Decided wheel by wheel, so tanks parked side by side in a column still use the cheap test.
+        bool grid = WorldQuery.Ground != null;
+        if (grid) GatherNear();
+        PhysicsDirectSpaceState3D space = null;
+        if (_wheelQuery == null)
             _wheelQuery = new PhysicsRayQueryParameters3D
             {
                 CollisionMask = GridRegistry.Layers.All, Exclude = new Godot.Collections.Array<Rid> { GetRid() },
@@ -582,7 +584,7 @@ public partial class VehicleBody : RigidBody3D, IGridHost
         {
             Vector3 mount = xf * w.Mount;
             Vector3 end = mount - up * (w.Rest + w.Radius);
-            if (open)
+            if (grid && !RayMayHitSomething(mount, end))
             {
                 w.Contact = WorldQuery.Ground.Raycast(mount.N(), end.N(), out float gd, out System.Numerics.Vector3 gn);
                 if (w.Contact)
@@ -593,6 +595,7 @@ public partial class VehicleBody : RigidBody3D, IGridHost
             }
             else
             {
+                space ??= GetWorld3D().DirectSpaceState;
                 _wheelQuery.From = mount;
                 _wheelQuery.To = end;
                 Godot.Collections.Dictionary hit = space.IntersectRay(_wheelQuery);
@@ -704,15 +707,45 @@ public partial class VehicleBody : RigidBody3D, IGridHost
     }
 
     /// <summary>True when nothing but the bare ground is near enough for the wheels to touch.</summary>
-    private bool OnlyGroundNear()
+    private readonly List<(Transform3D toLocal, Aabb box)> _nearHosts = new();
+    private readonly List<Aabb> _nearProps = new();
+
+    /// <summary>The other machines and scenery near enough that a wheel's ray might meet them (usually none).</summary>
+    private void GatherNear()
     {
+        _nearHosts.Clear();
+        _nearProps.Clear();
         Vector3 c = GlobalPosition;
         float r = Radius + 3f;
         _nearby.Clear();
         WorldQuery.HostsNear(c, r, _nearby);
         foreach (IGridHost h in _nearby)
-            if (h != this) return false;
-        return !WorldQuery.PropsIn(new Aabb(c - Vector3.One * r, Vector3.One * r * 2f));
+        {
+            if (h == this || h.Body == null || !IsInstanceValid(h.Body) || h.Model.Sections.Count == 0) continue;
+            // Its hull's box in its own frame, a metre larger all round (turrets and guns sit above the hull,
+            // well clear of the ground where wheel rays are).
+            Section hull = h.Model.Sections[0];
+            Vector3 lo = hull.Min.G() * Conv.CS - Vector3.One * (Conv.CS * 0.5f + 1f);
+            Vector3 hi = hull.Max.G() * Conv.CS + Vector3.One * (Conv.CS * 0.5f + 1f);
+            _nearHosts.Add((h.Body.GlobalTransform.AffineInverse(), new Aabb(lo, hi - lo)));
+        }
+
+        WorldQuery.PropsNear(new Aabb(c - Vector3.One * r, Vector3.One * r * 2f), _nearProps);
+    }
+
+    private bool RayMayHitSomething(Vector3 from, Vector3 to)
+    {
+        foreach ((Transform3D toLocal, Aabb box) in _nearHosts)
+        {
+            Vector3 a = toLocal * from, b = toLocal * to;
+            if (new Aabb(a, Vector3.Zero).Expand(b).Intersects(box)) return true;
+        }
+
+        if (_nearProps.Count == 0) return false;
+        var seg = new Aabb(from, Vector3.Zero).Expand(to).Grow(0.3f);
+        foreach (Aabb p in _nearProps)
+            if (p.Intersects(seg)) return true;
+        return false;
     }
 
     private static float Wrap(float a)

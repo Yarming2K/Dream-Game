@@ -121,6 +121,13 @@ public static class WorldQuery
     }
 
     /// <summary>Whether a box (in world space) overlaps any solid scenery other than the ground.</summary>
+    /// <summary>Adds the boxes of solid scenery (ramps, walls, houses) that overlap <paramref name="box"/>.</summary>
+    public static void PropsNear(Aabb box, List<Aabb> result)
+    {
+        foreach (Aabb p in Props)
+            if (p.Intersects(box)) result.Add(p);
+    }
+
     public static bool PropsIn(Aabb box)
     {
         foreach (Aabb p in Props)

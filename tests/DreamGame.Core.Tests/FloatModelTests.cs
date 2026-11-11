@@ -38,6 +38,25 @@ public class FloatModelTests
     }
 
     [Fact]
+    public void ABoatUsesMetreBricksWithTheSameBalance()
+    {
+        // A patrol-boat sized hull: one brick per cell made it cost as much per step as a battleship.
+        var hull = Hull(10, 6, 40);
+        List<Compartment> comps = Hydro.FindCompartments(hull);
+        var auto = new FloatModel(Solids(hull), comps);
+        var fine = new FloatModel(Solids(hull), comps, 1);
+        Assert.Equal(2, auto.BrickSize);
+        Assert.True(auto.Bricks.Count < fine.Bricks.Count / 4);
+        // Floats on the same volume, centered in the same place.
+        static System.Numerics.Vector3 Centre(FloatModel m) =>
+            m.Bricks.Aggregate(System.Numerics.Vector3.Zero, (c, b) => c + b.Center * (b.Solid + m.AirIn(b))) / Total(m);
+        Assert.Equal(Total(fine), Total(auto), 2);
+        Assert.True(System.Numerics.Vector3.Distance(Centre(fine), Centre(auto)) < 0.15f);
+        // A small machine keeps one brick per cell.
+        Assert.Equal(1, FloatModel.BrickSizeFor(400));
+    }
+
+    [Fact]
     public void AHugeHullStillMakesOnlyAFewThousandBricks()
     {
         var hull = Hull(200, 30, 40);
