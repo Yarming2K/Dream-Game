@@ -19,6 +19,9 @@ public partial class Atmosphere : Node3D
 
     /// <summary>The haze the range should use above water (it thins with height there).</summary>
     public float FogDensity { get; private set; } = 0.0012f;
+
+    /// <summary>How wet everything is (0 dry to 1 soaked), for game code; the shaders read their own copy.</summary>
+    public static float Wetness { get; private set; }
     public Color FogColor { get; private set; } = new(0.66f, 0.7f, 0.73f);
 
     private Godot.Environment _env;
@@ -230,6 +233,7 @@ void sky() {
         FogDensity = 0.0012f * l.Fog;
         FogColor = l.FogColor;
         RenderingServer.GlobalShaderParameterSet("wetness", _wet);
+        Wetness = _wet;
         RenderingServer.GlobalShaderParameterSet("wind", l.Wind);
         RenderingServer.GlobalShaderParameterSet("sea_state", l.Sea);
     }

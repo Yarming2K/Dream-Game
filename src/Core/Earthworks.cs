@@ -104,6 +104,14 @@ public sealed class Earthworks
 
     private GridRect _wornDirty = GridRect.Empty;
 
+    /// <summary>The wear at a point (the nearest sample's).</summary>
+    public float WornAt(float x, float z)
+    {
+        int ix = Math.Clamp((int)MathF.Round((x - Field.Origin.X) / S), 0, W - 1);
+        int iz = Math.Clamp((int)MathF.Round((z - Field.Origin.Y) / S), 0, D - 1);
+        return Worn[iz * W + ix];
+    }
+
     /// <summary>Samples whose wear has visibly changed since the last call (then forgets them).</summary>
     public GridRect TakeWornDirty()
     {

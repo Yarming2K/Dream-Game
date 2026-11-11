@@ -779,6 +779,29 @@ public static class Effects
         };
     }
 
+    /// <summary>
+    /// What a wheel or track throws up behind it: a low cloud of dust on dry ground, clods of mud when it's wet or
+    /// rutted. <paramref name="muddy"/> is 0 (dust) to 1 (mud); <paramref name="strength"/> grows with speed and weight.
+    /// </summary>
+    public static void Kickup(Node3D world, Vector3 pos, Vector3 back, float strength, float muddy)
+    {
+        if (world == null || Detail(pos, 0.6f) < 2) return;
+        FxNode fx = Spawn(world, pos, 3.5f);
+        if (muddy < 0.6f)
+            Emit(fx, new Burst
+            {
+                Mat = Smoke, Size = (1.1f + strength) * (1f - muddy * 0.6f), Amount = 3, Life = 2.6f, LifeRandom = 0.4f,
+                Dir = back + Vector3.Up * 0.6f, Spread = 35, VelMin = 0.6f, VelMax = 1.6f + strength, DampMin = 1.5f, DampMax = 2.5f,
+                Gravity = new Vector3(0, 0.15f, 0), Colors = DustRamp, ScaleFrom = 0.4f, ScaleTo = 1f,
+            });
+        if (muddy > 0.3f)
+            Emit(fx, new Burst
+            {
+                Mat = Smoke, Size = 0.14f, Amount = (int)(3 + 5 * muddy * strength), Life = 0.9f, Dir = back + Vector3.Up * 1.2f, Spread = 25,
+                VelMin = 2.5f, VelMax = 4.5f + strength * 2f, Gravity = new Vector3(0, -14f, 0), Colors = ClodRamp, ScaleFrom = 0.9f, ScaleTo = 0.6f,
+            });
+    }
+
     /// <summary>A puff of exhaust from a working engine (darker and bigger the harder it works).</summary>
     public static void ExhaustPuff(Node3D world, Vector3 pos, Vector3 dir, float load)
     {

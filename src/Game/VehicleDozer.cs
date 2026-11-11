@@ -160,6 +160,7 @@ public partial class VehicleBody
         if (speed < 1.2f || GlobalPosition.DistanceTo(WorldQuery.Viewer) > 600f) return;
         float weight = Mathf.Clamp(Mass / 25000f, 0.3f, 2f);
         var flat = new Vector3(vel.X, 0, vel.Z);
+        KickUp(flat, speed, weight);
         int stamps = Mathf.Clamp((int)(flat.Length() * step / 0.6f), 1, 12);
         foreach (WheelRt w in Wheels)
         {
@@ -177,6 +178,37 @@ public partial class VehicleBody
                 Vector3 p = w.HitPos - flat * step * (k / (float)stamps);
                 Terrain.Earth.Trample(new System.Numerics.Vector2(p.X, p.Z), track ? 0.5f : 0.3f, each);
             }
+        }
+    }
+
+    /// <summary>
+    /// Dust behind the rearmost wheels (or the back of each track) on dry ground; mud flung up when it's raining or the
+    /// ground's rutted. Close to the camera only, and only going at a fair pace.
+    /// </summary>
+    private void KickUp(Vector3 flat, float speed, float weight)
+    {
+        if (speed < 3f || GlobalPosition.DistanceTo(WorldQuery.Viewer) > 160f) return;
+        Vector3 back = -flat.Normalized();
+        WheelRt left = null, right = null;
+        float leftBack = float.MinValue, rightBack = float.MinValue;
+        foreach (WheelRt w in Wheels)
+        {
+            if (!w.Contact) continue;
+            float along = (w.HitPos - GlobalPosition).Dot(back);
+            if (w.LeftSide && along > leftBack) (left, leftBack) = (w, along);
+            if (!w.LeftSide && along > rightBack) (right, rightBack) = (w, along);
+        }
+
+        float wet = Atmosphere.Wetness;
+        Node3D world = GetParent<Node3D>();
+        foreach (WheelRt w in new[] { left, right })
+        {
+            if (w == null) continue;
+            float ground = WorldQuery.Ground.HeightAt(w.HitPos.X, w.HitPos.Z);
+            if (Mathf.Abs(w.HitPos.Y - ground) > 0.25f || ground < Terrain.LandHeight - 0.5f) continue;
+            float rut = Terrain.Earth.WornAt(w.HitPos.X, w.HitPos.Z);
+            float muddy = Mathf.Clamp(Mathf.Max(wet, rut - 0.3f), 0f, 1f);
+            Effects.Kickup(world, w.HitPos + Vector3.Up * 0.2f, back, Mathf.Clamp(speed / 12f, 0.2f, 1.5f) * weight, muddy);
         }
     }
 }
