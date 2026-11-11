@@ -184,12 +184,112 @@ def muzzle_brake():
     attach(ob, bmesh_of(cap))
     return finish(ob, 0.004, 2, 35)
 
-PARTS = [tire, rim, hub, track_wheel, track_link, muzzle_brake]
+# Small fittings. Remember: the game's -Z (a block's front) is Blender's +Y.
+def hatch():
+    # A cast round hatch on a bolted ring: domed lid, central boss, three-knuckle hinge at the back, grab handle.
+    ob = new_obj("hatch", cylinder(0.19, 0.03, 40, z=-0.0275))
+    attach(ob, cylinder(0.17, 0.04, 40, z=0.0075))
+    attach(ob, cylinder(0.17, 0.01, 40, z=0.0325, r2=0.14))
+    attach(ob, cylinder(0.05, 0.02, 20, z=0.0325))
+    for x in (-0.06, 0.0, 0.06):
+        k = cylinder(0.022, 0.036, 12)
+        bmesh.ops.transform(k, matrix=Matrix.Translation((x, -0.183, 0.008)) @ Matrix.Rotation(math.pi / 2, 4, "Y"), verts=k.verts)
+        attach(ob, k)
+    attach(ob, join(box(0.03, 0.06, 0.012, at=(-0.03, -0.15, 0.022)), box(0.03, 0.06, 0.012, at=(0.03, -0.15, 0.022))))
+    attach(ob, join(box(0.08, 0.014, 0.01, at=(0, 0.1, 0.0425 - 0.005)), box(0.012, 0.012, 0.012, at=(-0.034, 0.1, 0.03)), box(0.012, 0.012, 0.012, at=(0.034, 0.1, 0.03))))
+    attach(ob, ring_of(8, 0.18, lambda: cylinder(0.01, 0.012, 6), z=-0.008, phase=math.pi / 8))
+    return finish(ob, 0.003, 1, 35)
+
+def periscope():
+    # A periscope head: armoured base, housing with a sloped front, window recess, rain hood over the glass.
+    ob = new_obj("periscope", box(0.2, 0.16, 0.06, at=(0, 0, -0.0555)))
+    up = new_obj("up", box(0.15, 0.12, 0.1, at=(0, 0, 0.0245)))
+    cut(up, box(0.11, 0.02, 0.045, at=(0, 0.06, 0.0295)))
+    attach(ob, bmesh_of(up))
+    attach(ob, box(0.16, 0.05, 0.012, at=(0, 0.07, 0.0795)))
+    attach(ob, join(box(0.012, 0.03, 0.03, at=(-0.07, 0.06, 0.07)), box(0.012, 0.03, 0.03, at=(0.07, 0.06, 0.07))))
+    return finish(ob, 0.004, 1, 35)
+
+def headlight():
+    # A lamp bucket, wider at the front (Blender -Z), with a rim and the lens set in it.
+    ob = new_obj("headlight", cylinder(0.075, 0.12, 32, r2=0.058))
+    attach(ob, cylinder(0.08, 0.016, 32, z=-0.052))
+    attach(ob, cylinder(0.05, 0.02, 20, z=0.06))
+    return finish(ob, 0.003, 1, 35)
+
+def toolbox():
+    # A stowage bin: pressed body, a lid with a lip, two bands round it, hinges at the back.
+    ob = new_obj("toolbox", box(0.38, 0.21, 0.13, at=(0, 0, -0.015)))
+    cut(ob, box(0.28, 0.012, 0.07, at=(0, 0.105, -0.02)))
+    attach(ob, box(0.42, 0.225, 0.03, at=(0, 0, 0.065)))
+    attach(ob, join(box(0.02, 0.226, 0.15, at=(-0.17, 0, -0.005)), box(0.02, 0.226, 0.15, at=(0.17, 0, -0.005))))
+    for x in (-0.12, 0.12):
+        k = cylinder(0.01, 0.06, 10)
+        bmesh.ops.transform(k, matrix=Matrix.Translation((x, -0.113, 0.05)) @ Matrix.Rotation(math.pi / 2, 4, "Y"), verts=k.verts)
+        attach(ob, k)
+    return finish(ob, 0.004, 1, 35)
+
+def smoke_tube():
+    # A smoke-grenade cup: a tube flared at the mouth (+Z), a clamp band, a base boss for the wiring.
+    ob = new_obj("smoke_tube", cylinder(0.036, 0.17, 24, z=-0.005))
+    m = new_obj("mouth", cylinder(0.036, 0.03, 24, z=0.085, r2=0.043))
+    cut(m, cylinder(0.03, 0.06, 24, z=0.1))
+    attach(ob, bmesh_of(m))
+    attach(ob, cylinder(0.04, 0.012, 24, z=-0.04))
+    attach(ob, cylinder(0.042, 0.015, 24, z=-0.0925))
+    return finish(ob, 0.003, 1, 35)
+
+def muffler():
+    # An exhaust silencer: a drum with tapered ends, two clamp bands and a seam along it.
+    ob = new_obj("muffler", cylinder(0.075, 0.28, 32))
+    attach(ob, cylinder(0.075, 0.04, 32, z=0.16, r2=0.045))
+    attach(ob, cylinder(0.045, 0.04, 32, z=-0.16, r2=0.075))
+    attach(ob, join(cylinder(0.08, 0.02, 32, z=0.09), cylinder(0.08, 0.02, 32, z=-0.09)))
+    attach(ob, box(0.012, 0.012, 0.26, at=(0, 0.074, 0)))
+    return finish(ob, 0.003, 1, 35)
+
+def prop_blade():
+    # A propeller blade along +Z: round shank, airfoil section, tapering, twisted, with a rounded tip.
+    bm = bmesh.new()
+    rings, M, N = [], 20, 28
+    for i in range(N + 1):
+        t = i / N
+        if t < 0.08:
+            c, th = 0.06, 0.06  # the shank
+        else:
+            c = 0.17 * (1 - 0.38 * (t - 0.08))
+            th = 0.035 * (1 - 0.55 * (t - 0.08))
+        if t > 0.86:
+            k = math.sqrt(max(0.0, 1 - ((t - 0.86) / 0.14) ** 2))
+            c *= max(k, 0.08); th *= max(k, 0.15)
+        twist = -0.12 * t
+        ring = []
+        for j in range(M):
+            phi = j / M * math.tau
+            x = 0.5 * c * math.cos(phi)
+            y = 0.5 * th * math.sin(phi) + 0.12 * th * (1 - (2 * x / c) ** 2 if c > 0 else 0)
+            xr, yr = x * math.cos(twist) - y * math.sin(twist), x * math.sin(twist) + y * math.cos(twist)
+            ring.append(bm.verts.new((xr, yr, t)))
+        rings.append(ring)
+    for i in range(N):
+        for j in range(M):
+            a, b = rings[i][j], rings[i][(j + 1) % M]
+            c2, d = rings[i + 1][(j + 1) % M], rings[i + 1][j]
+            bm.faces.new((a, b, c2, d))
+    bm.faces.new(list(reversed(rings[0])))
+    bm.faces.new(rings[-1])
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    ob = new_obj("prop_blade", bm)
+    return finish(ob, 0.0)
+
+PARTS = [tire, rim, hub, track_wheel, track_link, muzzle_brake, hatch, periscope, headlight, toolbox, smoke_tube, muffler, prop_blade]
 made = [f() for f in PARTS]
 
 # Spread out for the preview only; reset before export.
 if PREVIEW:
-    for i, ob in enumerate(made): ob.location = ((i - (len(made) - 1) / 2) * 0.75, 0, 0.35)
+    for i, ob in enumerate(made):
+        row, col = divmod(i, 7)
+        ob.location = ((col - 3) * 0.7, row * 0.9, 0.35)
     mat = bpy.data.materials.new("show"); mat.use_nodes = True
     nt = mat.node_tree; bsdf = nt.nodes["Principled BSDF"]
     attr = nt.nodes.new("ShaderNodeVertexColor"); attr.layer_name = "Col"
@@ -204,7 +304,7 @@ if PREVIEW:
     sun = bpy.data.objects.new("sun", bpy.data.lights.new("sun", "SUN")); scene.collection.objects.link(sun)
     sun.data.energy = 3; sun.rotation_euler = (math.radians(50), 0, math.radians(30))
     cam = bpy.data.objects.new("cam", bpy.data.cameras.new("cam")); scene.collection.objects.link(cam)
-    cam.location = (0.0, -3.6, 2.6); cam.data.lens = 26
+    cam.location = (0.0, -3.2, 3.4); cam.data.lens = 24
     cam.rotation_euler = (Vector((0, 0, 0.3)) - cam.location).to_track_quat("-Z", "Y").to_euler()
     scene.camera = cam
     scene.render.engine = "CYCLES"; scene.cycles.samples = 32; scene.cycles.use_denoising = True

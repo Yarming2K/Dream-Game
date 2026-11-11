@@ -391,9 +391,10 @@ public static class BlockVisuals
             {
                 Aabb box = lib.GetAabb();
                 float across = 2f * Mathf.Max(p.Size.X, p.Size.Z);
-                Vector3 want = p.Prim == Prim.Cylinder ? new Vector3(across, p.Size.Y, across) : p.Size.G();
+                Vector3 want = p.FitSize != System.Numerics.Vector3.Zero ? p.FitSize.G()
+                    : p.Prim == Prim.Cylinder ? new Vector3(across, p.Size.Y, across) : p.Size.G();
                 var s = new Vector3(want.X / Mathf.Max(box.Size.X, 1e-4f), want.Y / Mathf.Max(box.Size.Y, 1e-4f), want.Z / Mathf.Max(box.Size.Z, 1e-4f));
-                return (lib, placement * new Transform3D(Basis.FromScale(s), -(box.GetCenter() * s)));
+                return (lib, placement * new Transform3D(Basis.FromScale(s), p.FitCenter.G() - box.GetCenter() * s));
             }
         }
 

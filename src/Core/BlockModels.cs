@@ -59,7 +59,11 @@ public enum Paint
 public static class PartLibrary
 {
     /// <summary>Every mesh in the library. The Blender script makes exactly these.</summary>
-    public static readonly string[] Names = { "tire", "rim", "hub", "track_wheel", "track_link", "muzzle_brake" };
+    public static readonly string[] Names =
+    {
+        "tire", "rim", "hub", "track_wheel", "track_link", "muzzle_brake",
+        "hatch", "periscope", "headlight", "toolbox", "smoke_tube", "muffler", "prop_blade",
+    };
 
     /// <summary>Marks detail that a library part already has, so it's left out when the library is there.</summary>
     public const string Covered = "-";
@@ -86,6 +90,12 @@ public struct ModelPart
     /// Without the library the simple shape is drawn.
     /// </summary>
     public string Model;
+
+    /// <summary>
+    /// The box a library mesh is fitted to, in the part's own frame, when it covers more than the part's simple
+    /// shape (a whole propeller blade drawn in place of its inner half). Zero size: the simple shape's own size.
+    /// </summary>
+    public Vector3 FitSize, FitCenter;
 
     /// <summary>A key that is the same for every part with the same mesh.</summary>
     public readonly string MeshKey => Prim switch
@@ -179,8 +189,29 @@ public static class BlockModels
             M.Parts[^1] = p;
         }
 
+        /// <summary>Like <see cref="Lib(string)"/>, fitting the mesh to a box of its own (in the part's frame).</summary>
+        public void Lib(string model, Vector3 fitSize, Vector3 fitCenter)
+        {
+            ModelPart p = M.Parts[^1];
+            p.Model = model;
+            p.FitSize = fitSize;
+            p.FitCenter = fitCenter;
+            M.Parts[^1] = p;
+        }
+
         /// <summary>The last part is detail a library part already has: left out when the library is there.</summary>
         public void Covered() => Lib(PartLibrary.Covered);
+
+        /// <summary>The last <paramref name="n"/> parts are covered by a library part.</summary>
+        public void CoverLast(int n)
+        {
+            for (int i = M.Parts.Count - n; i < M.Parts.Count; i++)
+            {
+                ModelPart p = M.Parts[i];
+                p.Model = PartLibrary.Covered;
+                M.Parts[i] = p;
+            }
+        }
 
         public int AddNode(string name, Vector3 pos)
         {
@@ -620,8 +651,11 @@ public static class BlockModels
                 {
                     Quaternion q = Rot(Vector3.UnitZ, i * MathF.PI / 2);
                     float rr = Aero.PropRadiusM;
+                    // One whole twisted blade from the library, in place of the two halves.
                     k.Slab(new Vector3(0.17f, rr * 0.5f, 0.035f), 0.78f, 0.85f, Paint.Self, Vector3.Transform(new Vector3(0, rr * 0.27f, 0), q), q * Rot(Vector3.UnitY, 0.32f));
+                    k.Lib("prop_blade", new Vector3(0.17f, rr * 0.98f, 0.035f), new Vector3(0, rr * 0.24f, 0));
                     k.Slab(new Vector3(0.133f, rr * 0.48f, 0.03f), 0.6f, 0.8f, Paint.Self, Vector3.Transform(new Vector3(0, rr * 0.74f, 0), q), q * Rot(Vector3.UnitY, 0.2f));
+                    k.Covered();
                     k.Box(new Vector3(0.075f, 0.08f, 0.026f), Paint.Brass, Vector3.Transform(new Vector3(0, rr * 0.97f, 0), q), q * Rot(Vector3.UnitY, 0.2f));
                 }
 
@@ -885,37 +919,55 @@ public static class BlockModels
         {
             case "hatch":
                 k.Cyl(0.19f, 0.03f, Paint.SelfDark, new Vector3(0, b + 0.015f, 0), sides: 24);
+                k.Covered();
                 k.Cyl(0.17f, 0.04f, Paint.Self, new Vector3(0, b + 0.05f, 0), sides: 24);
+                k.Lib("hatch", new Vector3(0.38f, 0.085f, 0.395f), new Vector3(0, -0.0075f, 0.0075f));
                 k.Cyl(0.05f, 0.02f, Paint.SelfDark, new Vector3(0, b + 0.075f, 0), sides: 12);
+                k.Covered();
                 k.Cyl(0.025f, 0.14f, Paint.Steel, new Vector3(0, b + 0.05f, 0.18f), AlongX, sides: 10);
+                k.Covered();
                 k.Box(new Vector3(0.08f, 0.02f, 0.015f), Paint.Steel, new Vector3(0, b + 0.078f, -0.1f));
+                k.Covered();
                 k.Bolts(8, 0.18f, b + 0.032f, 0.01f, 0.02f, Paint.Steel);
+                k.CoverLast(8);
                 break;
             case "periscope":
                 k.Bevel(new Vector3(0.2f, 0.06f, 0.16f), Paint.SelfDark, new Vector3(0, b + 0.03f, 0), 0.01f);
+                k.Covered();
                 k.Bevel(new Vector3(0.15f, 0.1f, 0.12f), Paint.Self, new Vector3(0, b + 0.11f, 0), 0.01f);
+                k.Lib("periscope", new Vector3(0.2f, 0.171f, 0.175f), new Vector3(0, -0.0245f, -0.0075f));
                 k.Box(new Vector3(0.11f, 0.045f, 0.01f), Paint.Glass, new Vector3(0, b + 0.115f, -0.062f));
                 k.Box(new Vector3(0.16f, 0.012f, 0.05f), Paint.SelfDark, new Vector3(0, b + 0.165f, -0.07f));
+                k.Covered();
                 break;
             case "headlight":
                 k.Box(new Vector3(0.04f, 0.12f, 0.04f), Paint.Dark, new Vector3(0, b + 0.06f, 0.04f));
                 k.Cyl(0.075f, 0.12f, Paint.Self, new Vector3(0, b + 0.15f, 0), AlongZ, sides: 16);
+                k.Lib("headlight");
                 k.GlowCyl(0.06f, 0.01f, Lamp, 1.2f, new Vector3(0, b + 0.15f, -0.062f), AlongZ);
                 k.Torus(0.08f, 0.008f, Paint.Dark, new Vector3(0, b + 0.15f, -0.075f), AlongZ);
+                k.Covered();
                 k.Box(new Vector3(0.012f, 0.16f, 0.012f), Paint.Dark, new Vector3(0, b + 0.15f, -0.078f));
                 k.Box(new Vector3(0.16f, 0.012f, 0.012f), Paint.Dark, new Vector3(0, b + 0.15f, -0.078f));
                 break;
             case "toolbox":
                 k.Bevel(new Vector3(0.42f, 0.16f, 0.22f), Paint.Self, new Vector3(0, b + 0.08f, 0), 0.012f);
+                k.Lib("toolbox");
                 k.Box(new Vector3(0.43f, 0.012f, 0.225f), Paint.SelfDark, new Vector3(0, b + 0.125f, 0));
+                k.Covered();
                 foreach (float x in new[] { -0.12f, 0.12f }) k.Box(new Vector3(0.03f, 0.05f, 0.012f), Paint.Steel, new Vector3(x, b + 0.11f, -0.113f));
-                foreach (float x in new[] { -0.17f, 0.17f }) k.Box(new Vector3(0.02f, 0.165f, 0.226f), Paint.SelfDark, new Vector3(x, b + 0.08f, 0));
+                foreach (float x in new[] { -0.17f, 0.17f })
+                {
+                    k.Box(new Vector3(0.02f, 0.165f, 0.226f), Paint.SelfDark, new Vector3(x, b + 0.08f, 0));
+                    k.Covered();
+                }
                 break;
             case "spare_tracks":
                 k.Box(new Vector3(0.46f, 0.02f, 0.03f), Paint.Dark, new Vector3(0, b + 0.045f, 0));
                 for (int i = -1; i <= 1; i++)
                 {
                     k.Box(new Vector3(0.42f, 0.035f, 0.12f), Paint.Self, new Vector3(0, b + 0.018f, i * 0.14f));
+                    k.Lib("track_link");
                     k.Box(new Vector3(0.06f, 0.05f, 0.06f), Paint.Steel, new Vector3(0, b + 0.045f, i * 0.14f));
                     k.Cyl(0.012f, 0.44f, Paint.Steel, new Vector3(0, b + 0.018f, i * 0.14f + 0.06f), AlongX, sides: 6);
                 }
@@ -950,7 +1002,9 @@ public static class BlockModels
                 {
                     var at = new Vector3(x, b + 0.13f, -0.02f);
                     k.Cyl(0.04f, 0.2f, Paint.Self, at, up, sides: 12);
+                    k.Lib("smoke_tube");
                     k.Cyl(0.043f, 0.015f, Paint.Dark, at + Vector3.Transform(new Vector3(0, 0.1f, 0), up), up, sides: 12);
+                    k.Covered();
                 }
 
                 break;
@@ -958,6 +1012,7 @@ public static class BlockModels
 
             case "exhaust":
                 k.Cyl(0.08f, 0.36f, Paint.Dark, new Vector3(0, b + 0.1f, 0), AlongX, sides: 16);
+                k.Lib("muffler");
                 k.Box(new Vector3(0.38f, 0.012f, 0.18f), Paint.Self, new Vector3(0, b + 0.19f, 0));
                 foreach (float x in new[] { -0.12f, 0.12f }) k.Box(new Vector3(0.02f, 0.18f, 0.18f), Paint.SelfDark, new Vector3(x, b + 0.1f, 0));
                 k.Cyl(0.03f, 0.12f, Paint.Dark, new Vector3(0.2f, b + 0.1f, 0.06f), AlongX, sides: 10);
