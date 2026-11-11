@@ -388,7 +388,8 @@ public sealed partial class GridView
             if (TierOf(b.Def) != Tier.Normal) continue;
             Transform3D at = Conv.BlockTransform(b.Cell, b.Orientation);
             bool shapedPlate = BlockModels.IsSurface(b.Def);
-            foreach ((Mesh mesh, Material mat, Transform3D local, Paint finish) in BlockVisuals.PartsOf(b.Def, CaliberOf(b)))
+            // The simple shapes, not the part library's detailed meshes: this is the far model.
+            foreach ((Mesh mesh, Material mat, Transform3D local, Paint finish) in BlockVisuals.PartsOf(b.Def, CaliberOf(b), simple: true))
             {
                 Transform3D xf = at * local;
                 Aabb box = xf * mesh.GetAabb();
@@ -457,6 +458,8 @@ public sealed partial class GridView
         BaseMaterial3D bm when bm.ShadingMode == BaseMaterial3D.ShadingModeEnum.Unshaded => bm.AlbedoColor,
         BaseMaterial3D bm when bm.EmissionEnabled => bm.Emission,
         BaseMaterial3D bm => bm.AlbedoColor,
+        // Plain parts in the weathering shader carry their color as a parameter.
+        ShaderMaterial sm when sm.GetShaderParameter("color_a").VariantType == Variant.Type.Color => sm.GetShaderParameter("color_a").AsColor(),
         _ => new Color(0.5f, 0.5f, 0.5f),
     };
 

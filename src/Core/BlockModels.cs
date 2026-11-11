@@ -52,6 +52,19 @@ public enum Paint
 }
 
 /// <summary>One shape in a block's look.</summary>
+/// <summary>
+/// The detailed meshes made in Blender (tools/blender/parts_library.py, exported to models/parts.glb) that block
+/// models can use in place of their simple shapes.
+/// </summary>
+public static class PartLibrary
+{
+    /// <summary>Every mesh in the library. The Blender script makes exactly these.</summary>
+    public static readonly string[] Names = { "tire", "rim", "hub", "track_wheel", "track_link", "muzzle_brake" };
+
+    /// <summary>Marks detail that a library part already has, so it's left out when the library is there.</summary>
+    public const string Covered = "-";
+}
+
 public struct ModelPart
 {
     public Prim Prim;
@@ -66,6 +79,13 @@ public struct ModelPart
 
     /// <summary>Index into <see cref="BlockModel.Nodes"/>, or -1 for the block itself.</summary>
     public int Node;
+
+    /// <summary>
+    /// A detailed mesh from the part library (made in Blender, see <see cref="PartLibrary"/>) to draw instead of the
+    /// simple shape, fitted to its size; or <see cref="PartLibrary.Covered"/> for detail a library part already has.
+    /// Without the library the simple shape is drawn.
+    /// </summary>
+    public string Model;
 
     /// <summary>A key that is the same for every part with the same mesh.</summary>
     public readonly string MeshKey => Prim switch
@@ -150,6 +170,17 @@ public static class BlockModels
         public readonly BlockModel M = new();
         public int Node = -1;
         public Vector3 Offset;
+
+        /// <summary>Draws the last part with a mesh from the part library when there is one.</summary>
+        public void Lib(string model)
+        {
+            ModelPart p = M.Parts[^1];
+            p.Model = model;
+            M.Parts[^1] = p;
+        }
+
+        /// <summary>The last part is detail a library part already has: left out when the library is there.</summary>
+        public void Covered() => Lib(PartLibrary.Covered);
 
         public int AddNode(string name, Vector3 pos)
         {
@@ -263,17 +294,21 @@ public static class BlockModels
             {
                 // Axle along X. A treaded tire, a rim, and a bolted hub.
                 float r = def.WheelRadiusM;
-                k.Cyl(r * 0.92f, 0.28f, Paint.Rubber, Vector3.Zero, AlongX, sides: 28);
+                k.Cyl(r * 0.98f, 0.28f, Paint.Rubber, Vector3.Zero, AlongX, sides: 28);
+                k.Lib("tire");
                 for (int i = 0; i < 14; i++)
                 {
                     float a = i * MathF.Tau / 14;
                     var at = new Vector3(0, MathF.Cos(a) * r * 0.95f, MathF.Sin(a) * r * 0.95f);
                     k.Box(new Vector3(0.29f, r * 0.12f, r * 0.24f), Paint.Rubber, at, Rot(Vector3.UnitX, a));
+                    k.Covered();
                 }
 
                 Paint rim = def.Kind == BlockKind.SteerWheel ? Paint.Brass : Paint.Self;
                 k.Cyl(r * 0.6f, 0.3f, rim, Vector3.Zero, AlongX, sides: 24);
+                k.Lib("rim");
                 k.Cyl(r * 0.26f, 0.34f, Paint.Dark, Vector3.Zero, AlongX, sides: 12);
+                k.Lib("hub");
                 for (int i = 0; i < 6; i++)
                 {
                     float a = i * MathF.Tau / 6;
@@ -462,9 +497,13 @@ public static class BlockModels
             case BlockKind.MuzzleBrake:
                 k.Cyl(br, Full, Paint.Self, Vector3.Zero, AlongZ, sides: 24);
                 k.Cyl(br * 1.7f, 0.28f, Paint.Self, new Vector3(0, 0, -0.04f), AlongZ, sides: 24);
+                k.Lib("muzzle_brake");
                 k.Cyl(br * 1.78f, 0.04f, Paint.SelfDark, new Vector3(0, 0, -0.18f), AlongZ, sides: 24);
+                k.Covered();
                 k.Box(new Vector3(br * 4f, 0.06f, 0.07f), Paint.Dark, new Vector3(0, 0, -0.06f));
+                k.Covered();
                 k.Box(new Vector3(br * 4f, 0.06f, 0.07f), Paint.Dark, new Vector3(0, 0, 0.05f));
+                k.Covered();
                 break;
 
             case BlockKind.Loader:
@@ -963,8 +1002,11 @@ public static class BlockModels
     private static void TrackRun(Maker k, float r, float width, float length)
     {
         k.Cyl(r * 0.8f, width * 0.6f, Paint.Dark, Vector3.Zero, AlongX, sides: 24);
+        k.Lib("track_wheel");
         k.Cyl(r * 0.45f, width * 0.66f, Paint.Steel, Vector3.Zero, AlongX, sides: 16);
+        k.Covered();
         k.Cyl(r * 0.16f, width * 0.72f, Paint.Dark, Vector3.Zero, AlongX, sides: 10);
+        k.Covered();
         int links = Math.Max(2, (int)MathF.Round(length / 0.25f));
         float pitch = length / links;
         foreach (float y in new[] { -r, r })
@@ -973,8 +1015,11 @@ public static class BlockModels
             for (int i = 0; i < links; i++)
             {
                 float z = -length * 0.5f + pitch * (i + 0.5f);
-                k.Box(new Vector3(width, 0.06f, pitch * 0.9f), Paint.Self, new Vector3(0, y, z));
+                // The library's shoe has its grousers on top: the bottom run is turned over so they face out.
+                k.Box(new Vector3(width, 0.06f, pitch * 0.9f), Paint.Self, new Vector3(0, y, z), outward < 0 ? Rot(Vector3.UnitZ, MathF.PI) : null);
+                k.Lib("track_link");
                 k.Box(new Vector3(width * 1.02f, 0.035f, 0.04f), Paint.Self, new Vector3(0, y + outward * 0.045f, z));
+                k.Covered();
                 k.Box(new Vector3(0.07f, 0.05f, pitch * 0.5f), Paint.Steel, new Vector3(0, y - outward * 0.04f, z));
             }
         }

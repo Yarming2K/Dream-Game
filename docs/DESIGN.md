@@ -109,6 +109,8 @@ What every part should follow, so a design reads as one machine however odd it i
    - **Sun-bleached** tops.
    - **Mud** caked low down and splashed higher.
 
+   **Part library (Blender).** Detailed meshes for the most visible parts are made by a Blender script (`tools/blender/parts_library.py`, run with `blender -b -P tools/blender/parts_library.py -- models/parts.glb`) and exported to `models/parts.glb`: so far tyres with chevron tread, pressed-steel rims, hubs with wheel nuts, road wheels with lightening holes, cast track shoes with grousers and pins, and double-baffle muzzle brakes. Block models still describe every part as a simple shape, and can tag it with a library mesh's name. When the library's there, the detailed mesh is drawn in its place, fitted to the shape's size, and detail the mesh already has is left out; without it, the simple shapes are drawn. Godot makes each mesh's detail levels when it imports the file. Far models always use the simple shapes. The meshes mark their bevels for the weathering. A test checks that every name a block asks for is in the library.
+
    Bare metal (barrels, tracks) only rusts and gets dirty; rubber and concrete only get dirty. How worn and how muddy is set per machine: tanks are the muddiest, aircraft barely muddy, ships never (anti-fouling below the waterline), buildings a little dusty. It's all one shader on top of the paint job: the meshes mark their chamfers, and the wear is cut from a seamless noise texture, so it costs no extra draw calls or files.
 
 ### Guns (built from components)

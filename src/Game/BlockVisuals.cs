@@ -378,6 +378,28 @@ public static class BlockVisuals
     }
 
     // Every part goes through the weathering shader except glass and lights.
+    /// <summary>
+    /// A part's mesh and placement: the part library's detailed mesh, fitted to the part's simple shape, when it has
+    /// one; null for detail the library part already has; otherwise the simple shape.
+    /// </summary>
+    private static (Mesh mesh, Transform3D xf)? Resolve(in ModelPart p, Transform3D placement)
+    {
+        if (p.Model != null && ModelLibrary.Loaded)
+        {
+            if (p.Model == PartLibrary.Covered) return null;
+            if (ModelLibrary.TryGet(p.Model, out Mesh lib))
+            {
+                Aabb box = lib.GetAabb();
+                float across = 2f * Mathf.Max(p.Size.X, p.Size.Z);
+                Vector3 want = p.Prim == Prim.Cylinder ? new Vector3(across, p.Size.Y, across) : p.Size.G();
+                var s = new Vector3(want.X / Mathf.Max(box.Size.X, 1e-4f), want.Y / Mathf.Max(box.Size.Y, 1e-4f), want.Z / Mathf.Max(box.Size.Z, 1e-4f));
+                return (lib, placement * new Transform3D(Basis.FromScale(s), -(box.GetCenter() * s)));
+            }
+        }
+
+        return (MeshOf(p), placement);
+    }
+
     private static Material PaintOf(BlockDef def, in ModelPart p) => p.Paint switch
     {
         Paint.Self when def.Glass => MaterialOf(def),
@@ -418,7 +440,8 @@ public static class BlockVisuals
             bool flame = p.Node >= 0 && model.Nodes[p.Node].Name == "Flame" && p.Paint == Paint.Glow;
             Material mat = flame ? Flame(new Color(p.GlowColor.X, p.GlowColor.Y, p.GlowColor.Z), p.GlowEnergy * 0.5f)
                 : painted && Liveries.Paints(def, p.Paint) ? Repainted(def, livery, p.Paint == Paint.SelfDark) : PaintOf(def, p);
-            var mi = new MeshInstance3D { Mesh = MeshOf(p), MaterialOverride = mat, Transform = ToTransform(p.Transform) };
+            if (Resolve(p, ToTransform(p.Transform)) is not var (partMesh, partXf)) continue;
+            var mi = new MeshInstance3D { Mesh = partMesh, MaterialOverride = mat, Transform = partXf };
             if (p.Paint == Paint.Glow) mi.CastShadow = GeometryInstance3D.ShadowCastingSetting.Off;
             (p.Node < 0 ? root : nodes[p.Node]).AddChild(mi);
         }
@@ -481,13 +504,18 @@ public static class BlockVisuals
     private static readonly Dictionary<string, List<(Mesh, Material, Transform3D, Paint)>> PaintedPartsCache = new();
 
     /// <summary>Like <see cref="Parts"/>, with each part's finish, so paint jobs know which parts to paint.</summary>
-    public static List<(Mesh, Material, Transform3D, Paint)> PartsOf(BlockDef def, float caliberMm, bool hints = false)
+    public static List<(Mesh, Material, Transform3D, Paint)> PartsOf(BlockDef def, float caliberMm, bool hints = false, bool simple = false)
     {
-        string key = $"{def.Id}:{Mathf.RoundToInt(caliberMm)}:{hints}";
+        string key = $"{def.Id}:{Mathf.RoundToInt(caliberMm)}:{hints}:{simple}";
         if (PaintedPartsCache.TryGetValue(key, out List<(Mesh, Material, Transform3D, Paint)> parts)) return parts;
         parts = new List<(Mesh, Material, Transform3D, Paint)>();
         BlockModel model = BlockModels.For(def, caliberMm, hints);
-        foreach (ModelPart p in model.Parts) parts.Add((MeshOf(p), PaintOf(def, p), ToTransform(model.PlacementOf(p)), p.Paint));
+        foreach (ModelPart p in model.Parts)
+        {
+            Transform3D at = ToTransform(model.PlacementOf(p));
+            if (simple) parts.Add((MeshOf(p), PaintOf(def, p), at, p.Paint));
+            else if (Resolve(p, at) is var (m, xf)) parts.Add((m, PaintOf(def, p), xf, p.Paint));
+        }
         PaintedPartsCache[key] = parts;
         return parts;
     }
@@ -511,7 +539,9 @@ public static class BlockVisuals
         if (PartsCache.TryGetValue(key, out List<(Mesh, Material, Transform3D)> parts)) return parts;
         parts = new List<(Mesh, Material, Transform3D)>();
         BlockModel model = BlockModels.For(def, caliberMm, hints);
-        foreach (ModelPart p in model.Parts) parts.Add((MeshOf(p), PaintOf(def, p), ToTransform(model.PlacementOf(p))));
+        foreach (ModelPart p in model.Parts)
+            if (Resolve(p, ToTransform(model.PlacementOf(p))) is var (m, xf))
+                parts.Add((m, PaintOf(def, p), xf));
         PartsCache[key] = parts;
         return parts;
     }

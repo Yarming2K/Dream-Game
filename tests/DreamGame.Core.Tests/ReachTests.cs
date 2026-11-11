@@ -61,3 +61,23 @@ public class ReachTests
         Assert.True(reach < far + 0.25f * pivots, $"reach {reach} vs furthest cell {far}");
     }
 }
+
+/// <summary>Block models only ask the part library for meshes it has.</summary>
+public class PartLibraryTests
+{
+    [Fact]
+    public void EveryTagIsInTheLibrary()
+    {
+        var used = new HashSet<string>();
+        foreach (BlockDef def in BlockCatalog.All)
+            foreach (ModelPart p in BlockModels.For(def).Parts)
+                if (p.Model != null)
+                {
+                    used.Add(p.Model);
+                    Assert.True(p.Model == PartLibrary.Covered || PartLibrary.Names.Contains(p.Model), $"{def.Id}: unknown library part {p.Model}");
+                }
+
+        // Every library part is used somewhere, and wheels, tracks and muzzle brakes use it.
+        foreach (string n in PartLibrary.Names) Assert.Contains(n, used);
+    }
+}
