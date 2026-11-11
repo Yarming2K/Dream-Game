@@ -599,7 +599,7 @@ public partial class VehicleBody
                     float flicker = 0.95f + 0.1f * GD.Randf();
                     t.BurnerLevel = Mathf.MoveToward(t.BurnerLevel, t.Afterburner ? 1f : 0f, dt * 2.5f);
                     float b = t.BurnerLevel;
-                    float len = (0.3f + 0.7f * o) * (1f + 1.2f * b) * flicker;
+                    float len = (0.3f + 0.7f * o) * (1f + 1.8f * b) * flicker;
                     float wide = (0.6f + 0.4f * o) * (1f + 0.25f * b);
                     t.Flame.Scale = new Vector3(wide, wide, len);
                     Exhaust.Drive(t.Flame, o, b);

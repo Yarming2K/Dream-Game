@@ -23,6 +23,7 @@ instance uniform float burner = 0.0;
 
 varying float t;
 varying vec2 around;
+varying vec3 axis_v;
 
 float h(vec3 p) {
 	return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453);
@@ -43,11 +44,17 @@ void vertex() {
 	t = clamp(VERTEX.y / length_m + 0.5, 0.0, 1.0);
 	// Which way round the flame (unit length, no seam where an angle would wrap).
 	around = VERTEX.xz / max(length(VERTEX.xz), 0.0001);
+	// The flame's axis as the camera sees it.
+	axis_v = normalize((MODELVIEW_MATRIX * vec4(0.0, 1.0, 0.0, 0.0)).xyz);
 }
 
 void fragment() {
-	float facing = abs(dot(normalize(NORMAL), normalize(VIEW)));
-	float edge = pow(facing, 1.6);
+	vec3 view = normalize(VIEW);
+	float facing = abs(dot(normalize(NORMAL), view));
+	// Soft at its silhouette seen from the side; seen along its length (from behind the jet, the usual view),
+	// the camera looks through the whole flame, so it shows in full.
+	float endon = abs(dot(axis_v, view));
+	float edge = mix(pow(facing, 0.9), 1.0, endon * endon);
 	float along = pow(1.0 - t, core ? 0.7 : 1.3);
 	float flick = n3(vec3(t * 7.0 - TIME * 9.0, around * 1.2)) * 0.6 + n3(vec3(t * 15.0 - TIME * 17.0, around * 2.4 + 4.0)) * 0.4;
 	float diamonds = pow(0.5 + 0.5 * cos(t * 6.2832 * 4.5), 6.0) * (1.0 - smoothstep(0.0, 0.85, t));
@@ -56,11 +63,11 @@ void fragment() {
 	if (core) {
 		col = hot;
 		// On afterburner the core dims between the shock diamonds so they stand out.
-		strength = mix(0.3, 1.2, throttle) * (1.0 - 0.6 * burner) + burner * 3.0 * diamonds;
+		strength = mix(0.4, 1.6, throttle) * (1.0 - 0.5 * burner) + burner * (0.8 + 5.0 * diamonds);
 	} else {
 		col = mix(hot, warm, smoothstep(0.05, 0.45, t));
 		col = mix(col, warm * vec3(1.0, 0.9, 0.55), burner * 0.7);
-		strength = mix(0.04, 0.45, throttle * throttle) + burner * 1.0;
+		strength = mix(0.05, 0.6, throttle * throttle) + burner * 2.5;
 	}
 	ALBEDO = col * strength;
 	ALPHA = clamp(edge * along * (0.55 + 0.6 * flick), 0.0, 1.0);
@@ -77,15 +84,19 @@ instance uniform float throttle = 1.0;
 instance uniform float burner = 0.0;
 
 varying float t;
+varying vec3 axis_v;
 
 void vertex() {
 	t = clamp(VERTEX.y / length_m + 0.5, 0.0, 1.0);
+	axis_v = normalize((MODELVIEW_MATRIX * vec4(0.0, 1.0, 0.0, 0.0)).xyz);
 }
 
 void fragment() {
 	// Bends what's behind it, most in the middle of the plume and near the nozzle, fading to nothing at its edges.
-	float facing = abs(dot(normalize(NORMAL), normalize(VIEW)));
-	float amount = (0.002 + 0.004 * throttle + 0.006 * burner) * pow(facing, 2.0) * (1.0 - t);
+	vec3 view = normalize(VIEW);
+	float facing = abs(dot(normalize(NORMAL), view));
+	float endon = abs(dot(axis_v, view));
+	float amount = (0.002 + 0.004 * throttle + 0.006 * burner) * mix(pow(facing, 2.0), 1.0, endon * endon) * (1.0 - t);
 	vec2 wob = vec2(sin(SCREEN_UV.y * 95.0 + TIME * 23.0 + t * 20.0), cos(SCREEN_UV.x * 85.0 - TIME * 19.0));
 	ALBEDO = texture(screen, SCREEN_UV + wob * amount).rgb;
 	ALPHA = 1.0;
