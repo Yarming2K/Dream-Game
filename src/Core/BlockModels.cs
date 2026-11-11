@@ -61,7 +61,7 @@ public static class PartLibrary
     /// <summary>Every mesh in the library. The Blender script makes exactly these.</summary>
     public static readonly string[] Names =
     {
-        "tire", "rim", "hub", "track_wheel", "track_link", "muzzle_brake",
+        "tire", "rim", "hub", "roadwheel", "track_link", "muzzle_brake",
         "hatch", "periscope", "headlight", "toolbox", "smoke_tube", "muffler", "prop_blade",
         "jet_engine", "jet_nozzle", "rotor_blade", "breech",
     };
@@ -1064,7 +1064,7 @@ public static class BlockModels
     private static void TrackRun(Maker k, float r, float width, float length)
     {
         k.Cyl(r * 0.8f, width * 0.6f, Paint.Dark, Vector3.Zero, AlongX, sides: 24);
-        k.Lib("track_wheel");
+        k.Lib("roadwheel");
         k.Cyl(r * 0.45f, width * 0.66f, Paint.Steel, Vector3.Zero, AlongX, sides: 16);
         k.Covered();
         k.Cyl(r * 0.16f, width * 0.72f, Paint.Dark, Vector3.Zero, AlongX, sides: 10);

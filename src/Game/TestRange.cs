@@ -234,7 +234,7 @@ public partial class TestRange : Node3D
         Billboard = BaseMaterial3D.BillboardModeEnum.Enabled, OutlineSize = 12,
         Modulate = new Color(1f, 0.95f, 0.8f),
         // Right underneath one, its letters would fill the screen: it fades out within a few metres.
-        VisibilityRangeBegin = size * 0.1f, VisibilityRangeBeginMargin = 2f,
+        VisibilityRangeBegin = size * 0.2f, VisibilityRangeBeginMargin = 3f,
         VisibilityRangeFadeMode = GeometryInstance3D.VisibilityRangeFadeModeEnum.Self,
     };
 

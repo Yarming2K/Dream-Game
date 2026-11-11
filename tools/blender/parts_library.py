@@ -144,10 +144,10 @@ def hub():
     attach(ob, ring_of(6, r * 0.72, lambda: cylinder(0.011, w * 0.97, 6)))
     return finish(ob, 0.003, 1, 35)
 
-def track_wheel():
+def roadwheel():
     # A track's road wheel: rubber band, dished disc, hub with bolts.
     r, w = 0.26, 0.26
-    ob = new_obj("track_wheel", cylinder(r, w, 48))
+    ob = new_obj("roadwheel", cylinder(r, w, 48))
     cut(ob, join(cylinder(r * 0.8, 0.06, 48, z=w / 2), cylinder(r * 0.8, 0.06, 48, z=-w / 2)))
     cut(ob, cylinder(r * 0.93, w * 0.1, 48))  # the groove between the two rubber bands
     disc = new_obj("disc", cylinder(r * 0.86, w * 0.88, 48))
@@ -371,7 +371,7 @@ def breech():
     attach(ob, lever)
     return finish(ob, 0.006, 2, 35)
 
-PARTS = [tire, rim, hub, track_wheel, track_link, muzzle_brake, hatch, periscope, headlight, toolbox, smoke_tube, muffler, prop_blade,
+PARTS = [tire, rim, hub, roadwheel, track_link, muzzle_brake, hatch, periscope, headlight, toolbox, smoke_tube, muffler, prop_blade,
          jet_engine, jet_nozzle, rotor_blade, breech]
 made = [f() for f in PARTS]
 

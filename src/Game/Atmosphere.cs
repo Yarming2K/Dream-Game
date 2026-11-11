@@ -136,7 +136,7 @@ void sky() {
             },
             Time.Night => new Look
             {
-                Elevation = 40, Azimuth = 200, SunEnergy = 0.16f, Ambient = 0.14f, SunColor = new Color(0.55f, 0.65f, 0.9f), Stars = 1f,
+                Elevation = 40, Azimuth = 200, SunEnergy = 0.16f, Ambient = 0.3f, SunColor = new Color(0.55f, 0.65f, 0.9f), Stars = 1f,
                 Zenith = new Color(0.008f, 0.012f, 0.03f), Horizon = new Color(0.04f, 0.05f, 0.08f), FogColor = new Color(0.04f, 0.05f, 0.07f),
             },
             _ => new Look
@@ -222,10 +222,14 @@ void sky() {
         _sun.LightColor = l.SunColor;
         _sun.LightEnergy = l.SunEnergy;
         _env.AmbientLightEnergy = l.Ambient;
+        // The night sky is too dark to light anything by itself: a cool moonlit fill makes up most of the
+        // ambient at night, so a tank's shadowed side reads as dark blue-grey, not a black cut-out.
+        _env.AmbientLightColor = new Color(0.36f, 0.42f, 0.58f);
+        _env.AmbientLightSkyContribution = Mathf.Lerp(1f, 0.3f, l.Stars);
         _sky.SetShaderParameter("zenith", l.Zenith);
         _sky.SetShaderParameter("horizon", l.Horizon);
         _sky.SetShaderParameter("sea_far", l.FogColor.Lerp(l.Horizon, 0.3f) * 0.95f);
-        _sky.SetShaderParameter("sea_deep", l.FogColor * 0.25f + new Color(0.03f, 0.08f, 0.12f) * (l.Ambient / 0.7f));
+        _sky.SetShaderParameter("sea_deep", l.FogColor * 0.25f + new Color(0.03f, 0.08f, 0.12f) * (Mathf.Lerp(l.Ambient, 0.14f, l.Stars) / 0.7f));
         _sky.SetShaderParameter("cloud_color", l.Cloud);
         _sky.SetShaderParameter("cover", l.Cover);
         _sky.SetShaderParameter("shift", _cloudShift);

@@ -126,7 +126,9 @@ float fbm(vec3 q) {
 
 // Brick laid in courses with mortar (each brick its own tone), boards with grain and seams, or rows of rounded
 // roof tiles, each row laid over the joints of the one below.
-vec3 masonry_color(vec3 col, vec3 p, vec3 n, vec2 uv) {
+// w: how much surface (m) one pixel covers. Fine patterns fade to their average as it grows, so distant walls
+// and roofs don't shimmer with rings (moiré).
+vec3 masonry_color(vec3 col, vec3 p, vec3 n, vec2 uv, float w) {
 	vec3 an = abs(n);
 	if (masonry == 1) {
 		if (an.y > 0.7) {
@@ -135,15 +137,16 @@ vec3 masonry_color(vec3 col, vec3 p, vec3 n, vec2 uv) {
 		float row = floor(uv.y / 0.075);
 		float u = uv.x / 0.225 + mod(row, 2.0) * 0.5;
 		vec2 f = vec2(fract(u) * 0.225, fract(uv.y / 0.075) * 0.075);
-		float mortar = 1.0 - smoothstep(0.006, 0.012, min(f.x, f.y));
-		float tone = h01(ivec3(int(floor(u)), int(row), 7));
+		float fade = smoothstep(0.008, 0.03, w);
+		float mortar = (1.0 - smoothstep(0.006 - 0.5 * w, 0.012 + 0.5 * w, min(f.x, f.y))) * (1.0 - fade);
+		float tone = mix(h01(ivec3(int(floor(u)), int(row), 7)), 0.5, fade);
 		col *= 0.78 + 0.34 * tone;
-		return mix(col, vec3(0.6, 0.58, 0.53), mortar * 0.8);
+		return mix(col, vec3(0.6, 0.58, 0.53), mortar * 0.8 + 0.13 * fade);
 	}
 	if (masonry == 2) {
 		float b = uv.x / 0.15;
-		float seam = 1.0 - smoothstep(0.02, 0.06, min(fract(b), 1.0 - fract(b)));
-		float grain = vnoise(vec3(uv.x * 60.0, uv.y * 3.0, floor(b) * 7.0));
+		float seam = (1.0 - smoothstep(0.02, 0.06, min(fract(b), 1.0 - fract(b)))) * (1.0 - smoothstep(0.006, 0.02, w));
+		float grain = mix(vnoise(vec3(uv.x * 60.0, uv.y * 3.0, floor(b) * 7.0)), 0.5, smoothstep(0.003, 0.012, w));
 		col *= (0.78 + 0.3 * grain) * (0.9 + 0.2 * h01(ivec3(int(floor(b)), 3, 11)));
 		return col * (1.0 - seam * 0.45);
 	}
@@ -152,7 +155,8 @@ vec3 masonry_color(vec3 col, vec3 p, vec3 n, vec2 uv) {
 	float cu = u / 0.2 + mod(row, 2.0) * 0.5;
 	float curve = sin(fract(cu) * 3.14159);
 	col *= (0.7 + 0.35 * curve) * (0.85 + 0.25 * h01(ivec3(int(floor(cu)), int(row), 5)));
-	return col * (1.0 - 0.3 * (1.0 - smoothstep(0.0, 0.12, fract(p.y / 0.11))));
+	float band = mix(1.0 - smoothstep(0.0, 0.12, fract(p.y / 0.11)), 0.06, smoothstep(0.01, 0.035, w));
+	return col * (1.0 - 0.3 * band);
 }
 
 vec3 pattern_color(vec3 p) {
@@ -222,13 +226,13 @@ void fragment() {
 			}
 		}
 		if (masonry > 0) {
-			col = masonry_color(col, p, n, uv);
+			col = masonry_color(col, p, n, uv, max(max(fwidth(uv.x), fwidth(uv.y)), fwidth(p.y)));
 		}
 		if (panel_lines > 0.0) {
 			// Seams between the plates every meter, and streaks of grime running down the sides.
 			vec2 f = fract(uv - 0.25);
 			vec2 e = min(f, 1.0 - f);
-			float seam = 1.0 - smoothstep(0.004, 0.011, min(e.x, e.y));
+			float seam = (1.0 - smoothstep(0.004, 0.011, min(e.x, e.y))) * (1.0 - smoothstep(0.008, 0.03, fwidth(uv.x) + fwidth(uv.y)));
 			col *= 1.0 - seam * 0.3 * panel_lines;
 			float streak = vnoise(vec3(lpos.x * 7.0, lpos.y * 0.6, lpos.z * 7.0));
 			col *= mix(1.0, 0.86 + 0.14 * streak, (1.0 - an.y) * panel_lines);

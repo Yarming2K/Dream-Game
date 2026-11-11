@@ -84,5 +84,5 @@ foreach ($r in $runs) {
     if ($errors) { $report.Add("Errors:`n" + (($errors | Select-Object -First 30) -join "`n")) }
 }
 
-$report | Set-Content "$check\report.md"
+$report | Set-Content -Encoding utf8 "$check\report.md"
 Write-Host "Done: $check\report.md, screenshots in $check\shots"

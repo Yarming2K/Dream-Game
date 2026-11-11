@@ -80,4 +80,18 @@ public class PartLibraryTests
         // Every library part is used somewhere, and wheels, tracks and muzzle brakes use it.
         foreach (string n in PartLibrary.Names) Assert.Contains(n, used);
     }
+
+    [Fact]
+    public void NoNameIsAGodotImportHint()
+    {
+        // Godot turns a node named "..._wheel", "..._col", "..._rigid" and so on into a different kind of node when
+        // it imports the file, renaming it: the game then can't find the part ("track_wheel" was lost this way).
+        string[] hints = { "col", "convcol", "colonly", "convcolonly", "navmesh", "occ", "occonly", "rigid", "vehicle", "wheel", "noimp", "loop", "cycle" };
+        foreach (string n in PartLibrary.Names)
+        {
+            Assert.DoesNotContain("$", n);
+            foreach (string h in hints)
+                Assert.False(n.EndsWith("_" + h) || n.EndsWith("-" + h), $"'{n}' ends with Godot's import hint '{h}'");
+        }
+    }
 }
