@@ -164,7 +164,8 @@ public partial class TestRange : Node3D
         AddCommandPost();
         SpawnVehicle();
         EnterVehicle(_vehicle, SeatRole.Driver);
-        Input.MouseMode = Input.MouseModeEnum.Captured;
+        // A benchmark run leaves the mouse free, so the PC can still be used while it plays.
+        Input.MouseMode = Bench.Active ? Input.MouseModeEnum.Visible : Input.MouseModeEnum.Captured;
         if (Bench.Active) BenchStart();
     }
 
@@ -1484,7 +1485,7 @@ public partial class TestRange : Node3D
 
     private void UpdateHud(float dt)
     {
-        _resume.Visible = Input.MouseMode != Input.MouseModeEnum.Captured && !_help.Visible && !(_map != null && _map.Visible);
+        _resume.Visible = Input.MouseMode != Input.MouseModeEnum.Captured && !_help.Visible && !(_map != null && _map.Visible) && !Bench.Active;
         if (_bigTime > 0)
         {
             _bigTime -= dt;
