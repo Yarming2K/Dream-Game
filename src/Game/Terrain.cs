@@ -395,7 +395,9 @@ void fragment() {
             float rut = worn != null ? worn[i] : 0f;
             dirt = Math.Max(dirt, rut * 0.9f);
             float rock = Math.Clamp(slope * 6f, 0, 1);
-            float sand = y < -1.5f ? 1f : Math.Clamp((LandHeight + 0.8f - y) / 1.5f, 0, 1);
+            // Beaches only along the shore: sand up to about a metre above the sea, gone by 1.8 m (the plains at
+            // LandHeight are grass and dirt, and roads stay roads).
+            float sand = y < -1.5f ? 1f : Math.Clamp((1.8f - y) / 1.2f, 0, 1);
             float turned = Math.Max(stirred != null ? stirred[i] * 0.85f : 0f, (rut - 0.5f) * 0.6f);
             colors[li] = new Color(dirt, rock, sand, turned);
         }
