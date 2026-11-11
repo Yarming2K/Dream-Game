@@ -221,6 +221,9 @@ public partial class TestRange : Node3D
         Text = text, FontSize = size, PixelSize = 0.012f, Position = pos, Font = Ui.HeadingBoldFont,
         Billboard = BaseMaterial3D.BillboardModeEnum.Enabled, OutlineSize = 12,
         Modulate = new Color(1f, 0.95f, 0.8f),
+        // Right underneath one, its letters would fill the screen: it fades out within a few metres.
+        VisibilityRangeBegin = size * 0.1f, VisibilityRangeBeginMargin = 2f,
+        VisibilityRangeFadeMode = GeometryInstance3D.VisibilityRangeFadeModeEnum.Self,
     };
 
     /// <summary>A supply pad: park on it to rearm and refuel, stand on it to heal and restock.</summary>
@@ -1538,7 +1541,9 @@ public partial class TestRange : Node3D
         else if (v.IsNaval) NavalStatus(v, sb);
         else if (v.IsAir) AirStatus(v, sb);
         else sb.Append($"[font_size=22][b]{Mathf.Abs(v.SpeedKmh):0}[/b][/font_size] km/h   ");
-        if (!v.IsBuilding) sb.Append($"Fuel {v.FuelL:0}/{v.FuelCapacityL:0} L   Engines {v.UsablePowerKw:0} kW\n");
+        int jets = v.AirThrusters.Count(t => t.Alive && t.Info.Kind == BlockKind.JetEngine);
+        if (!v.IsBuilding)
+            sb.Append($"Fuel {v.FuelL:0}/{v.FuelCapacityL:0} L   " + (jets > 0 && v.UsablePowerKw <= 0 ? $"Jets {jets} working\n" : $"Engines {v.UsablePowerKw:0} kW\n"));
         if (v.HasElectric)
         {
             PowerBank e = v.Electric;
@@ -1554,7 +1559,7 @@ public partial class TestRange : Node3D
             sb.Append('\n');
         }
         if (!v.DriverAlive && !v.IsBuilding) sb.Append($"[color={Ui.Hex(Ui.Bad)}]Driver knocked out. Get out (E) and weld the seat back, or Backspace.[/color]\n");
-        else if (v.PowerKw <= 0 && !v.IsBuilding) sb.Append($"[color={Ui.Hex(Ui.Bad)}]Engines destroyed.[/color]\n");
+        else if (v.PowerKw <= 0 && jets == 0 && !v.IsBuilding) sb.Append($"[color={Ui.Hex(Ui.Bad)}]Engines destroyed.[/color]\n");
         else if (v.EngineDrowned) sb.Append($"[color={Ui.Hex(Ui.Bad)}]{(v.IsNaval ? "Engine room flooded: pump it out or weld the holes." : "Engine flooded: it won't run under water. Backspace to respawn.")}[/color]\n");
         else if (v.FuelL <= 0 && !v.IsBuilding) sb.Append($"[color={Ui.Hex(Ui.Bad)}]Out of fuel: {(v.IsNaval ? "stop inside the buoy ring." : "drive onto the supply pad.")}[/color]\n");
         else if (!v.IsNaval && !v.IsAir && !v.IsBuilding && v.Wheels.Count == 0) sb.Append($"[color={Ui.Hex(Ui.Bad)}]No wheels left.[/color]\n");

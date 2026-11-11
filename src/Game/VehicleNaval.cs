@@ -192,13 +192,30 @@ public partial class VehicleBody
     // ---------- Physics ----------
 
     /// <summary>Buoyancy, water drag, flooding and drowned engines. Runs for every vehicle.</summary>
+    /// <summary>The height of the lowest corner of its box, however it's tilted.</summary>
+    private float LowestY(Transform3D xf)
+    {
+        float cs = Conv.CS;
+        Vector3 lo = new Vector3(Analysis.Min.X - 0.5f, Analysis.Min.Y - 0.5f, Analysis.Min.Z - 0.5f) * cs;
+        Vector3 hi = new Vector3(Analysis.Max.X + 0.5f, Analysis.Max.Y + 0.5f, Analysis.Max.Z + 0.5f) * cs;
+        Basis b = xf.Basis;
+        float y = xf.Origin.Y;
+        y += Mathf.Min(b.X.Y * lo.X, b.X.Y * hi.X);
+        y += Mathf.Min(b.Y.Y * lo.Y, b.Y.Y * hi.Y);
+        y += Mathf.Min(b.Z.Y * lo.Z, b.Z.Y * hi.Z);
+        return y;
+    }
+
     private void WaterTick(float dt)
     {
         Transform3D xf = GlobalTransform;
         float cs = Conv.CS;
         float topY = (xf * new Vector3(CenterOfMass.X, (Analysis.Max.Y + 0.5f) * cs, CenterOfMass.Z)).Y;
         DepthM = Ocean.Level - topY;
-        if (GlobalPosition.Y - Radius > Ocean.Level + 0.5f)
+        // Clear of the water (the lowest corner of its box is above the waves): nothing to float, drag or flood.
+        // A tank on the island used to fall through to the per-brick sums below every step, which with a
+        // hundred tanks in the battle drill was most of the frame.
+        if (LowestY(xf) > Ocean.Level + 0.5f)
         {
             Submerged = 0;
             _drownedKw = 0;

@@ -4,6 +4,9 @@
     <EnableDynamicLoading>true</EnableDynamicLoading>
     <RootNamespace>DreamGame</RootNamespace>
     <Nullable>disable</Nullable>
+    <!-- Optimized in every build, including the Debug build the editor runs: without it the .NET JIT leaves the
+         game's C# unoptimized, several times slower in the hot loops (physics, AI, shells). -->
+    <Optimize>true</Optimize>
   </PropertyGroup>
   <ItemGroup>
     <!-- The unit tests are their own project. -->

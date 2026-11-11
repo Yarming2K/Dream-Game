@@ -41,7 +41,7 @@ public partial class TestRange
             if (Bench.Scene == "bigdrill") ToggleDrill();
         }
 
-        if (Bench.Scene == "jet" && Mounted) _mount.SetAirThrottle(1f);
+        if (Bench.Scene == "jet" && Mounted) _mount.SetAirThrottle(0.9f);
     }
 
     /// <summary>Runs before the camera is placed each frame: steers the scene, then measures.</summary>
@@ -67,7 +67,7 @@ public partial class TestRange
             case "jet" when Mounted:
                 // Take off down the runway, climb to about 400 m, then circle.
                 float alt = _mount.GlobalPosition.Y;
-                _mount.SetAirThrottle(1f);
+                _mount.SetAirThrottle(0.9f);
                 if (_benchT < 6f) _pitch = 0.02f;
                 else if (alt < 400f) _pitch = 0.22f;
                 else _pitch = 0.0f;
