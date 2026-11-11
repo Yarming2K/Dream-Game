@@ -439,7 +439,7 @@ public static class BlockVisuals
         foreach (ModelPart p in model.Parts)
         {
             bool flame = p.Node >= 0 && model.Nodes[p.Node].Name == "Flame" && p.Paint == Paint.Glow;
-            Material mat = flame ? Flame(new Color(p.GlowColor.X, p.GlowColor.Y, p.GlowColor.Z), p.GlowEnergy * 0.5f)
+            Material mat = flame ? Exhaust.Flame(p.GlowColor.Z > p.GlowColor.X, p.Size.Y)
                 : painted && Liveries.Paints(def, p.Paint) ? Repainted(def, livery, p.Paint == Paint.SelfDark) : PaintOf(def, p);
             if (Resolve(p, ToTransform(p.Transform)) is not var (partMesh, partXf)) continue;
             var mi = new MeshInstance3D { Mesh = partMesh, MaterialOverride = mat, Transform = partXf };
@@ -447,6 +447,8 @@ public static class BlockVisuals
             (p.Node < 0 ? root : nodes[p.Node]).AddChild(mi);
         }
 
+        // Jets shimmer the air behind them.
+        if (def.Kind == BlockKind.JetEngine && root.FindChild("Flame", true, false) is Node3D flameNode) flameNode.AddChild(Exhaust.Haze());
         return root;
     }
 

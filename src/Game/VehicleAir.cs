@@ -35,6 +35,9 @@ public partial class VehicleBody
         public float Output;
         public float Spin;
         public bool Afterburner;
+
+        /// <summary>The afterburner's flame coming in and dying away (0 to 1), not at once.</summary>
+        public float BurnerLevel;
     }
 
     public readonly List<SurfaceRt> AirSurfaces = new();
@@ -593,10 +596,13 @@ public partial class VehicleBody
                 t.Flame.Visible = o > 0.03f;
                 if (t.Flame.Visible)
                 {
-                    float flicker = 0.92f + 0.16f * GD.Randf();
-                    float len = (0.3f + 0.7f * o) * (t.Afterburner ? 2.2f : 1f) * flicker;
-                    float wide = (0.6f + 0.4f * o) * (t.Afterburner ? 1.25f : 1f);
+                    float flicker = 0.95f + 0.1f * GD.Randf();
+                    t.BurnerLevel = Mathf.MoveToward(t.BurnerLevel, t.Afterburner ? 1f : 0f, dt * 2.5f);
+                    float b = t.BurnerLevel;
+                    float len = (0.3f + 0.7f * o) * (1f + 1.2f * b) * flicker;
+                    float wide = (0.6f + 0.4f * o) * (1f + 0.25f * b);
                     t.Flame.Scale = new Vector3(wide, wide, len);
+                    Exhaust.Drive(t.Flame, o, b);
                 }
             }
 

@@ -282,12 +282,33 @@ def prop_blade():
     ob = new_obj("prop_blade", bm)
     return finish(ob, 0.0)
 
+def lathe(profile, segs=48):
+    """A solid of revolution round Z from (radius, z) points, front to back, capped at both ends."""
+    bm = bmesh.new()
+    rings = [[bm.verts.new((r * math.cos(j / segs * math.tau), r * math.sin(j / segs * math.tau), z)) for j in range(segs)]
+             for r, z in profile]
+    for a, b in zip(rings, rings[1:]):
+        for j in range(segs):
+            bm.faces.new((a[j], a[(j + 1) % segs], b[(j + 1) % segs], b[j]))
+    bm.faces.new(list(reversed(rings[0])))
+    bm.faces.new(rings[-1])
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    return bm
+
 def jet_engine():
-    # A jet engine's casing (axis Z): three raised bands and stringers along it.
-    ob = new_obj("jet_engine", cylinder(0.235, 0.45, 40))
-    attach(ob, join(*[cylinder(0.24, 0.02, 40, z=z) for z in (-0.15, 0.0, 0.15)]))
-    attach(ob, ring_of(8, 0.232, lambda: box(0.012, 0.014, 0.42), phase=math.pi / 8))
-    return finish(ob, 0.003, 1, 35)
+    # A jet engine's casing (axis Z, intake at -Z): a raised intake lip, then a skin tapering toward the exhaust,
+    # broken by a bolted flange and two panel seams, with access panels and a cable run along the side.
+    ob = new_obj("jet_engine", lathe([
+        (0.226, -0.225), (0.240, -0.221), (0.240, -0.200), (0.230, -0.196),     # intake lip
+        (0.2235, -0.060), (0.2275, -0.058), (0.2275, -0.042), (0.2220, -0.040), # bolted flange
+        (0.2155, 0.070), (0.2125, 0.072), (0.2125, 0.078), (0.2150, 0.080),     # seam
+        (0.2105, 0.160), (0.2075, 0.162), (0.2075, 0.168), (0.2100, 0.170),     # seam
+        (0.2075, 0.215), (0.1980, 0.225)]))
+    attach(ob, ring_of(24, 0.229, lambda: box(0.006, 0.008, 0.006), z=-0.05))   # flange bolts
+    def panel(): return box(0.004, 0.07, 0.085)
+    attach(ob, ring_of(3, 0.219, panel, z=0.012, phase=math.radians(20)))       # access panels
+    attach(ob, ring_of(2, 0.214, lambda: box(0.012, 0.012, 0.13), z=0.115, phase=math.radians(-35)))  # cable runs
+    return finish(ob, 0.002, 1, 35)
 
 def jet_nozzle():
     # A convergent nozzle: wide at the front (-Z), narrowing aft, made of overlapping petals, hollow.
