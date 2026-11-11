@@ -300,11 +300,12 @@ public partial class VehicleBody : RigidBody3D, IGridHost
         Mass = mass;
         CenterOfMass = Model.CenterOfMass().G();
 
-        PowerKw = Model.Instances.Where(b => b.Alive).Sum(b => b.Def.PowerKw);
-        FuelCapacityL = Model.Instances.Where(b => b.Alive).Sum(b => b.Def.FuelL);
+        // Running totals kept by the grid: a battleship isn't added up block by block after every hit.
+        PowerKw = Model.PowerKw;
+        FuelCapacityL = Model.FuelL;
         FuelL = Mathf.Min(FuelL, FuelCapacityL);
         bool driverWas = DriverAlive;
-        DriverAlive = Model.Instances.Any(b => b.Alive && b.Def.Kind is BlockKind.DriverSeat or BlockKind.DroneCore);
+        DriverAlive = Model.CountOf(BlockKind.DriverSeat) + Model.CountOf(BlockKind.DroneCore) > 0;
         if (driverWas && !DriverAlive) Status?.Invoke("Driver knocked out!");
         if (_hadEngine && PowerKw <= 0) Status?.Invoke("Engine destroyed");
         _hadEngine = PowerKw > 0;

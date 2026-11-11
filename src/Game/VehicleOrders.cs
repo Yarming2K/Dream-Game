@@ -36,16 +36,8 @@ public partial class VehicleBody
     /// <summary>Recounts what's left aboard that matters to command (after damage).</summary>
     private void RefreshCommandParts()
     {
-        bool console = false, radar = false;
-        foreach (BlockInstance b in Model.Instances)
-        {
-            if (!b.Alive) continue;
-            if (b.Def.Kind == BlockKind.CommandConsole) console = true;
-            else if (b.Def.Kind == BlockKind.Radar) radar = true;
-        }
-
-        ConsoleAlive = console;
-        RadarAlive = radar;
+        ConsoleAlive = Model.CountOf(BlockKind.CommandConsole) > 0;
+        RadarAlive = Model.CountOf(BlockKind.Radar) > 0;
         if (StartBlocks == 0) StartBlocks = Model.Blocks.Count;
     }
 

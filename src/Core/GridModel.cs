@@ -135,6 +135,8 @@ public sealed class GridModel
 
     public void Add(BlockInstance b)
     {
+        if (_byAnchor.TryGetValue(b.Cell, out BlockInstance old) && old != b) Tally(old, -1);
+        if (!_byAnchor.TryGetValue(b.Cell, out old) || old != b) Tally(b, +1);
         foreach (Int3 c in b.Cells)
         {
             Blocks[c] = b;
@@ -153,8 +155,40 @@ public sealed class GridModel
             Sections[b.Section].Cells.Remove(c);
         }
 
-        if (_byAnchor.TryGetValue(b.Cell, out BlockInstance a) && a == b) _byAnchor.Remove(b.Cell);
+        if (_byAnchor.TryGetValue(b.Cell, out BlockInstance a) && a == b)
+        {
+            _byAnchor.Remove(b.Cell);
+            Tally(b, -1);
+        }
     }
+
+    // Running totals, kept as blocks come and go, so nothing has to add up a 30,000-block ship after every hit.
+    private double _mass, _power, _fuel;
+    private double _momentX, _momentY, _momentZ;
+    private readonly Dictionary<BlockKind, int> _kinds = new();
+
+    private void Tally(BlockInstance b, int sign)
+    {
+        double m = b.Def.MassKg * sign;
+        _mass += m;
+        Vector3 c = b.Center;
+        _momentX += c.X * m;
+        _momentY += c.Y * m;
+        _momentZ += c.Z * m;
+        _power += b.Def.PowerKw * sign;
+        _fuel += b.Def.FuelL * sign;
+        _kinds.TryGetValue(b.Def.Kind, out int n);
+        _kinds[b.Def.Kind] = n + sign;
+    }
+
+    /// <summary>How many blocks of this kind it has.</summary>
+    public int CountOf(BlockKind kind) => _kinds.TryGetValue(kind, out int n) ? n : 0;
+
+    /// <summary>The power of all its engines, generators and reactors together.</summary>
+    public float PowerKw => (float)Math.Max(_power, 0);
+
+    /// <summary>What all its fuel tanks hold, full.</summary>
+    public float FuelL => (float)Math.Max(_fuel, 0);
 
     /// <summary>The block whose anchor is <paramref name="anchor"/>, if it's there.</summary>
     public bool TryGetInstance(Int3 anchor, out BlockInstance b) => _byAnchor.TryGetValue(anchor, out b);
@@ -201,26 +235,12 @@ public sealed class GridModel
         foreach (Section s in Sections) s.RecomputeBounds();
     }
 
-    public float TotalMassKg()
-    {
-        float m = 0;
-        foreach (BlockInstance b in Instances) m += b.Def.MassKg;
-        return m;
-    }
+    public float TotalMassKg() => _byAnchor.Count == 0 ? 0f : (float)Math.Max(_mass, 0);
 
     /// <summary>Mass-weighted center in meters, with every section at rest.</summary>
-    public Vector3 CenterOfMass()
-    {
-        float m = 0;
-        Vector3 sum = Vector3.Zero;
-        foreach (BlockInstance b in Instances)
-        {
-            m += b.Def.MassKg;
-            sum += b.Center * b.Def.MassKg;
-        }
-
-        return m > 0 ? sum / m * Blueprint.CellSize : Vector3.Zero;
-    }
+    public Vector3 CenterOfMass() => _mass > 1e-6 && _byAnchor.Count > 0
+        ? new Vector3((float)(_momentX / _mass), (float)(_momentY / _mass), (float)(_momentZ / _mass)) * Blueprint.CellSize
+        : Vector3.Zero;
 
     /// <summary>True if blocks touching at cells <paramref name="ac"/> and <paramref name="bc"/> (face neighbors) hold each other up.</summary>
     public bool AreJoined(BlockInstance a, Int3 ac, BlockInstance b, Int3 bc)

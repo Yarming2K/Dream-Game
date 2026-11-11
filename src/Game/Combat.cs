@@ -478,8 +478,10 @@ public partial class Combat : Node3D
         foreach ((IGridHost host, List<BlockInstance> blocks) in byHost)
         {
             if (!IsInstanceValid(host.Body)) continue;
+            var removed = new List<Int3>();
             foreach (BlockInstance b in blocks)
             {
+                removed.AddRange(b.Cells);
                 Vector3 at = host.View.BlockWorldPos(b);
                 if (b.Def.Kind == BlockKind.AmmoRack && b.AmmoUnits > 0)
                 {
@@ -512,7 +514,7 @@ public partial class Combat : Node3D
                 host.View.RemoveBlock(b);
             }
 
-            SplitOff(host, source, push, blastDamage);
+            SplitOff(host, source, push, blastDamage, removed);
             host.OnBlocksRemoved();
         }
     }
@@ -550,9 +552,11 @@ public partial class Combat : Node3D
     }
 
     /// <summary>Turns pieces that lost their connection into separate physics bodies.</summary>
-    private void SplitOff(IGridHost host, Vector3 source, Vector3 push, float blastDamage)
+    private void SplitOff(IGridHost host, Vector3 source, Vector3 push, float blastDamage, List<Int3> removed)
     {
-        List<List<BlockInstance>> pieces = Connectivity.FindDetached(host.Model, host.Keep);
+        // Search out from the hole (quick); only when that can't tell (a hull broken in two) check the whole grid.
+        List<List<BlockInstance>> pieces = Connectivity.FindDetachedNear(host.Model, host.Keep, removed)
+                                           ?? Connectivity.FindDetached(host.Model, host.Keep);
         Node parent = GetParent();
         foreach (List<BlockInstance> piece in pieces)
         {
