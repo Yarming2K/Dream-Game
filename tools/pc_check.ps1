@@ -62,7 +62,7 @@ foreach ($r in $runs) {
     $p = Start-Process -FilePath $Godot -ArgumentList $gargs -RedirectStandardOutput $log -RedirectStandardError "$log.err" -PassThru -NoNewWindow
     if (-not $p.WaitForExit(($secs + 120) * 1000)) {
         Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
-        $report.Add("`n### $name: HUNG (stopped after $($secs + 120) s)")
+        $report.Add("`n### ${name}: HUNG (stopped after $($secs + 120) s)")
     }
     $text = (Get-Content $log -ErrorAction SilentlyContinue) + (Get-Content "$log.err" -ErrorAction SilentlyContinue)
     $errors = $text | Where-Object { $_ -match "ERROR|SHADER|Exception|error:" } | Group-Object | ForEach-Object { "$($_.Count)x $($_.Name)" }
