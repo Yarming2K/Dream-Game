@@ -46,6 +46,11 @@ public sealed class Blueprint
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string Paint { get; set; }
 
+    /// <summary>How the instruments are drawn while it's driven (see <see cref="Overlays"/>), or null to go with the cockpit.</summary>
+    [JsonPropertyName("overlay")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string Overlay { get; set; }
+
     private static readonly JsonSerializerOptions Options = new() { WriteIndented = false };
 
     public string ToJson() => JsonSerializer.Serialize(this, Options);
@@ -146,6 +151,7 @@ public sealed class Blueprint
     {
         Blueprint c = FromCellMap(Name, Blocks);
         c.Paint = Paint;
+        c.Overlay = Overlay;
         return c;
     }
 }

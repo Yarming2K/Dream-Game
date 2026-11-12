@@ -105,6 +105,10 @@ public partial class VehicleBody : RigidBody3D, IGridHost
         new Vector2(Analysis.Max.X - Analysis.Min.X + 1, Analysis.Max.Z - Analysis.Min.Z + 1) * Conv.CS);
 
     public Blueprint Blueprint { get; private set; }
+
+    /// <summary>The overlay style picked for this vehicle (Auto: whatever its cockpit comes with), and the one that shows.</summary>
+    public OverlayStyle Overlay { get; set; }
+    public OverlayStyle OverlayShown => Overlays.Shown(Overlay == OverlayStyle.Auto ? Overlays.CockpitDefault(Blueprint.Blocks.Select(b => b.Id)) : Overlay);
     public VehicleAnalysis Analysis { get; private set; }
     public string DisplayName => Blueprint.Name;
     /// <summary>0 is the player's side; anything else is hostile to it.</summary>
@@ -124,6 +128,10 @@ public partial class VehicleBody : RigidBody3D, IGridHost
 
     /// <summary>How far the landing gear is down: 1 down and locked, 0 folded away.</summary>
     private float _gear = 1f;
+
+    /// <summary>Landing gear that folds away, and whether it's down now.</summary>
+    public bool HasRetractingGear => Analysis.Wheels.Any(w => Analysis.Defs[w.Cell].Retracts);
+    public bool GearDown => _gear > 0.5f;
     public bool Braking = true;
 
     public float PowerKw { get; private set; }
@@ -174,7 +182,10 @@ public partial class VehicleBody : RigidBody3D, IGridHost
     {
         // Each vehicle gets its own analysis (it keeps flood water in its compartments), so a shared one is only reused once.
         VehicleAnalysis a = analysis ?? VehicleAnalysis.Analyze(bp);
-        var v = new VehicleBody { Name = player ? "PlayerVehicle" : "Vehicle", Blueprint = bp, Analysis = a, Faction = player ? 0 : 1 };
+        var v = new VehicleBody
+        {
+            Name = player ? "PlayerVehicle" : "Vehicle", Blueprint = bp, Analysis = a, Faction = player ? 0 : 1, Overlay = Overlays.FromId(bp.Overlay),
+        };
         v.Model = GridModel.FromAnalysis(a);
         foreach (Int3 c in a.Disconnected)
             if (v.Model.Blocks.TryGetValue(c, out BlockInstance b)) v.Model.Remove(b);

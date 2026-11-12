@@ -324,6 +324,13 @@ public partial class VehicleBody
 
     public bool HasJets => AirThrusters.Any(t => t.Alive && t.Info.Kind == BlockKind.JetEngine);
 
+    /// <summary>Swivelling nozzles still working.</summary>
+    public bool HasVectoring => AirThrusters.Any(t => t.Alive && t.Jet.VectorDeg > 0);
+
+    /// <summary>Weapons bay doors, and whether they're open now.</summary>
+    public bool HasBayDoors => _bayDoors.Count > 0;
+    public bool BayOpen => _bayOpen > 0.1f;
+
     public bool ToggleEmergencyPower()
     {
         if (!HasJets) return false;

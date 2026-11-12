@@ -86,6 +86,11 @@ public partial class TestRange : Node3D
 
     // HUD
     private Control _vehicleHud, _footHud;
+
+    // The Glass overlay and the vehicle options panel (O).
+    private HudGlass _glass;
+    private HudOptions _options;
+    private bool _optionsOpen;
     private RichTextLabel _status, _guns, _feed, _crew;
     private Label _big, _resume, _prompt, _liveChip;
     private float _bigTime;
@@ -1034,6 +1039,13 @@ public partial class TestRange : Node3D
         {
             if (!captured && mb.Pressed && mb.ButtonIndex == MouseButton.Left)
             {
+                if (_optionsOpen)
+                {
+                    SetOptions(false);
+                    GetViewport().SetInputAsHandled();
+                    return;
+                }
+
                 Input.MouseMode = Input.MouseModeEnum.Captured;
                 _holdFire = true;
                 GetViewport().SetInputAsHandled();
@@ -1045,6 +1057,19 @@ public partial class TestRange : Node3D
             if (mb.ButtonIndex == MouseButton.WheelUp && mb.Pressed) _dist = Mathf.Clamp(_dist * 0.9f, 5f, far);
             if (mb.ButtonIndex == MouseButton.WheelDown && mb.Pressed) _dist = Mathf.Clamp(_dist * 1.1f, 5f, far);
             if (mb.ButtonIndex == MouseButton.Right) _zoom = mb.Pressed && captured;
+            return;
+        }
+
+        if (_optionsOpen && (e.IsActionPressed("vehicle_options") || e is InputEventKey { Pressed: true, PhysicalKeycode: Key.Escape }))
+        {
+            SetOptions(false);
+            GetViewport().SetInputAsHandled();
+            return;
+        }
+
+        if (e.IsActionPressed("vehicle_options") && Mounted)
+        {
+            SetOptions(true);
             return;
         }
 
@@ -1296,6 +1321,27 @@ public partial class TestRange : Node3D
         root.AddChild(_reticle);
         _reticle.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
 
+        _glass = new HudGlass { Visible = false };
+        root.AddChild(_glass);
+        _glass.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
+        _options = new HudOptions(new OptionActions
+        {
+            Lights = () => { if (Mounted && _mount.HasLights) _mount.ToggleLights(); },
+            Smoke = () => _smokeQueued = true,
+            Blade = () => { if (Mounted && _mount.HasBlade) _mount.ToggleBlade(); },
+            LiveFire = ToggleLiveFire,
+            LiveFireOn = () => _liveFire,
+            Ammo = () => { if (Mounted) _mount.ToggleAmmo(); },
+            Overlay = s =>
+            {
+                if (!Mounted) return;
+                _mount.Overlay = s;
+                Big("Overlay: " + Overlays.Name(_mount.OverlayShown) + (s == OverlayStyle.Auto ? " (from the cockpit)" : ""));
+            },
+        }) { Visible = false };
+        root.AddChild(_options);
+        _options.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
+
         _vehicleHud = new Control { MouseFilter = Control.MouseFilterEnum.Ignore };
         root.AddChild(_vehicleHud);
         _vehicleHud.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
@@ -1526,7 +1572,7 @@ public partial class TestRange : Node3D
 
     private void UpdateHud(float dt)
     {
-        _resume.Visible = Input.MouseMode != Input.MouseModeEnum.Captured && !_help.Visible && !(_map != null && _map.Visible) && !Bench.Active;
+        _resume.Visible = Input.MouseMode != Input.MouseModeEnum.Captured && !_help.Visible && !(_map != null && _map.Visible) && !Bench.Active && !_optionsOpen;
         if (_bigTime > 0)
         {
             _bigTime -= dt;
@@ -1548,7 +1594,12 @@ public partial class TestRange : Node3D
         _vignette.Color = new Color(0.6f, 0, 0, Mathf.Clamp(_hurtFlash * 0.45f + lowHealth, 0, 0.6f));
 
         bool mounted = Mounted;
-        _vehicleHud.Visible = mounted;
+        bool glass = mounted && _mount.OverlayShown == OverlayStyle.Glass;
+        _vehicleHud.Visible = mounted && !glass;
+        _glass.Visible = glass;
+        if (_optionsOpen && !mounted) SetOptions(false);
+        _options.Visible = _optionsOpen;
+        if (_optionsOpen) _options.Refresh(_mount, _cam, dt);
         _footHud.Visible = !mounted && _me.Alive;
         _reticle.HitFlash = Mathf.Max(0, _reticle.HitFlash - dt * 3f);
         _reticle.Marks.Clear();
@@ -1557,7 +1608,8 @@ public partial class TestRange : Node3D
             if (!cam.IsPositionBehind(p)) _reticle.Marks.Add((cam.UnprojectPosition(p), ready));
         _reticle.BombMark = mounted && _bombImpact is Vector3 bomb && !cam.IsPositionBehind(bomb) ? cam.UnprojectPosition(bomb) : null;
         Vector3? lockAt = mounted && _lock != null && IsInstanceValid(_lock) ? _lock.GlobalTransform * _lock.CenterOfMass : null;
-        _reticle.LockMark = lockAt is Vector3 la && !cam.IsPositionBehind(la) ? cam.UnprojectPosition(la) : null;
+        // (The Glass overlay draws its own brackets round the lock.)
+        _reticle.LockMark = lockAt is Vector3 la && !cam.IsPositionBehind(la) && !(mounted && _mount.OverlayShown == OverlayStyle.Glass) ? cam.UnprojectPosition(la) : null;
         _reticle.QueueRedraw();
 
         if (!_me.Alive)
@@ -1566,8 +1618,54 @@ public partial class TestRange : Node3D
             return;
         }
 
-        if (mounted) UpdateVehicleHud();
+        if (glass)
+            _glass.Refresh(new GlassFeed { Vehicle = _mount, Camera = _cam, Lock = _lock != null && IsInstanceValid(_lock) ? _lock : null, Alerts = VehicleAlerts(_mount) }, dt);
+        else if (mounted) UpdateVehicleHud();
         else UpdateFootHud();
+    }
+
+    /// <summary>Opens or closes the vehicle options: the mouse is free while they're open.</summary>
+    private void SetOptions(bool open)
+    {
+        _optionsOpen = open && Mounted;
+        _options.Visible = _optionsOpen;
+        // (A click that closes the panel mustn't also fire the guns.)
+        if (!_optionsOpen) _holdFire = true;
+        Input.MouseMode = _optionsOpen || Bench.Active ? Input.MouseModeEnum.Visible : Input.MouseModeEnum.Captured;
+    }
+
+    /// <summary>
+    /// What the Glass overlay flags across the top, most urgent first: the same warnings the classic panels spell out,
+    /// in a few words each.
+    /// </summary>
+    private List<(string text, Color color)> VehicleAlerts(VehicleBody v)
+    {
+        var list = new List<(string, Color)>();
+        Color red = GlassStyle.Red, amber = GlassStyle.Amber, cyan = GlassStyle.Cyan;
+        int jets = v.AirThrusters.Count(t => t.Alive && t.Info.Kind == BlockKind.JetEngine);
+        if (v.IsAir && v.FlightMode == MobilityMode.Plane)
+        {
+            float stall = v.Analysis.Air.StallSpeedMs * 3.6f;
+            if (v.Stalled) list.Add(("STALL · NOSE DOWN, THROTTLE UP", red));
+            else if (!v.OnGround && v.HeightAboveGroundM < 40f && v.ClimbRate < -8f) list.Add(("PULL UP", red));
+            else if (!v.OnGround && v.AirspeedKmh < stall * 1.1f) list.Add(($"SLOW · STALLS BELOW {stall:0} KM/H", amber));
+            else if (v.OnGround && v.AirspeedKmh < stall) list.Add(($"FULL THROTTLE · LIFT THE NOSE AT {stall * 0.9f:0} KM/H", cyan));
+            if (v.HottestJet > EngineHeat.Damaging) list.Add(("ENGINES BURNING OUT · EASE OFF (N)", red));
+            else if (v.HottestJet > EngineHeat.Limit) list.Add(("ENGINES HOT · LOSING POWER", amber));
+        }
+
+        if (v.FiresBurning > 0) list.Add(($"FIRE · {v.FiresBurning} BLOCKS BURNING", red));
+        if (!v.DriverAlive && !v.IsBuilding) list.Add(("DRIVER DOWN · WELD THE SEAT OR BACKSPACE", red));
+        else if (v.PowerKw <= 0 && jets == 0 && !v.IsBuilding) list.Add(("ENGINES DESTROYED", red));
+        else if (v.EngineDrowned) list.Add((v.IsNaval ? "ENGINE ROOM FLOODED · PUMP OR WELD" : "ENGINE FLOODED", red));
+        else if (v.FuelL <= 0 && !v.IsBuilding) list.Add((v.IsNaval ? "OUT OF FUEL · STOP IN THE BUOY RING" : "OUT OF FUEL · DRIVE ONTO THE SUPPLY PAD", red));
+        else if (!v.IsNaval && !v.IsAir && !v.IsBuilding && v.Wheels.Count == 0) list.Add(("NO WHEELS LEFT", red));
+        else if (v.IsNaval && v.PropsAlive == 0) list.Add(("PROPELLERS DESTROYED", red));
+        if (!v.IsNaval && v.Submerged > 0.25f) list.Add(("DEEP WATER · BACK OUT", amber));
+        if (v.IsUpsideDownOrStuck && (!v.IsAir || v.OnGround)) list.Add(("TIPPED OVER · R TO RIGHT IT", amber));
+        if (_resupplying) list.Add(("RESUPPLYING", cyan));
+        if (_lock != null && IsInstanceValid(_lock) && v.Analysis.Missiles.Count > 0 && !v.IsAir) list.Add(($"LOCK · {_lock.NameForYou.ToUpperInvariant()}", red));
+        return list;
     }
 
     private void UpdateVehicleHud()

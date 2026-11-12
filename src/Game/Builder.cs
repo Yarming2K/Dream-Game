@@ -73,6 +73,10 @@ public partial class Builder : Node3D
     /// <summary>The design's paint job id, or null for the default (factory colors; naval grey on ships).</summary>
     private string _paint;
     private OptionButton _paintPicker;
+
+    // The design's overlay style (null: whatever the cockpit comes with), and its picker.
+    private string _overlay;
+    private OptionButton _overlayPicker;
     private VehicleAnalysis _analysis;
     private bool _dirty = true;
     private bool _paletteDirty;
@@ -409,6 +413,7 @@ public partial class Builder : Node3D
         _name = bp.Name;
         if (_nameEdit != null) _nameEdit.Text = _name;
         SetPaint(bp.Paint);
+        SetOverlay(bp.Overlay);
         FocusCamera();
     }
 
@@ -416,8 +421,20 @@ public partial class Builder : Node3D
     {
         Blueprint bp = Blueprint.FromCellMap(_name, _blocks.Values);
         bp.Paint = _paint;
+        bp.Overlay = _overlay;
         return bp;
     }
+
+    /// <summary>Picks how the design's instruments are drawn when it's driven (null: whatever its cockpit comes with).</summary>
+    private void SetOverlay(string id)
+    {
+        _overlay = string.IsNullOrEmpty(id) ? null : id;
+        _overlayPicker?.Select(Math.Max(0, Array.IndexOf(Overlays.Choices, Overlays.FromId(_overlay))));
+        if (_selected != null && IsCockpit(_selected)) BuildPartCard(_selected);
+    }
+
+    /// <summary>Blocks you drive from: canopies and the pilot's and driver's seats. Their cards offer the overlay style.</summary>
+    private static bool IsCockpit(BlockDef d) => d.Id.StartsWith("canopy_") || d.Id is "pilot_seat" or "driver_seat";
 
     /// <summary>Picks the design's paint job and shows it on the design.</summary>
     private void SetPaint(string id)
@@ -1323,6 +1340,22 @@ public partial class Builder : Node3D
             Sfx.Play2D(this, SoundId.Tick, -8f);
         };
         bar.AddChild(_paintPicker);
+        _overlayPicker = new OptionButton { FocusMode = Control.FocusModeEnum.None, TooltipText = "How the instruments are drawn when you drive it. Each cockpit comes with a style; pick another here." };
+        foreach (OverlayStyle o in Overlays.Choices)
+        {
+            bool built = o == OverlayStyle.Auto || Overlays.IsBuilt(o);
+            _overlayPicker.AddItem("Overlay: " + Overlays.Name(o) + (built ? "" : " (soon)"));
+            int i = _overlayPicker.ItemCount - 1;
+            _overlayPicker.SetItemTooltip(i, Overlays.Describe(o));
+            _overlayPicker.SetItemDisabled(i, !built);
+        }
+
+        _overlayPicker.ItemSelected += i =>
+        {
+            SetOverlay(Overlays.Id(Overlays.Choices[(int)i]));
+            Sfx.Play2D(this, SoundId.Tick, -8f);
+        };
+        bar.AddChild(_overlayPicker);
         _savePartButton = Ui.Button("Save part", SavePart, "Keep what you copied as a part, to paste into any design later (Load, Parts)");
         _savePartButton.Disabled = true;
         bar.AddChild(_savePartButton);
@@ -1565,6 +1598,31 @@ public partial class Builder : Node3D
         head.AddChild(Ui.Caption(d.Category));
         _partCard.AddChild(head);
         _partCard.AddChild(Ui.Wrapped(d.Description, 14, Ui.Dim));
+
+        // A cockpit brings an overlay style: show which, and let the design pick another.
+        if (IsCockpit(d))
+        {
+            OverlayStyle brings = Overlays.CockpitDefault(new[] { d.Id }), pickNow = Overlays.FromId(_overlay);
+            _partCard.AddChild(Ui.Caption($"Overlay: comes with {Overlays.Name(brings)}" + (Overlays.IsBuilt(brings) ? "" : " (shows as Glass for now)")));
+            var styleRow = new HFlowContainer();
+            styleRow.AddThemeConstantOverride("h_separation", 4);
+            styleRow.AddThemeConstantOverride("v_separation", 4);
+            foreach (OverlayStyle o in Overlays.Choices)
+            {
+                OverlayStyle style = o;
+                bool built = o == OverlayStyle.Auto || Overlays.IsBuilt(o);
+                var b = new Button
+                {
+                    Text = o == OverlayStyle.Auto ? "From cockpit" : Overlays.Name(o), ToggleMode = true, Disabled = !built,
+                    FocusMode = Control.FocusModeEnum.None, TooltipText = Overlays.Describe(o),
+                };
+                b.SetPressedNoSignal(o == pickNow);
+                b.Pressed += () => SetOverlay(Overlays.Id(style));
+                styleRow.AddChild(b);
+            }
+
+            _partCard.AddChild(styleRow);
+        }
 
         // The shapes this block comes in, to pick from directly (V steps through them).
         List<BlockDef> shapes = BlockCatalog.VariantsOf(d);
