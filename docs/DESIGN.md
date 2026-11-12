@@ -375,7 +375,7 @@ The goal is hundreds of vehicles and thousands of shells in the air at once, on 
 ## Roadmap
 
 ### What's next, in order
-1. **Graphics pass 1: models, effects and environment** *(in progress)*. Done: weathering on everything, the Blender part library, trees, bushes and rocks you can knock down, time of day and weather, ground and roads, the village, a livelier sea, tyre ruts, the new jet exhaust, and the frame-rate fixes from the first PC benchmarks. Still to do: the full check on the owner's PC and fixing what it finds, then the remaining frame-rate work (simpler collision shapes, cheaper ship floating).
+1. **Graphics pass 1: models, effects and environment** *(in progress)*. Done: weathering on everything, the Blender part library, trees, bushes and rocks you can knock down, time of day and weather, ground and roads, the village, a livelier sea, tyre ruts, the new jet exhaust, and the frame-rate fixes from the first PC benchmarks. The PC check is done and its fixes are in, and so is the frame-rate work on big machines (fewer collision shapes, cheaper floating and wheel tests): the battleship close up went from 27-43 to 83 FPS and the deck battle from 38 to 57. Still open: the battle drills (100 and 200 machines) hold at 20 FPS; the next step there is to measure how much of each physics step is the physics engine itself.
 2. **Game mechanics**: jets built from parts, streamlining, engine tuning and heat (see Jets).
 3. **Campaign planning**: what the campaign is, built on the environment from pass 1.
 4. **Campaign building**: industry and the planet war (milestones 4 and 5 below).
