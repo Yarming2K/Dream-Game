@@ -139,8 +139,8 @@ public static class Liveries
     public static Livery For(Blueprint bp, bool naval) =>
         !string.IsNullOrEmpty(bp?.Paint) ? Get(bp.Paint) : naval ? Get("naval") : All[0];
 
-    /// <summary>Whether a part of a block gets painted (its own color does; steel, rubber, glass and lamps don't).</summary>
-    public static bool Paints(BlockDef def, Paint finish) => !def.Glass && finish is Paint.Self or Paint.SelfDark;
+    /// <summary>Whether a part of a block gets painted (its own color does; steel, rubber, glass and lamps don't, nor do unpainted materials).</summary>
+    public static bool Paints(BlockDef def, Paint finish) => !def.Glass && !def.Unpainted && finish is Paint.Self or Paint.SelfDark;
 
     // ------------------------------------------------------------- pattern math (mirrored in the paint shader)
 

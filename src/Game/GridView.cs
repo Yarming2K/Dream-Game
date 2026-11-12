@@ -539,7 +539,7 @@ public sealed partial class GridView
     private Material PlatingMaterial(BlockDef def)
     {
         if (def.Glass) return Paintwork.Glass(def, _livery, plating: true);
-        return _livery != null ? Paintwork.Plating(def, _livery, _waterline) : BlockVisuals.SurfaceMaterial(def);
+        return _livery != null && !def.Unpainted ? Paintwork.Plating(def, _livery, _waterline) : BlockVisuals.SurfaceMaterial(def);
     }
 
     /// <summary>Merges the chunk's solid cells into boxes: runs along X, then rows along Z, then layers along Y.</summary>

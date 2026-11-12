@@ -280,7 +280,7 @@ public partial class BatchedBlocks : Node3D
             BlockDef def = _surfaceDefs[mat];
             Material m = _armorView ? ArmorMaterial(def, true)
                 : def.Glass ? Paintwork.Glass(def, _livery, plating: true)
-                : _livery != null ? Paintwork.Plating(def, _livery, _waterline) : BlockVisuals.SurfaceMaterial(def);
+                : _livery != null && !def.Unpainted ? Paintwork.Plating(def, _livery, _waterline) : BlockVisuals.SurfaceMaterial(def);
             var hull = new MeshInstance3D { Mesh = BlockVisuals.HullMesh(s), MaterialOverride = m };
             node.AddChild(hull);
         }

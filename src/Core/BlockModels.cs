@@ -700,6 +700,10 @@ public static class BlockModels
                 break;
             }
 
+            case BlockKind.Fieldwork:
+                Fieldwork(k, def);
+                break;
+
             case BlockKind.Fairing:
                 // A nose cone: a pointed ogive from a round base that fills the back face, and a seam ring at the base.
                 k.Ogive(H * 0.99f, Full * 0.98f, Paint.Self, new Vector3(0, 0, H * 0.98f), 6, 24);
@@ -1303,6 +1307,170 @@ public static class BlockModels
         k.Node = -1;
     }
 
+    /// <summary>A small pseudo-random number (0 to 1) from a seed, so hand-placed clutter looks irregular but never changes.</summary>
+    private static float Jitter(int seed)
+    {
+        uint h = unchecked((uint)seed * 2654435761u);
+        h ^= h >> 15;
+        h = unchecked(h * 2246822519u);
+        h ^= h >> 13;
+        return (h & 1023u) / 1023f;
+    }
+
+    /// <summary>Single-cell field fortification: sandbags, a wire coil, a post, a fence panel.</summary>
+    private static void Fieldwork(Maker k, BlockDef def)
+    {
+        switch (def.Id)
+        {
+            case "sandbags":
+                // Three courses of bags: two laid along the wall, then two across it (headers), then along again.
+                // Each bag is a soft, slightly irregular pillow, every other one a shade darker.
+                for (int c = 0; c < 3; c++)
+                {
+                    float y = -H + 0.085f + c * 0.165f;
+                    for (int i = 0; i < 2; i++)
+                    {
+                        float off = (i - 0.5f) * 0.245f, j = Jitter(c * 7 + i * 3 + 1);
+                        bool along = c != 1;
+                        var size = along ? new Vector3(0.49f - 0.03f * j, 0.15f, 0.235f) : new Vector3(0.235f, 0.15f, 0.49f - 0.03f * j);
+                        var at = along ? new Vector3((j - 0.5f) * 0.02f, y, off) : new Vector3(off, y, (j - 0.5f) * 0.02f);
+                        k.Bevel(size, (c + i) % 2 == 0 ? Paint.Self : Paint.SelfDark, at, 0.05f, Rot(Vector3.UnitY, (j - 0.5f) * 0.08f));
+                    }
+                }
+
+                break;
+
+            case "wire":
+            {
+                // Three loops of a coil standing across the line, each leaning a little, on a picket stake.
+                for (int i = 0; i < 3; i++)
+                {
+                    Quaternion q = Rot(Vector3.UnitY, (i % 2 == 0 ? 0.32f : -0.32f)) * Rot(Vector3.UnitZ, MathF.PI / 2);
+                    k.Torus(0.21f, 0.006f, Paint.Steel, new Vector3(-0.17f + i * 0.17f, -0.03f, 0), q);
+                }
+
+                k.Box(new Vector3(0.025f, 0.42f, 0.025f), Paint.Dark, new Vector3(0, -0.04f, 0.2f));
+                for (int i = 0; i < 6; i++)
+                    k.Box(new Vector3(0.03f, 0.008f, 0.008f), Paint.Steel, new Vector3(-0.2f + i * 0.08f, 0.17f - (i % 2) * 0.36f, (i % 3 - 1) * 0.06f),
+                        Rot(Vector3.UnitZ, 0.7f));
+                break;
+            }
+
+            case "post":
+                k.Cyl(0.055f, Full, Paint.Self, Vector3.Zero, sides: 12);
+                k.Cyl(0.07f, 0.03f, Paint.SelfDark, new Vector3(0, H - 0.015f, 0), sides: 12);
+                break;
+
+            case "fence":
+            {
+                // A panel across the cell (in its own XY plane) hung from a post at one edge: rails top and bottom,
+                // a mesh of fine wires, and a strand of barbed wire along the top.
+                k.Cyl(0.03f, Full, Paint.Steel, new Vector3(-H + 0.03f, 0, 0), sides: 10);
+                k.Cyl(0.014f, Full, Paint.Steel, new Vector3(0, H - 0.03f, 0), AlongX, sides: 8);
+                k.Cyl(0.012f, Full, Paint.Steel, new Vector3(0, -H + 0.04f, 0), AlongX, sides: 8);
+                for (int i = 1; i < 6; i++)
+                {
+                    float t = -H + i * Full / 6f;
+                    k.Box(new Vector3(0.005f, Full * 0.9f, 0.005f), Paint.Self, new Vector3(t, 0, 0), Rot(Vector3.UnitZ, 0.45f));
+                    k.Box(new Vector3(0.005f, Full * 0.9f, 0.005f), Paint.Self, new Vector3(t, 0, 0), Rot(Vector3.UnitZ, -0.45f));
+                }
+
+                k.Cyl(0.004f, Full, Paint.Steel, new Vector3(0, H - 0.005f, 0.02f), AlongX, sides: 6);
+                break;
+            }
+
+            default:
+                k.Bevel(new Vector3(Full), Paint.Self, Vector3.Zero);
+                break;
+        }
+    }
+
+    /// <summary>Big field fortification: a barrier basket, a camouflage net, an armored cupola.</summary>
+    private static void FieldworkBig(Maker k, BlockDef def, Vector3 ext)
+    {
+        switch (def.Id)
+        {
+            case "hesco":
+            {
+                // The fabric liner, the earth showing on top, and the welded mesh round all four sides.
+                k.Box(ext * new Vector3(0.97f, 0.99f, 0.97f), Paint.Self, Vector3.Zero);
+                k.Box(new Vector3(ext.X * 0.95f, 0.03f, ext.Z * 0.95f), Paint.SelfDark, new Vector3(0, ext.Y * 0.5f - 0.005f, 0));
+                for (int i = 0; i < 5; i++)
+                    k.Bevel(new Vector3(0.18f, 0.05f, 0.14f), Paint.SelfDark, new Vector3((Jitter(i) - 0.5f) * ext.X * 0.7f, ext.Y * 0.5f + 0.01f, (Jitter(i + 9) - 0.5f) * ext.Z * 0.7f), 0.02f);
+                foreach (int side in new[] { -1, 1 })
+                {
+                    for (int i = 0; i <= 4; i++)
+                    {
+                        float t = (i / 4f - 0.5f) * ext.X;
+                        k.Box(new Vector3(0.012f, ext.Y, 0.012f), Paint.Steel, new Vector3(t, 0, side * ext.Z * 0.5f));
+                        k.Box(new Vector3(0.012f, ext.Y, 0.012f), Paint.Steel, new Vector3(side * ext.X * 0.5f, 0, t));
+                    }
+
+                    for (int j = 0; j <= 6; j++)
+                    {
+                        float y = (j / 6f - 0.5f) * ext.Y;
+                        k.Box(new Vector3(ext.X, 0.012f, 0.012f), Paint.Steel, new Vector3(0, y, side * ext.Z * 0.5f));
+                        k.Box(new Vector3(0.012f, 0.012f, ext.Z), Paint.Steel, new Vector3(side * ext.X * 0.5f, y, 0));
+                    }
+                }
+
+                break;
+            }
+
+            case "camo_net":
+            {
+                // The net stretched over a ridge, hung with strips of cloth in the paint job's colors, and its edges
+                // drooping over the sides.
+                k.Slab(new Vector3(ext.X * 1.02f, ext.Y * 0.7f, ext.Z * 1.02f), 0.18f, 0.18f, Paint.Self, new Vector3(0, -ext.Y * 0.15f, 0));
+                for (int i = 0; i < 36; i++)
+                {
+                    float u = Jitter(i * 3 + 1) - 0.5f, v = Jitter(i * 3 + 2) - 0.5f;
+                    float edge = MathF.Max(MathF.Abs(u), MathF.Abs(v)) * 2f;
+                    float y = -ext.Y * 0.5f + ext.Y * 0.7f * (1f - edge * 0.82f) + 0.02f;
+                    k.Box(new Vector3(0.24f, 0.025f, 0.09f), i % 3 == 0 ? Paint.SelfDark : Paint.Self, new Vector3(u * ext.X, y, v * ext.Z),
+                        Rot(Vector3.UnitY, Jitter(i * 3 + 3) * MathF.PI) * Rot(Vector3.UnitX, (Jitter(i) - 0.5f) * 0.6f));
+                }
+
+                foreach (int s in new[] { -1, 1 })
+                {
+                    k.Box(new Vector3(ext.X * 0.9f, 0.4f, 0.02f), Paint.Self, new Vector3(0, -ext.Y * 0.5f - 0.12f, s * ext.Z * 0.53f), Rot(Vector3.UnitX, s * 0.45f));
+                    k.Box(new Vector3(0.02f, 0.4f, ext.Z * 0.9f), Paint.Self, new Vector3(s * ext.X * 0.53f, -ext.Y * 0.5f - 0.12f, 0), Rot(Vector3.UnitZ, -s * 0.45f));
+                }
+
+                break;
+            }
+
+            case "cupola":
+            {
+                // A cast-steel dome on a bolted ring, six vision slits round it and a periscope on top. The lower half
+                // of the dome sits down in the roof below.
+                float baseY = -ext.Y * 0.5f;
+                k.Cyl(ext.X * 0.49f, 0.12f, Paint.SelfDark, new Vector3(0, baseY + 0.06f, 0), sides: 32);
+                for (int i = 0; i < 12; i++)
+                {
+                    float a = i * MathF.Tau / 12;
+                    k.Cyl(0.025f, 0.04f, Paint.Steel, new Vector3(MathF.Sin(a) * ext.X * 0.46f, baseY + 0.13f, MathF.Cos(a) * ext.X * 0.46f), sides: 6);
+                }
+
+                k.Sphere(1f, Paint.Self, new Vector3(0, baseY, 0), new Vector3(ext.X * 0.45f, 0.8f, ext.Z * 0.45f));
+                for (int i = 0; i < 6; i++)
+                {
+                    float a = i * MathF.Tau / 6;
+                    float r = ext.X * 0.45f * 0.84f;
+                    k.Box(new Vector3(0.2f, 0.04f, 0.06f), Paint.Dark, new Vector3(MathF.Sin(a) * r, baseY + 0.43f, MathF.Cos(a) * r), Rot(Vector3.UnitY, a));
+                }
+
+                k.Cyl(0.045f, 0.16f, Paint.Steel, new Vector3(0, baseY + 0.86f, 0), sides: 10);
+                k.Box(new Vector3(0.1f, 0.06f, 0.08f), Paint.Dark, new Vector3(0, baseY + 0.96f, -0.01f));
+                break;
+            }
+
+            default:
+                k.Bevel(ext, Paint.Self, Vector3.Zero, 0.05f);
+                break;
+        }
+    }
+
     /// <summary>A flat radar face: a dark array of small transmitters in a frame, split into tiles by a grid.</summary>
     private static void ArrayFace(Maker k, Vector3 size, Vector3 at, Quaternion tilt, int tilesX, int tilesY)
     {
@@ -1711,6 +1879,10 @@ public static class BlockModels
                 k.Node = -1;
                 break;
             }
+
+            case BlockKind.Fieldwork:
+                FieldworkBig(k, def, ext);
+                break;
 
             case BlockKind.Fairing:
             {

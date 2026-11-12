@@ -66,6 +66,7 @@ public static class Fittings
             switch (d.Id)
             {
                 case "periscope": c.Periscopes++; break;
+                case "cupola": c.Periscopes += 2; break;
                 case "antenna": c.Antennas++; break;
                 case "toolbox":
                 case "stowage_rack": c.Toolboxes++; break;

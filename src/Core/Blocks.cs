@@ -109,6 +109,9 @@ public enum BlockKind
 
     /// <summary>A smooth fairing shaped for the air: nose cones and bubble canopies. Light, and it cuts drag at the end of a fuselage.</summary>
     Fairing,
+
+    /// <summary>Field fortification and fittings: sandbags, barrier baskets, wire, nets, posts, fences and armored cupolas.</summary>
+    Fieldwork,
 }
 
 /// <summary>What a vertical launch cell holds.</summary>
@@ -312,6 +315,12 @@ public sealed class BlockDef
 
     /// <summary>Box launchers: how far from straight up their missiles leave, tipped toward the front (degrees).</summary>
     public float LaunchTiltDeg;
+
+    /// <summary>
+    /// Never takes a paint job: natural materials (brick, timber, tiles, earth) and field stores (sandbags,
+    /// barrier baskets, wire) keep their own colors whatever the design is painted.
+    /// </summary>
+    public bool Unpainted;
 
     /// <summary>
     /// Which of its own axes the block looks the same flipped along (0 X, 1 Y, 2 Z), so mirrored building knows
@@ -1256,31 +1265,96 @@ public static class BlockCatalog
         },
         new BlockDef
         {
-            Id = "concrete", Name = "Concrete", Category = "Structure", Kind = BlockKind.Armor,
-            Description = "Reinforced concrete: heavy and cheap, and it shrugs off blast better than steel. For bunkers, walls and buildings (press V for its shapes).",
+            Id = "concrete", Name = "Concrete", Category = "Structure", Kind = BlockKind.Armor, Unpainted = true,
+            Description = "Reinforced concrete, with the marks of the timber boards it was poured against: heavy and cheap, and it shrugs off blast better than steel. For bunkers, walls and buildings (press V for its shapes).",
             MassKg = 260, Hp = 380, ArmorMm = 70, HeVulnerability = 0.7f,
             ColorR = 0.62f, ColorG = 0.61f, ColorB = 0.57f, Metallic = 0f, Roughness = 0.95f,
         },
         new BlockDef
         {
-            Id = "brick", Name = "Brick", Category = "Structure", Kind = BlockKind.Armor,
+            Id = "brick", Name = "Brick", Category = "Structure", Kind = BlockKind.Armor, Unpainted = true,
             Description = "Brick laid in courses: houses, barns, garden walls. Stops bullets, not shells: a tank gun goes through and blast knocks it down (press V for its shapes).",
             MassKg = 220, Hp = 240, ArmorMm = 35, HeVulnerability = 1.1f,
             ColorR = 0.55f, ColorG = 0.31f, ColorB = 0.23f, Metallic = 0f, Roughness = 0.95f,
         },
         new BlockDef
         {
-            Id = "timber", Name = "Timber", Category = "Structure", Kind = BlockKind.Armor,
+            Id = "timber", Name = "Timber", Category = "Structure", Kind = BlockKind.Armor, Unpainted = true,
             Description = "Boarded timber: barns, sheds, floors and gables. Light and weak; little stops anything (press V for its shapes).",
             MassKg = 60, Hp = 110, ArmorMm = 6, HeVulnerability = 1.4f,
             ColorR = 0.42f, ColorG = 0.31f, ColorB = 0.21f, Metallic = 0f, Roughness = 0.9f,
         },
         new BlockDef
         {
-            Id = "roof_tile", Name = "Roof Tiles", Category = "Structure", Kind = BlockKind.Armor,
+            Id = "roof_tile", Name = "Roof Tiles", Category = "Structure", Kind = BlockKind.Armor, Unpainted = true,
             Description = "Clay tiles on battens: the sloped roofs of houses (use its slope shapes, V). Light; shells go straight through.",
             MassKg = 90, Hp = 90, ArmorMm = 4, HeVulnerability = 1.4f,
             ColorR = 0.5f, ColorG = 0.24f, ColorB = 0.17f, Metallic = 0f, Roughness = 0.85f,
+        },
+        new BlockDef
+        {
+            Id = "earth", Name = "Earth", Category = "Structure", Kind = BlockKind.Armor, Unpainted = true,
+            Description = "Packed earth, grassed over on top: berms banked up against bunker walls, ramps, revetments round gun pits. It soaks up blast far better than its thickness suggests, and it's what makes a bunker hard to spot (press V for slopes).",
+            MassKg = 200, Hp = 320, ArmorMm = 45, HeVulnerability = 0.5f,
+            ColorR = 0.4f, ColorG = 0.33f, ColorB = 0.24f, Metallic = 0f, Roughness = 1f,
+        },
+        new BlockDef
+        {
+            Id = "corrugated", Name = "Corrugated Steel", Category = "Structure", Kind = BlockKind.Armor,
+            Description = "Corrugated sheet steel on a light frame: huts, sheds, hangars, container walls and the cabins of guard towers. Light and cheap; it keeps the rain out, not bullets (press V for roof slopes).",
+            MassKg = 25, Hp = 60, ArmorMm = 2, HeVulnerability = 1.3f, Watertight = true,
+            ColorR = 0.5f, ColorG = 0.52f, ColorB = 0.5f, Metallic = 0.5f, Roughness = 0.6f,
+        },
+
+        // Field fortification
+        new BlockDef
+        {
+            Id = "sandbags", Name = "Sandbags", Category = "Structure", Kind = BlockKind.Fieldwork, Unpainted = true,
+            Description = "Sandbags stacked three courses high, the way soldiers wall in a gun pit, a doorway or a window. Stops bullets and splinters and soaks up blast; a direct hit from a tank gun still goes through.",
+            MassKg = 200, Hp = 160, ArmorMm = 40, HeVulnerability = 0.6f,
+            ColorR = 0.6f, ColorG = 0.55f, ColorB = 0.42f, Metallic = 0f, Roughness = 1f,
+        },
+        new BlockDef
+        {
+            Id = "hesco", Name = "Barrier Basket (2×3×2)", Category = "Structure", Kind = BlockKind.Fieldwork, Size = new Int3(2, 3, 2), Unpainted = true,
+            Description = "A wire-mesh basket a metre square and 1.5 m tall, lined with fabric and filled with earth: the walls of a modern forward base, built in an afternoon. Very hard to knock down; set them in lines.",
+            MassKg = 2400, Hp = 1400, ArmorMm = 120, HeVulnerability = 0.4f,
+            ColorR = 0.62f, ColorG = 0.57f, ColorB = 0.44f, Metallic = 0f, Roughness = 1f,
+        },
+        new BlockDef
+        {
+            Id = "wire", Name = "Barbed Wire Coil", Category = "Structure", Kind = BlockKind.Fieldwork, Unpainted = true,
+            Description = "Coils of razor wire on a stake, laid in lines round a position. People can't get through it; anything heavy rolls over it.",
+            MassKg = 8, Hp = 20, ArmorMm = 0, Watertight = false,
+            ColorR = 0.45f, ColorG = 0.45f, ColorB = 0.44f, Metallic = 0.8f, Roughness = 0.5f,
+        },
+        new BlockDef
+        {
+            Id = "camo_net", Name = "Camouflage Net (5×1×5)", Category = "Structure", Kind = BlockKind.Fieldwork, Size = new Int3(5, 1, 5),
+            Description = "A net hung with strips of cloth, stretched over a gun pit or a parked vehicle. It takes the design's paint job. Nothing solid: it hides, it doesn't protect.",
+            MassKg = 60, Hp = 40, ArmorMm = 0, HasCollider = false, Watertight = false,
+            ColorR = 0.33f, ColorG = 0.36f, ColorB = 0.24f, Metallic = 0f, Roughness = 1f,
+        },
+        new BlockDef
+        {
+            Id = "cupola", Name = "Armored Cupola (3×2×3)", Category = "Structure", Kind = BlockKind.Fieldwork, Size = new Int3(3, 2, 3),
+            Description = "A cast-steel observation dome 1.5 m across with vision slits all round, set into a bunker roof. Counts as two periscopes (everything aboard spots further) and it's very hard to crack.",
+            MassKg = 3500, Hp = 900, ArmorMm = 180, HeVulnerability = 0.6f,
+            ColorR = 0.4f, ColorG = 0.41f, ColorB = 0.38f, Metallic = 0.6f, Roughness = 0.6f,
+        },
+        new BlockDef
+        {
+            Id = "post", Name = "Steel Post", Category = "Structure", Kind = BlockKind.Fieldwork, Unpainted = true,
+            Description = "A steel pole a cell tall: legs for guard towers, masts, net and light poles. Stack them for taller ones.",
+            MassKg = 15, Hp = 40, ArmorMm = 6, Watertight = false,
+            ColorR = 0.38f, ColorG = 0.39f, ColorB = 0.37f, Metallic = 0.7f, Roughness = 0.5f,
+        },
+        new BlockDef
+        {
+            Id = "fence", Name = "Chain-Link Fence", Category = "Structure", Kind = BlockKind.Fieldwork, Unpainted = true,
+            Description = "A chain-link panel on a post, a cell wide: fence lines round compounds and depots. Stack two for a full-height fence with barbed wire on top.",
+            MassKg = 10, Hp = 30, ArmorMm = 1, Watertight = false,
+            ColorR = 0.55f, ColorG = 0.56f, ColorB = 0.55f, Metallic = 0.8f, Roughness = 0.45f,
         },
 
         // Heavy weapons
@@ -1516,7 +1590,7 @@ public static class BlockCatalog
         (BlockShape.Half, "half"), (BlockShape.Plate, "plate"), (BlockShape.Octagon, "octagon"),
     };
 
-    private static readonly string[] ShapedBases = { "armor_light", "armor_heavy", "armor_composite", "glazing", "airframe", "concrete", "brick", "timber", "roof_tile" };
+    private static readonly string[] ShapedBases = { "armor_light", "armor_heavy", "armor_composite", "glazing", "airframe", "concrete", "brick", "timber", "roof_tile", "earth", "corrugated" };
 
     // After the lists above: static fields are set up in the order they're written.
     private static readonly Dictionary<string, BlockDef> ById = BuildIndex();
@@ -1558,7 +1632,7 @@ public static class BlockCatalog
                     Id = vid, Name = $"{b.Name}: {Shapes.NameOf(shape).ToLowerInvariant()}", Category = b.Category, Kind = b.Kind, Shape = shape,
                     BaseId = id, Glass = b.Glass, Description = $"{b.Description.Split('.')[0]}, shaped. {ShapeHint(shape)}",
                     MassKg = MathF.Round(b.MassKg * vol * 1.05f), Hp = MathF.Round(b.Hp * MathF.Max(vol, 0.35f)), ArmorMm = b.ArmorMm,
-                    HeVulnerability = b.HeVulnerability, Watertight = b.Watertight,
+                    HeVulnerability = b.HeVulnerability, Watertight = b.Watertight, Unpainted = b.Unpainted,
                     ColorR = b.ColorR, ColorG = b.ColorG, ColorB = b.ColorB, Metallic = b.Metallic, Roughness = b.Roughness,
                 });
             }

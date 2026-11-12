@@ -1788,6 +1788,83 @@ public static class ExampleDesigns
     public static IReadOnlyList<Blueprint> Buildings => new[]
         { Pillbox(), FlakNest(), Outpost(), SiegeFortress(), CoastalCitadel(), FlakTower(), MortarBattery() };
 
+    // ------------------------------------------------------------------ fortification helpers
+
+    /// <summary>Chamfers the outer edge of a box's top layer: slopes along the sides, corner pieces at the corners.</summary>
+    private static void ChamferEdge(Draft d, int x0, int x1, int y, int z0, int z1, string mat = "concrete")
+    {
+        for (int x = x0 + 1; x < x1; x++)
+        {
+            d.Slope(x, y, z0, mat + "_slope", new Int3(0, 1, -1));
+            d.Slope(x, y, z1, mat + "_slope", new Int3(0, 1, 1));
+        }
+
+        for (int z = z0 + 1; z < z1; z++)
+        {
+            d.Slope(x0, y, z, mat + "_slope", new Int3(-1, 1, 0));
+            d.Slope(x1, y, z, mat + "_slope", new Int3(1, 1, 0));
+        }
+
+        foreach (int x in new[] { x0, x1 })
+        foreach (int z in new[] { z0, z1 })
+            d.Set(x, y, z, mat + "_corner", CornerFacing(new Int3(x == x0 ? -1 : 1, 1, 0), new Int3(0, 1, z == z0 ? -1 : 1)));
+    }
+
+    /// <summary>
+    /// Earth banked up round the box x0..x1 × z0..z1: <paramref name="h"/> cells high against its walls, sloping away
+    /// at 45° with corner pieces where two banks meet, like a bunker half dug in. Never replaces what's there;
+    /// <paramref name="skip"/> leaves gaps (doorways, embrasures, trenches).
+    /// </summary>
+    private static void Berm(Draft d, int x0, int x1, int z0, int z1, int h, Func<int, int, bool> skip = null)
+    {
+        for (int x = x0 - h; x <= x1 + h; x++)
+        for (int z = z0 - h; z <= z1 + h; z++)
+        {
+            int dx = x < x0 ? x0 - x : x > x1 ? x - x1 : 0, dz = z < z0 ? z0 - z : z > z1 ? z - z1 : 0;
+            int k = Math.Max(dx, dz);
+            if (k == 0 || skip?.Invoke(x, z) == true) continue;
+            int sx = x < x0 ? -1 : 1, sz = z < z0 ? -1 : 1;
+            if (h - k >= 1) d.Fill(x, x, 1, h - k, z, z, "earth");
+            int top = h - k + 1;
+            if (dx == dz) d.Fill(x, x, top, top, z, z, "earth_corner", CornerFacing(new Int3(sx, 1, 0), new Int3(0, 1, sz)));
+            else if (dx > dz) d.Fill(x, x, top, top, z, z, "earth_slope", Facing(new Int3(sx, 1, 0)));
+            else d.Fill(x, x, top, top, z, z, "earth_slope", Facing(new Int3(0, 1, sz)));
+        }
+    }
+
+    /// <summary>
+    /// A guard tower centered on (x, z): four steel legs, a boarded platform 2.5 m square at <paramref name="floor"/>
+    /// walled with sandbags, a corrugated roof on corner posts with a searchlight, and a ladder up the
+    /// <paramref name="ladderSide"/> (+1 or -1 in z).
+    /// </summary>
+    private static void GuardTower(Draft d, int x, int z, int floor, int ladderSide)
+    {
+        foreach (int sx in new[] { -2, 2 })
+        foreach (int sz in new[] { -2, 2 })
+            for (int y = 1; y <= floor + 2; y++) d.Set(x + sx, y, z + sz, "post");
+        d.Fill(x - 2, x + 2, floor, floor, z - 2, z + 2, "timber");
+        for (int i = -1; i <= 1; i++)
+        {
+            d.Set(x + i, floor + 1, z - 2 * ladderSide, "sandbags");
+            d.Set(x - 2, floor + 1, z + i, "sandbags");
+            d.Set(x + 2, floor + 1, z + i, "sandbags");
+            if (i != 0) d.Set(x + i, floor + 1, z + 2 * ladderSide, "sandbags");
+        }
+
+        d.Fill(x - 2, x + 2, floor + 3, floor + 3, z - 2, z + 2, "corrugated");
+        d.Set(x, floor + 4, z, "searchlight");
+        for (int y = 1; y <= floor + 1; y++) d.Set(x, y, z + 3 * ladderSide, "ladder", Orient(new Int3(0, -1, 0), new Int3(0, 0, -ladderSide)));
+    }
+
+    /// <summary>A camouflage net 2.5 m square on four posts, its middle at (x, y, z), over whatever is below.</summary>
+    private static void NetOnPosts(Draft d, int x, int y, int z)
+    {
+        d.Set(x, y, z, "camo_net");
+        foreach (int sx in new[] { -2, 2 })
+        foreach (int sz in new[] { -2, 2 })
+            for (int yy = 1; yy < y; yy++) d.Fill(x + sx, x + sx, yy, yy, z + sz, z + sz, "post");
+    }
+
     // ------------------------------------------------------------------ the village
 
     /// <summary>The village's buildings: houses, a barn and a chapel. Civilian structures, no guns.</summary>
@@ -2408,14 +2485,15 @@ public static class ExampleDesigns
     }
 
     /// <summary>
-    /// Pillbox: a concrete blockhouse with a 37 mm on a turntable inside, firing out through a wide slit in
-    /// the front wall. A door at the back, a bunk and a weapon locker for the crew, first aid, lamps, and a
-    /// periscope on the roof.
+    /// Pillbox: a concrete blockhouse dug into an earth bank, with a 37 mm on a turntable inside firing out
+    /// through a splayed slit in the front wall. Board-marked concrete with a chamfered roof, an armored
+    /// observation cupola on top, a sandbagged trench round to the door at the back, and a line of wire in
+    /// front. Inside: a bunk and a weapon locker for the crew, first aid and lamps.
     /// </summary>
     public static Blueprint Pillbox()
     {
         var d = new Draft();
-        d.Fill(-4, 4, 0, 0, -4, 4, "foundation");
+        d.Fill(-8, 8, 0, 0, -10, 8, "foundation");
         d.Set(0, 1, -2, "turret_ring");
         d.Set(0, 2, -2, "breech_37");
         for (int z = -3; z >= -6; z--) d.Set(0, 2, z, "barrel");
@@ -2434,23 +2512,44 @@ public static class ExampleDesigns
         d.Fill(-4, -4, 1, 5, -3, 3, "concrete");
         d.Fill(4, 4, 1, 5, -3, 3, "concrete");
         d.Fill(-4, 4, 6, 6, -4, 4, "concrete");
-        // The firing slit.
+        ChamferEdge(d, -4, 4, 6, -4, 4);
+
+        // The firing slit, its sides and top splayed outward so the gun can swing and fire low.
         for (int x = -2; x <= 2; x++)
         for (int y = 2; y <= 3; y++)
             if (x != 0 || y != 2) d.Remove(x, y, -4);
-        d.Set(0, 7, 2, "periscope");
-        d.Set(3, 7, 3, "antenna");
+        foreach (int y in new[] { 2, 3 })
+        {
+            d.Slope(-3, y, -4, "concrete_slope", new Int3(1, 0, -1));
+            d.Slope(3, y, -4, "concrete_slope", new Int3(-1, 0, -1));
+        }
+
+        for (int x = -2; x <= 2; x++) d.Slope(x, 4, -4, "concrete_slope", new Int3(0, -1, -1));
+
+        // The cupola and an antenna on the roof.
+        d.Set(1, 7, 1, "cupola");
+        d.Set(-2, 7, 2, "antenna");
+
+        // A sandbagged trench round to the door, then earth banked up the sides and back to the slit.
+        for (int z = 5; z <= 8; z++)
+            foreach (int x in new[] { -3, 2 })
+                d.Fill(x, x, 1, 2, z, z, "sandbags");
+        Berm(d, -4, 4, -4, 4, 4, (x, z) => (z < -4 && x >= -4 && x <= 4) || (z > 4 && x >= -2 && x <= 1));
+
+        // Wire across the front, clear of the gun.
+        for (int x = -8; x <= 8; x++) d.Set(x, 1, -10, "wire");
         return d.Build("Pillbox (bunker)", "olive");
     }
 
     /// <summary>
-    /// Flak nest: a 40 mm autocannon on a raised turntable inside a low concrete wall, with flak and HE at
-    /// hand, a search radar and a searchlight on posts, and a first aid station on the wall.
+    /// Flak nest: a 40 mm autocannon on a raised turntable in an eight-sided sandbagged pit, with flak and HE at
+    /// hand, earth banked round the outside and a trench in at the back. A search radar and a searchlight
+    /// on the sandbags, first aid inside, and wire round the whole position.
     /// </summary>
     public static Blueprint FlakNest()
     {
         var d = new Draft();
-        d.Fill(-4, 4, 0, 0, -4, 4, "foundation");
+        d.Fill(-8, 8, 0, 0, -8, 8, "foundation");
         d.Set(0, 1, 0, "concrete");
         d.Set(0, 2, 0, "turret_ring");
         d.Set(0, 3, 0, "breech_40ac");
@@ -2458,35 +2557,50 @@ public static class ExampleDesigns
         d.Set(-1, 3, 0, "ammo_flak");
         d.Set(1, 3, 0, "ammo_he");
         d.Set(0, 3, 1, "gunner_seat");
-
-        foreach ((int x, int z) in new[] { (3, 3), (-3, -3) }) d.Fill(x, x, 1, 2, z, z, "concrete");
-        d.Set(3, 3, 3, "radar");
-        d.Set(-3, 3, -3, "searchlight");
         d.Set(-3, 2, 0, "first_aid", Orient(new Int3(0, -1, 0), new Int3(1, 0, 0)));
 
-        d.Fill(-4, 4, 1, 2, -4, -4, "concrete");
-        d.Fill(-4, 4, 1, 2, 4, 4, "concrete");
-        d.Fill(-4, -4, 1, 2, -3, 3, "concrete");
-        d.Fill(4, 4, 1, 2, -3, 3, "concrete");
-        // The way in, at the back.
-        foreach (int x in new[] { -1, 0 })
-        foreach (int y in new[] { 1, 2 })
-            d.Remove(x, y, 4);
+        // The pit: an eight-sided ring of sandbags a metre high, open at the back; outside its corners, earth.
+        for (int x = -4; x <= 4; x++)
+        for (int z = -4; z <= 4; z++)
+        {
+            float o = MathF.Max(Math.Max(Math.Abs(x), Math.Abs(z)), (Math.Abs(x) + Math.Abs(z)) * 0.72f);
+            bool gate = z == 4 && x >= -1 && x <= 1;
+            if (MathF.Round(o) == 4 && !gate) d.Fill(x, x, 1, 2, z, z, "sandbags");
+            else if (o > 4.5f) d.Fill(x, x, 1, 2, z, z, "earth");
+        }
+
+        d.Set(3, 3, 3, "radar");
+        d.Set(-3, 3, -3, "searchlight");
+        Berm(d, -4, 4, -4, 4, 2, (x, z) => z > 4 && x >= -1 && x <= 1);
+
+        // Wire all round, with a gap at the trench.
+        for (int i = -8; i <= 8; i++)
+        {
+            d.Set(i, 1, -8, "wire");
+            if (i < -2 || i > 2) d.Set(i, 1, 8, "wire");
+            if (i > -8 && i < 8)
+            {
+                d.Set(-8, 1, i, "wire");
+                d.Set(8, 1, i, "wire");
+            }
+        }
+
         return d.Build("Flak nest (AA site)", "olive");
     }
 
     /// <summary>
-    /// Outpost: a forward base. Inside: bunks (rest there and you come back there), a weapon locker, first
-    /// aid, and a workbench that repairs your vehicles parked outside. Supply crates on the apron in front
-    /// rearm and refuel them. Stairs up the side to a 40 mm anti-aircraft gun on the roof, with a
-    /// searchlight and an antenna.
+    /// Outpost: a modern forward base. Earth-filled barrier baskets wall in a compound round a concrete
+    /// command building, with a gate in front between two sandbagged guard towers, wire outside, and
+    /// camouflage nets over the supply crates. Inside the building: bunks (rest there and you come back
+    /// there), a weapon locker, first aid, and a workbench that repairs your vehicles parked nearby. The supply
+    /// crates rearm and refuel them. Stairs up the side to a 40 mm anti-aircraft gun behind sandbags on the
+    /// roof, with a searchlight and an antenna; a radio mast and a floodlight in the compound.
     /// </summary>
     public static Blueprint Outpost()
     {
         var d = new Draft();
         const int roof = 6;
-        d.Fill(-6, 6, 0, 0, -5, 5, "foundation");
-        d.Fill(-6, 6, 0, 0, -11, -6, "foundation");
+        d.Fill(-13, 12, 0, 0, -20, 10, "foundation");
 
         // Inside.
         d.Set(-1, 2, -5, "door");
@@ -2505,16 +2619,18 @@ public static class ExampleDesigns
         d.Fill(6, 6, 1, roof - 1, -4, 4, "concrete");
         d.Fill(-6, 6, roof, roof, -5, 5, "concrete");
 
-        // Supply crates on the apron.
+        // Supply crates in front, under camouflage nets.
         d.Set(3, 1, -8, "supply_crate");
         d.Set(-4, 1, -8, "supply_crate");
+        NetOnPosts(d, 3, 4, -8);
+        NetOnPosts(d, -4, 4, -8);
 
         // Stairs up the right-hand side to the roof.
         for (int i = 0; i < roof; i++)
             foreach (int x in new[] { 7, 8 })
                 d.Set(x, 1 + i, -4 + i, "stairs");
 
-        // The roof gun.
+        // The roof gun behind a sandbag parapet (open where the stairs come up).
         d.Set(0, roof + 1, 1, "turret_ring");
         d.Set(0, roof + 2, 1, "breech_40ac");
         for (int z = 0; z >= -2; z--) d.Set(0, roof + 2, z, "barrel");
@@ -2525,16 +2641,38 @@ public static class ExampleDesigns
         d.Set(5, roof + 1, 4, "antenna");
         for (int i = -6; i <= 6; i++)
         {
-            d.Set(i, roof + 1, -5, "railing", Orient(new Int3(0, -1, 0), new Int3(0, 0, 1)));
-            d.Set(i, roof + 1, 5, "railing", Orient(new Int3(0, -1, 0), new Int3(0, 0, -1)));
+            d.Set(i, roof + 1, -5, "sandbags");
+            d.Set(i, roof + 1, 5, "sandbags");
             if (i > -5 && i < 5)
             {
-                d.Set(-6, roof + 1, i, "railing", Orient(new Int3(0, -1, 0), new Int3(1, 0, 0)));
-                if (i < 1 || i > 2) d.Set(6, roof + 1, i, "railing", Orient(new Int3(0, -1, 0), new Int3(-1, 0, 0)));
+                d.Set(-6, roof + 1, i, "sandbags");
+                if (i < 1 || i > 2) d.Set(6, roof + 1, i, "sandbags");
             }
         }
 
-        return d.Build("Outpost (forward base)", "olive");
+        // The compound wall: barrier baskets all round, with a gate in front.
+        for (int x = -12; x <= 10; x += 2)
+        {
+            d.Set(x, 2, 8, "hesco");
+            if (x < -4 || x > 2) d.Set(x, 2, -18, "hesco");
+        }
+
+        for (int z = -16; z <= 6; z += 2)
+        {
+            d.Set(-12, 2, z, "hesco");
+            d.Set(10, 2, z, "hesco");
+        }
+
+        // Guard towers either side of the gate, a radio mast and a floodlight, and wire outside the front.
+        GuardTower(d, -8, -13, 8, 1);
+        GuardTower(d, 7, -13, 8, 1);
+        for (int y = 1; y <= 8; y++) d.Set(-10, y, 6, "post");
+        d.Set(-10, 9, 6, "antenna");
+        for (int y = 1; y <= 5; y++) d.Set(8, y, 6, "post");
+        d.Set(8, 6, 6, "searchlight");
+        for (int x = -13; x <= 12; x++)
+            if (x < -5 || x > 4) d.Set(x, 1, -20, "wire");
+        return d.Build("Outpost (forward base)", "desert_digital");
     }
 
     /// <summary>

@@ -42,7 +42,8 @@ uniform sampler2D grit : source_color, filter_linear_mipmap, repeat_enable;
 // Weathering (the game's look: worn, chipped, dirty). finish: 0 paint, 1 bare metal, 2 rubber, concrete and the like.
 uniform sampler2D wear_tex : filter_linear_mipmap, repeat_enable;
 uniform int finish = 0;
-// Building materials drawn into the surface: 1 brick courses, 2 timber boards, 3 clay roof tiles.
+// Building materials drawn into the surface: 1 brick courses, 2 timber boards, 3 clay roof tiles, 4 board-formed
+// concrete, 5 earth grassed over on top, 6 corrugated sheet steel.
 uniform int masonry = 0;
 instance uniform float wear_amount = 0.7;
 instance uniform float mud_amount = 0.5;
@@ -149,6 +150,39 @@ vec3 masonry_color(vec3 col, vec3 p, vec3 n, vec2 uv, float w) {
 		float grain = mix(vnoise(vec3(uv.x * 60.0, uv.y * 3.0, floor(b) * 7.0)), 0.5, smoothstep(0.003, 0.012, w));
 		col *= (0.78 + 0.3 * grain) * (0.9 + 0.2 * h01(ivec3(int(floor(b)), 3, 11)));
 		return col * (1.0 - seam * 0.45);
+	}
+	if (masonry == 4) {
+		// Concrete poured against timber boards: the planks' faint marks and seams, a darker line where each pour
+		// stopped, and the holes the formwork ties left. Tops were trowelled smooth.
+		if (an.y > 0.7) {
+			return col * (0.93 + 0.12 * vnoise(p * 3.0));
+		}
+		float fade = smoothstep(0.006, 0.025, w);
+		float board = floor(p.y / 0.15);
+		float fb = fract(p.y / 0.15);
+		float seam = (1.0 - smoothstep(0.0, 0.07, min(fb, 1.0 - fb))) * (1.0 - fade);
+		col *= 0.94 + 0.1 * mix(h01(ivec3(int(board), int(floor(uv.x / 2.4)), 13)), 0.5, fade);
+		col *= 1.0 - 0.1 * seam;
+		float lift = 1.0 - smoothstep(0.006, 0.016 + w, abs(fract(p.y / 1.2 + 0.5) - 0.5) * 1.2);
+		vec2 t = abs(fract(vec2(uv.x / 0.6, p.y / 0.6 + 0.25)) - 0.5) * 0.6;
+		float hole = 1.0 - smoothstep(0.011, 0.018 + w, length(t));
+		return col * (1.0 - (0.14 * lift + 0.35 * hole) * (1.0 - fade));
+	}
+	if (masonry == 5) {
+		// Packed earth: grass over the tops and gentle slopes, bare soil down the steep sides, both patchy.
+		float n1 = fbm(p * 1.3);
+		float n2 = vnoise(p * 7.0);
+		vec3 soil = col * (0.8 + 0.35 * n2);
+		vec3 grass = mix(vec3(0.2, 0.28, 0.11), vec3(0.32, 0.35, 0.16), n1) * (0.85 + 0.25 * n2);
+		return mix(soil, grass, smoothstep(0.35, 0.7, n.y + (n1 - 0.5) * 0.4));
+	}
+	if (masonry == 6) {
+		// Corrugated sheet: ridges 7.6 cm apart running up the walls and down the roofs, sheets lapped every 0.9 m.
+		float across = an.x > an.z ? p.z : p.x;
+		float fade = smoothstep(0.004, 0.02, w);
+		col *= 1.0 + 0.16 * sin(across / 0.076 * 6.2831853) * (1.0 - fade);
+		float lap = 1.0 - smoothstep(0.004, 0.012 + w, abs(fract(across / 0.9 + 0.5) - 0.5) * 0.9);
+		return col * (1.0 - 0.2 * lap * (1.0 - fade));
 	}
 	float u = an.x > an.z ? p.z : p.x;
 	float row = floor(p.y / 0.11);
@@ -369,10 +403,13 @@ void fragment() {
 
     private static string BaseOf(BlockDef def) => def.BaseId ?? def.Id;
 
-    /// <summary>Concrete, brick, timber and tiles aren't painted: they only get dirty.</summary>
-    private static Finish FinishOf(BlockDef def) => BaseOf(def) is "concrete" or "brick" or "timber" or "roof_tile" ? Finish.Other : Finish.Paint;
+    /// <summary>Concrete, brick, timber, tiles and earth don't chip like paint: they only get dirty.</summary>
+    private static Finish FinishOf(BlockDef def) => BaseOf(def) is "concrete" or "brick" or "timber" or "roof_tile" or "earth" ? Finish.Other : Finish.Paint;
 
-    private static int MasonryOf(BlockDef def) => BaseOf(def) switch { "brick" => 1, "timber" => 2, "roof_tile" => 3, _ => 0 };
+    private static int MasonryOf(BlockDef def) => BaseOf(def) switch
+    {
+        "brick" => 1, "timber" => 2, "roof_tile" => 3, "concrete" => 4, "earth" => 5, "corrugated" => 6, _ => 0,
+    };
 
     /// <summary>Unpainted hull plating: the block's own color, worn like everything else.</summary>
     public static ShaderMaterial PlainPlating(BlockDef def) =>
