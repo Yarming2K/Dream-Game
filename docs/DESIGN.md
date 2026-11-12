@@ -411,7 +411,10 @@ The goal is hundreds of vehicles and thousands of shells in the air at once, on 
 | Enemy | **One rival faction** fielding ready-made designs (like the examples, with variations), getting stronger as it researches. More rivals, and an AI that designs its own machines, come later. |
 | Tech | **Hybrid:** eras as tiers (WW2, Cold War, modern, future), with branches inside each (armor, air, naval, artillery, energy weapons). Enough research in an era opens the next; which branches is your choice. Salvaged enemy wrecks and captured sites jump you ahead in that branch. |
 | Victory | **Take their last base.** Losses are setbacks; a side is out when its last base falls. |
-| Economy | Being decided. |
+| Resources | **About 8:** steel, aluminium, copper, rubber, fuel, explosives, electronics, and a rare one (uranium and rare earths) for reactors, railguns and lasers. A design costs the resources its blocks are made of, so designing well is also designing cheaply; the builder shows the price live. |
+| Supply | **Hybrid:** real convoys (trucks, cargo ships, transport planes) you can see, escort and ambush near you; far away the same flow is worked out along the routes on the map. Cut a route by taking or destroying its depots and bridges. |
+| Bases | **Capture sites, build around them:** each island has sites worth taking (ports, airfields, mines, towns); once you hold one you can build your own structures around it. Plus **field equipment** for the front (being decided). |
+| Production | Being worked out. |
 
 ## Technical approach
 
