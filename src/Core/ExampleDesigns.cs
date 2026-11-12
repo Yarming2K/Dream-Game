@@ -1149,7 +1149,8 @@ public static class ExampleDesigns
         d.Set(0, 1, -3, "ammo_he");
         d.Set(-1, 1, -4, "ammo_ap");
 
-        // Stub wings with a missile rail each: motor, fins, warhead, optical seeker on the nose.
+        // Stub wings with a missile rail each: motor, fins, warhead, and a seeker on the nose: optical on the right
+        // (anything, close in), top attack on the left (armor, from a few hundred meters off, onto the roof).
         foreach (int x in new[] { -2, 2 })
         {
             d.Set(x, 1, 0, "airframe");
@@ -1158,7 +1159,7 @@ public static class ExampleDesigns
             d.Set(side, 1, -1, "missile_motor");
             d.Set(side, 1, -2, "missile_fins");
             d.Set(side, 1, -3, "missile_warhead");
-            d.Set(side, 1, -4, "seeker_optical");
+            d.Set(side, 1, -4, x < 0 ? "seeker_top" : "seeker_optical");
         }
 
         // A glazed nose for the gunner and pilot, then the cabin, tail boom, and fins at the tail.
