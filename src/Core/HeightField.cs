@@ -9,7 +9,8 @@ namespace DreamGame.Core;
 /// times faster when thousands of shells are in the air.
 /// <para>Samples are <see cref="Spacing"/> apart, sample (0, 0) is at <see cref="Origin"/> (x, z). Each square
 /// is split into two triangles along the diagonal from (x, z) to (x+1, z+1), the same way the physics engine
-/// splits its height fields. Beyond the edges the ground is a flat floor at <see cref="Floor"/>.</para>
+/// splits its height fields. Beyond the edges the ground is <see cref="Beyond"/> (a coarser grid of a bigger area, as
+/// round the fine ground near you in the world), or a flat floor at <see cref="Floor"/>.</para>
 /// </summary>
 public sealed class HeightField
 {
@@ -18,6 +19,9 @@ public sealed class HeightField
     public readonly Vector2 Origin;
     public readonly float[] Heights;
     public readonly float Floor;
+
+    /// <summary>The ground beyond this grid's edges, or null for a flat floor at <see cref="Floor"/>.</summary>
+    public HeightField Beyond;
 
     /// <summary>The highest point anywhere (it rises when earth is piled up; see <see cref="NoteHeight"/>).</summary>
     public float MaxHeight { get; private set; }
@@ -52,7 +56,7 @@ public sealed class HeightField
     {
         normal = Vector3.UnitY;
         float gx = (x - Origin.X) / Spacing, gz = (z - Origin.Y) / Spacing;
-        if (gx < 0 || gz < 0 || gx > Width - 1 || gz > Depth - 1) return Floor;
+        if (gx < 0 || gz < 0 || gx > Width - 1 || gz > Depth - 1) return Beyond?.Sample(x, z, out normal) ?? Floor;
         int cx = Math.Min((int)gx, Width - 2), cz = Math.Min((int)gz, Depth - 2);
         float fx = gx - cx, fz = gz - cz;
         float a = H(cx, cz), b = H(cx + 1, cz), c = H(cx, cz + 1), d = H(cx + 1, cz + 1);
@@ -82,6 +86,44 @@ public sealed class HeightField
     /// </summary>
     public bool Raycast(Vector3 from, Vector3 to, out float dist, out Vector3 normal)
     {
+        if (Beyond == null) return Own(from, to, true, out dist, out normal);
+        dist = float.PositiveInfinity;
+        normal = Vector3.UnitY;
+        Vector3 seg = to - from;
+        float len = seg.Length();
+        if (len < 1e-6f) return false;
+        // The part of the segment over this grid is tested here; the parts before and after it against the ground beyond.
+        float ua = 0f, ub = 1f;
+        bool over = Clip((from.X - Origin.X) / Spacing, seg.X / Spacing, Width - 1, ref ua, ref ub) &&
+                    Clip((from.Z - Origin.Y) / Spacing, seg.Z / Spacing, Depth - 1, ref ua, ref ub);
+        if (!over) return Beyond.Raycast(from, to, out dist, out normal);
+        float best = float.PositiveInfinity;
+        if (Own(from, to, false, out float d, out Vector3 n))
+        {
+            best = d / len;
+            normal = n;
+        }
+
+        if (ua > 1e-6f && Beyond.Raycast(from, from + seg * ua, out d, out n) && d / len < best)
+        {
+            best = d / len;
+            normal = n;
+        }
+
+        if (ub < 1f - 1e-6f && Beyond.Raycast(from + seg * ub, to, out d, out n) && ub + d / len < best)
+        {
+            best = ub + d / len;
+            normal = n;
+        }
+
+        if (best > 1f) return false;
+        dist = best * len;
+        return true;
+    }
+
+    /// <summary>The segment against this grid's own triangles, and the flat floor beyond it if <paramref name="floor"/>.</summary>
+    private bool Own(Vector3 from, Vector3 to, bool floor, out float dist, out Vector3 normal)
+    {
         dist = float.PositiveInfinity;
         normal = Vector3.UnitY;
         Vector3 seg = to - from;
@@ -90,7 +132,7 @@ public sealed class HeightField
 
         // The floor beyond (and under) the grid.
         float best = float.PositiveInfinity;
-        if (from.Y >= Floor && to.Y < Floor) best = (from.Y - Floor) / (from.Y - to.Y);
+        if (floor && from.Y >= Floor && to.Y < Floor) best = (from.Y - Floor) / (from.Y - to.Y);
 
         // Only the part of the segment low enough to touch a hill, and over the grid, needs walking.
         float u0 = 0f, u1 = MathF.Min(1f, best);

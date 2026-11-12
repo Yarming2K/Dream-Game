@@ -94,6 +94,18 @@ public sealed class Earthworks
         Worn = new float[field.Heights.Length];
     }
 
+    /// <summary>
+    /// Ground changed before (the world keeps what was dug as you move about it): <paramref name="original"/> is the
+    /// ground as made, <paramref name="disturbed"/> and <paramref name="worn"/> carry on from where they were.
+    /// </summary>
+    public Earthworks(HeightField field, float[] original, float[] disturbed, float[] worn)
+    {
+        Field = field;
+        Original = original;
+        Disturbed = disturbed;
+        Worn = worn;
+    }
+
     // ------------------------------------------------------------------ wear from wheels and tracks
 
     /// <summary>
@@ -427,8 +439,11 @@ public sealed class Earthworks
                     int j = nz * W + nx;
                     float step = h[i] - h[j];
                     if (step <= max) continue;
-                    // Half the excess each time, so it settles evenly instead of see-sawing; never below bedrock.
-                    float move = MathF.Min((step - max) * 0.5f, h[i] - Bottom(i));
+                    // Half the excess each time, so it settles evenly instead of see-sawing; never below bedrock. Ground
+                    // that's never been dug or blasted is rock and holds its shape (cliffs stay cliffs); only earth
+                    // that's been turned over, or piled above it, slides.
+                    float floor = Disturbed[i] > 0.05f ? Bottom(i) : MathF.Max(Bottom(i), MathF.Min(h[i], Original[i]));
+                    float move = MathF.Min((step - max) * 0.5f, h[i] - floor);
                     if (move <= 1e-5f) continue;
                     h[i] -= move;
                     h[j] += move;
