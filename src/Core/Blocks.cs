@@ -1352,6 +1352,13 @@ public static class BlockCatalog
         },
         new BlockDef
         {
+            Id = "countermeasures", Name = "Flare & Chaff Launcher", Category = "Details", Kind = BlockKind.Detail,
+            Description = "Fires flares and chaff by itself when a radar-guided missile closes in: each salvo has about a two in three chance of throwing it off. One salvo per launcher, reloaded at supply points (airstrips, helipads and depots), so carry two or three. Optical and top-attack missiles aren't fooled: smoke is the answer to those.",
+            AmmoUnits = 1, MassKg = 20, Hp = 25, ArmorMm = 3, HasCollider = false, Watertight = false, Displacement = 0f,
+            ColorR = 0.3f, ColorG = 0.32f, ColorB = 0.27f, Metallic = 0.5f, Roughness = 0.6f,
+        },
+        new BlockDef
+        {
             Id = "smoke_launcher", Name = "Smoke Launchers", Category = "Details", Kind = BlockKind.Detail,
             Description = "A rack of three smoke dischargers. Z fires every rack, throwing a wall of smoke ahead that gunners can't see through. AI crews fire them when they're hit hard. Reloaded at supply points.",
             AmmoUnits = 1, MassKg = 18, Hp = 25, ArmorMm = 3, HasCollider = false, Watertight = false, Displacement = 0f,

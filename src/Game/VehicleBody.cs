@@ -131,6 +131,8 @@ public partial class VehicleBody : RigidBody3D, IGridHost
     /// <summary>Raised for big moments: "Driver knocked out!", "Engine destroyed", ...</summary>
     public event Action<string> Status;
 
+    private void StatusNow(string text) => Status?.Invoke(text);
+
     /// <summary>Raised each time a gun fires (camera kick, HUD).</summary>
     public event Action<GunRt> Fired;
 

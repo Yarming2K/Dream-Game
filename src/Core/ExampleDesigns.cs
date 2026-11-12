@@ -1030,6 +1030,7 @@ public static class ExampleDesigns
         d.Set(2, 0, MainGearZ, "wheel");
 
         d.Set(0, 3, 0, "antenna");
+        d.Set(0, 2, 2, "countermeasures");
         return d.Build("Falcon (jet fighter)", "sky");
     }
 
@@ -1108,6 +1109,7 @@ public static class ExampleDesigns
         d.Set(2, 0, MainGearZ, "wheel");
 
         d.Set(0, 3, 0, "antenna");
+        d.Set(0, 2, 2, "countermeasures");
 
         // Two jets built from parts, one down each side of the fuselage (set last, over the airframe): a ramp
         // intake for speed, three compressor stages, the core, two turbines, an afterburner and a variable nozzle.

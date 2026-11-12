@@ -217,6 +217,41 @@ Jets push on their own at any speed. Opening the throttle all the way lights the
 
 Later, with research and industry: better turbine alloys that run hotter (more thrust per stage), and ramjets that do nothing standing still but push hard at high speed.
 
+### Fronts and weapons: each its own advantage
+No one design should win everything: you bring a mix and use it well. Every front has something only it can do and something that beats it; every weapon has a job it does best, a counter and a cost.
+
+| Front | Only it can... | Beaten by |
+|---|---|---|
+| **Land** | Take and hold ground, villages and supply points; the cheapest armor per tonne; hide in hills, forests and dug-in positions. | Slow, stopped by water and cliffs; thin roofs, so bombs, mortars and top-attack missiles. |
+| **Sea** | The biggest guns and thickest armor, staying out longest, carrying supplies across water, shelling the coast. | Torpedoes and submarines (flooding), bombers and missiles; big targets that can't go inland. |
+| **Air** | Go anywhere fast, see furthest (it spots for everyone else), hit roofs and decks from above. | Fragile and short of fuel (must land to rearm); flak, radar missiles; can't hold ground. |
+| **Space** *(later)* | Watch and strike from orbit. | Very costly and slow to resupply. |
+
+| Weapon | Best at | Poor at / beaten by |
+|---|---|---|
+| 37 mm | Quick reload and traverse: light vehicles, infantry | Heavy armor |
+| 76 mm | All-rounder | Nothing in particular |
+| 120 mm | Heavy armor at range | Slow reload, heavy, slow to turn |
+| 203 / 406 mm naval | Huge damage and range, shore bombardment | Small fast targets; only ships and forts carry them |
+| 40 mm autocannon, 128 mm flak | Aircraft | Armor |
+| Mortars | Over hills, onto roofs; with spotters, beyond their own sight | Moving targets |
+| Rocket artillery | Saturating an area | A single moving tank; long reload |
+| Optical / top-attack missiles | Precision at range; top attack lands on the roof | Smoke, point defense, limited stock |
+| Radar missiles | Aircraft, fire and forget | Flares and chaff, point defense |
+| Torpedoes | Sinking big ships cheaply | Slow, can be dodged |
+| Bombs | Huge damage from above | Flying over the flak to drop them |
+| Railgun | Flat, fast, best long-range penetration; inert slugs can't cook off | Needs a lot of power |
+| Laser | Instant, no ammo; best point defense and anti-aircraft | Slow on heavy plate; fog, rain and smoke |
+| CIWS | Missiles and bombs | Very short range |
+
+What makes those advantages real *(built)*:
+- **Roofs are thin** on the examples (the Warden: 75 mm in front, 16 mm on top), so attack from above pays. The **Top-Attack Seeker** flies to the crosshair like the optical one but climbs (up to 150 m above the target) and dives onto the roof from 120 m out. AI crews use it on armor 250 m to 2.5 km away.
+- **Sight and spotting.** Each unit sees as far as its kind allows (tanks 1 km, ships 2.5 km, aircraft 3 km, radar much further). Night cuts sight to 40%, fog by up to 65%, rain by 35%; radar ignores all of them. AI gunners only shoot at what's within their sight, though aircraft stand out against the sky further off. Whatever any unit sees, its whole side knows for a few seconds, and mortars and rocket artillery fire at those spotted enemies beyond their own sight, four times less tightly. Planes, radar and forward scouts are the artillery's eyes.
+- **Countermeasures.** Smoke between an optical or top-attack missile and its target blinds it, and stops a laser beam. The **Flare & Chaff Launcher** fires by itself when a radar missile closes within 900 m, one salvo per missile, with about a two-in-three chance of breaking the lock; one salvo per launcher, reloaded at supply points. The Falcon and the Lancer carry one each. Point defense (CIWS, lasers) shoots missiles and bombs down.
+- **Weather against sensors.** Fog and rain shorten a laser's full-strength range (fog to 40%, rain to 70%); the dark doesn't. Radar works in any weather, so a front's strength shifts with the conditions.
+
+Still to come with the campaign: what each front does in it (only land units capture; ships carry heavy guns and supplies along coasts; aircraft scout and strike but must come home) and supply (missiles are scarce, aircraft need airstrips or carriers, ships need ports).
+
 ### Damage
 - **AP rounds** trace through the block grid. Each block's armor is scaled by the impact angle (`thickness / cos(angle)`). If penetration is greater, the block takes damage and the shell keeps going with the remaining penetration. At steep angles, shells ricochet.
 - **HE rounds** explode on impact. Damage falls off with distance, and armor reduces it.

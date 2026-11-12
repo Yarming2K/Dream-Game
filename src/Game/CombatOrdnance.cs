@@ -45,6 +45,9 @@ public partial class Combat
 
         /// <summary>Fired straight up out of a deck cell: it climbs clear before it turns.</summary>
         public bool Vertical;
+
+        /// <summary>Its target has already thrown flares and chaff at it (once per missile).</summary>
+        public bool DecoyTried;
     }
 
     private readonly List<BombRun> _bombs = new();
@@ -165,6 +168,17 @@ public partial class Combat
                     Vector3 look = vdir;
                     if (m.Vertical && ownerOk && m.Owner.GuidancePoint(m.ByPlayer) is Vector3 g) look = (g - m.Pos).Normalized();
                     m.Target = VehicleBody.RadarLock(m.Pos, look, ownerOk ? m.Owner.Faction : -1, m.Vertical ? 35f : 20f, m.Vertical ? 6000f : 3000f);
+                }
+            }
+
+            // Closing in on a target with flares and chaff: it fires them, and the missile may lose its lock.
+            if (m.Target != null && !m.DecoyTried && m.Pos.DistanceTo(m.Target.GlobalPosition) < Fittings.DecoyRangeM)
+            {
+                m.DecoyTried = true;
+                if (m.Target.FireDecoys() && GD.Randf() < Fittings.DecoyChance)
+                {
+                    m.Target = null;
+                    m.Search = 1.5f;
                 }
             }
 

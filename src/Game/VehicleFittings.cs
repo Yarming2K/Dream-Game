@@ -185,7 +185,26 @@ public partial class VehicleBody
     private void ReloadSmoke(float dt)
     {
         foreach (BlockInstance b in Model.Instances)
-            if (b.Alive && b.Def.Id == "smoke_launcher" && b.AmmoUnits < 1f) b.AmmoUnits = Mathf.Min(1f, b.AmmoUnits + dt / 5f);
+            if (b.Alive && b.Def.Id is "smoke_launcher" or "countermeasures" && b.AmmoUnits < 1f) b.AmmoUnits = Mathf.Min(1f, b.AmmoUnits + dt / 5f);
+    }
+
+    // ---------- Flares and chaff ----------
+
+    /// <summary>Flare and chaff launchers still loaded.</summary>
+    public int DecoysReady => Model.Instances.Count(b => b.Alive && b.Def.Id == "countermeasures" && b.AmmoUnits >= 1f);
+
+    /// <summary>A radar-guided missile is closing in: fire one loaded flare and chaff launcher. Returns whether one fired.</summary>
+    public bool FireDecoys()
+    {
+        BlockInstance rack = Model.Instances.FirstOrDefault(b => b.Alive && b.Def.Id == "countermeasures" && b.AmmoUnits >= 1f);
+        if (rack == null) return false;
+        rack.AmmoUnits = 0;
+        Node3D world = GetParent<Node3D>();
+        Vector3 at = View.BlockWorldPos(rack);
+        Effects.Decoys(world, at, LinearVelocity);
+        Sfx.At(world, at, SoundId.RocketLaunch, -8f, 2.2f, 10f, delayByDistance: false);
+        if (PlayerSeat != null) StatusNow("Missile warning: flares and chaff away");
+        return true;
     }
 
     // ---------- Exhausts ----------

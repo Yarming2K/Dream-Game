@@ -1030,6 +1030,21 @@ public static class Effects
     }
 
     /// <summary>A handful of welding sparks and a flicker of blue-white light. Called repeatedly while welding.</summary>
+    /// <summary>Flares and chaff: bright burning flares falling away behind, and a grey puff of chaff.</summary>
+    public static void Decoys(Node3D world, Vector3 pos, Vector3 velocity)
+    {
+        FxNode fx = Spawn(world, pos, 3f);
+        Vector3 back = velocity.LengthSquared() > 1f ? -velocity.Normalized() : Vector3.Up;
+        Emit(fx, new Burst
+        {
+            Mat = Sparks, Size = 0.35f, Amount = 10, Life = 2.6f, Dir = (back + Vector3.Up * 0.6f).Normalized(), Spread = 70,
+            VelMin = 8f, VelMax = 18f, Colors = SparkRamp, ScaleFrom = 1f, ScaleTo = 0.5f,
+        });
+        Flash(fx, new Color(1f, 0.85f, 0.6f), 1.2f, 0.12f);
+        Light(fx, new Color(1f, 0.8f, 0.5f), 6f, 30f, 1.5f, flicker: true);
+        FlakBurst(world, pos + back * 4f, 1.6f);
+    }
+
     public static void WeldSparks(Node3D world, Vector3 pos, Vector3 normal)
     {
         FxNode fx = Spawn(world, pos, 0.8f);

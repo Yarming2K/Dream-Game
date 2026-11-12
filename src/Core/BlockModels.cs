@@ -1109,6 +1109,19 @@ public static class BlockModels
                 break;
             }
 
+            case "countermeasures":
+            {
+                // A low box of square cartridge cells, angled up and back.
+                k.Bevel(new Vector3(0.3f, 0.05f, 0.24f), Paint.SelfDark, new Vector3(0, b + 0.025f, 0), 0.01f);
+                Quaternion tilt = Rot(Vector3.UnitX, 0.5f);
+                k.Bevel(new Vector3(0.26f, 0.12f, 0.16f), Paint.Self, new Vector3(0, b + 0.11f, 0.01f), 0.01f, tilt);
+                for (int i = 0; i < 3; i++)
+                for (int j = 0; j < 2; j++)
+                    k.Box(new Vector3(0.06f, 0.06f, 0.02f), Paint.Dark,
+                        new Vector3(-0.08f + i * 0.08f, b + 0.1f + j * 0.06f * MathF.Cos(0.5f), 0.1f - j * 0.06f * MathF.Sin(0.5f)), tilt);
+                break;
+            }
+
             case "exhaust":
                 k.Cyl(0.08f, 0.36f, Paint.Dark, new Vector3(0, b + 0.1f, 0), AlongX, sides: 16);
                 k.Lib("muffler");

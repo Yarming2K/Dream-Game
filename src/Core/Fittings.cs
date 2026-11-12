@@ -40,6 +40,13 @@ public static class Fittings
     /// <summary>How long a smoke screen hangs, how big each cloud is, and how far ahead it's thrown.</summary>
     public const float SmokeLifeS = 40f, SmokeRadiusM = 7f, SmokeThrowM = 22f;
 
+    /// <summary>
+    /// Flares and chaff: a loaded launcher fires by itself when a radar-guided missile closes to
+    /// <see cref="DecoyRangeM"/>, one salvo for each missile, and each salvo makes the missile lose its lock with
+    /// this chance. It may find the target again if it's still in front of it, so a second launcher helps.
+    /// </summary>
+    public const float DecoyChance = 0.65f, DecoyRangeM = 900f;
+
     /// <summary>First aid: health per second for anyone within reach.</summary>
     public const float FirstAidHpPerS = 15f, FirstAidRangeM = 3.5f;
 
