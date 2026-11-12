@@ -817,8 +817,11 @@ public sealed class VehicleAnalysis
                                  Cells[c].Cell == c && Orientations.Forward(Cells[c].O) == j.Forward;
             for (Int3 c = core + j.Forward; Part(c); c += j.Forward) j.Front.Add(c);
             for (Int3 c = core - j.Forward; Part(c); c -= j.Forward) j.Back.Add(c);
+            // Anything solid in the cell in front of the intake blocks its air.
+            if (j.Front.Count > 0 && Defs[j.Front[^1]].Kind == BlockKind.JetIntake)
+                j.IntakeBlocked = Defs.TryGetValue(j.Front[^1] + j.Forward, out BlockDef inFront) && inFront.HasCollider;
             j.Stats = JetDesign.Compute(Defs[core], j.Front.Select(c => Defs[c]).ToList(), j.Back.Select(c => Defs[c]).ToList(),
-                out string problem, out j.Runs);
+                out string problem, out j.Runs, j.IntakeBlocked);
             if (problem != null) j.Problem = $"The jet at {core}: {problem}";
             // A part next to the line facing another way is the usual mistake.
             Int3 ahead = (j.Front.Count > 0 ? j.Front[^1] : core) + j.Forward, behind = (j.Back.Count > 0 ? j.Back[^1] : core) - j.Forward;
@@ -930,7 +933,7 @@ public sealed class VehicleAnalysis
                         Thrusters.Add(new ThrusterInfo
                         {
                             Cell = c, Kind = BlockKind.JetEngine, Orientation = o, Direction = j.Forward, Jet = j.Stats,
-                            FlameCell = j.Back[^1], Front = j.Front, Back = j.Back,
+                            FlameCell = j.Back[^1], Front = j.Front, Back = j.Back, IntakeBlocked = j.IntakeBlocked,
                         });
                     break;
                 case BlockKind.AirPropeller:

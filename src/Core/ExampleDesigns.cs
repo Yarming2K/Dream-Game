@@ -1120,6 +1120,8 @@ public static class ExampleDesigns
             d.Set(x, 1, 2, "jet_turbine");
             d.Set(x, 1, 3, "jet_afterburner");
             d.Set(x, 1, 4, "jet_nozzle_variable");
+            // The intakes are cheeks beside the cockpit: nothing in front of them but air.
+            for (int z = -7; z <= -5; z++) d.Remove(x, 1, z);
         }
 
         return d.Build("Lancer (interceptor)", "sky");

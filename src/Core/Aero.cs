@@ -55,6 +55,9 @@ public sealed class ThrusterInfo
     public Int3 FlameCell;
     public List<Int3> Front, Back;
     public bool Built => Front != null;
+
+    /// <summary>A built jet whose intake has a block right in front of it.</summary>
+    public bool IntakeBlocked;
 }
 
 /// <summary>A jet built from parts in a line through a Jet Core (see <see cref="JetDesign"/>).</summary>
@@ -67,6 +70,7 @@ public sealed class BuiltJet
     public JetStats Stats;
     public bool Runs;
     public string Problem;
+    public bool IntakeBlocked;
 }
 
 public struct MissileStats

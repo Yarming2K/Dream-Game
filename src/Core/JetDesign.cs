@@ -80,6 +80,9 @@ public static class JetDesign
     /// <summary>Fuel (litres a second per kN of push) of a core with no compressors, and how much compressors save at most.</summary>
     public const float BaseFuelPerKn = 0.07f, CompressorFuelSaving = 0.45f;
 
+    /// <summary>An intake with a block right in front of it: this much of the push is left.</summary>
+    public const float BlockedIntake = 0.3f;
+
     /// <summary>A missing turbine's effect: push falls toward this fraction.</summary>
     public const float NoTurbineThrust = 0.4f;
 
@@ -103,7 +106,8 @@ public static class JetDesign
     /// then a fan, then the intake); <paramref name="back"/> from the core backward (turbines, afterburners, nozzle).
     /// <paramref name="problem"/> says what's wrong when it can't run (its push is then zero) or what holds it back.
     /// </summary>
-    public static JetStats Compute(BlockDef core, IReadOnlyList<BlockDef> front, IReadOnlyList<BlockDef> back, out string problem, out bool runs)
+    public static JetStats Compute(BlockDef core, IReadOnlyList<BlockDef> front, IReadOnlyList<BlockDef> back, out string problem, out bool runs,
+        bool intakeBlocked = false)
     {
         problem = null;
         runs = false;
@@ -172,6 +176,13 @@ public static class JetDesign
         else
         {
             thrust *= MathF.Pow(1f - SpareTurbineLoss, s.Turbines - s.TurbinesNeeded);
+        }
+
+        // An intake with a block right in front of it only gets the air that leaks round the edges.
+        if (intakeBlocked && intake)
+        {
+            thrust *= BlockedIntake;
+            problem ??= "Its intake is blocked by the block right in front of it, so it gets hardly any air. Leave the cell in front of the intake open.";
         }
 
         s.DryThrustN = thrust;

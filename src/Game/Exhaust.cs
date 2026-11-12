@@ -96,8 +96,11 @@ void fragment() {
 	vec3 view = normalize(VIEW);
 	float facing = abs(dot(normalize(NORMAL), view));
 	float endon = abs(dot(axis_v, view));
-	float amount = (0.002 + 0.004 * throttle + 0.006 * burner) * mix(pow(facing, 2.0), 1.0, endon * endon) * (1.0 - t);
-	vec2 wob = vec2(sin(SCREEN_UV.y * 95.0 + TIME * 23.0 + t * 20.0), cos(SCREEN_UV.x * 85.0 - TIME * 19.0));
+	// A few pixels at most, and starting a little behind the nozzle: any more and it drags the plane's own tail
+	// out into the sky as dark smears.
+	float amount = (0.0004 + 0.0008 * throttle + 0.0012 * burner) * mix(pow(facing, 2.0), 1.0, endon * endon)
+		* (1.0 - t) * smoothstep(0.02, 0.12, t);
+	vec2 wob = vec2(sin(SCREEN_UV.y * 260.0 + TIME * 31.0 + t * 40.0), cos(SCREEN_UV.x * 230.0 - TIME * 27.0 + t * 33.0));
 	ALBEDO = texture(screen, SCREEN_UV + wob * amount).rgb;
 	ALPHA = 1.0;
 }

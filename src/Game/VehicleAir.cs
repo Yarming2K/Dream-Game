@@ -188,7 +188,7 @@ public partial class VehicleBody
             if (!t.Alive || !t.Info.Built) continue;
             // A built jet runs on whatever's left of its line, from the core out to the first part shot away:
             // lose a compressor stage and it's weaker, lose the intake or nozzle and it stops.
-            t.Jet = JetDesign.Compute(t.Block.Def, StillThere(t.Info.Front), StillThere(t.Info.Back), out _, out bool runs);
+            t.Jet = JetDesign.Compute(t.Block.Def, StillThere(t.Info.Front), StillThere(t.Info.Back), out _, out bool runs, t.Info.IntakeBlocked);
             t.Alive = runs;
         }
     }

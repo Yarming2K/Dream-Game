@@ -152,4 +152,23 @@ public class JetDesignTests
         Assert.False(b.BuiltJets[0].Runs);
         Assert.Contains(b.Warnings, w => w.Text.Contains("faces a different way"));
     }
+
+    [Fact]
+    public void ABlockInFrontOfTheIntakeStarvesTheJet()
+    {
+        Int3 f = Orientations.Forward(0);
+        var cells = new List<BlueprintBlock>
+        {
+            new("jet_core", new Int3(0, 0, 0), 0), new("jet_intake", f, 0), new("jet_turbine", -f, 0), new("jet_nozzle", -f * 2, 0),
+            new("fuel_tank", new Int3(0, 1, 0), 0),
+        };
+        float open = VehicleAnalysis.Analyze(Blueprint.FromCellMap("open", cells)).BuiltJets[0].Stats.DryThrustN;
+        cells.Add(new BlueprintBlock("armor_light", f * 2, 0));
+        VehicleAnalysis a = VehicleAnalysis.Analyze(Blueprint.FromCellMap("blocked", cells));
+        Assert.True(a.BuiltJets[0].IntakeBlocked);
+        Assert.Equal(open * JetDesign.BlockedIntake, a.BuiltJets[0].Stats.DryThrustN, 1);
+        Assert.Contains(a.Warnings, w => w.Text.Contains("intake is blocked"));
+        // The Lancer's intakes are open.
+        Assert.All(VehicleAnalysis.Analyze(ExampleDesigns.Lancer()).BuiltJets, j => Assert.False(j.IntakeBlocked));
+    }
 }
