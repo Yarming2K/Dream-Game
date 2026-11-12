@@ -429,22 +429,26 @@ public static class BlockCatalog
     };
 
     /// <summary>
-    /// Railgun: a 40 mm slug thrown by magnets at well over 2 km/s. It flies flat and hits as hard as a big gun,
-    /// but every shot drains 20 MJ from the vehicle's power.
+    /// Railgun: a 40 mm slug thrown by magnets at 4 to 8 km/s (faster with more rail segments), so fast it flies dead
+    /// straight and arrives almost as you fire. It hits as hard as a big gun, but every shot drains 20 MJ from the
+    /// vehicle's power. The slug is light, so the kick is no worse than a big gun's.
     /// </summary>
     public static readonly BreechSpec Rail40 = new()
     {
-        CaliberMm = 40, ShellMassKg = 5f, BaseVelocity = 1400, BasePenMm = 180,
+        CaliberMm = 40, ShellMassKg = 1.6f, BaseVelocity = 4400, BasePenMm = 180,
         ApDamage = 380, HeDamage = 0, HeRadiusM = 0, ReloadS = 4f, ShellUnits = 2, DragK = 0.00002f,
         MaxElevationDeg = 35f, BarrelTag = "rail", ChargeMJ = 20f, Rail = true, Label = "Railgun",
     };
 
-    /// <summary>Laser: ten pulses a second, each burning the first block the beam touches. Takes 5 MW while it fires.</summary>
+    /// <summary>
+    /// Laser: a continuous beam while it fires (thirty burns a second), burning the first block it touches. Takes 5 MW
+    /// while it fires.
+    /// </summary>
     public static readonly BreechSpec Laser = new()
     {
         CaliberMm = 12, ShellMassKg = 0, BaseVelocity = 100000, BasePenMm = 1,
-        ApDamage = 22, ReloadS = 0.1f, ShellUnits = 1, MaxElevationDeg = 88f,
-        BarrelTag = "lens", ChargeMJ = 0.5f, Beam = true, PointDefense = true, BeamRangeM = 1000f, Label = "Laser",
+        ApDamage = 22f / 3f, ReloadS = 1f / 30f, ShellUnits = 1, MaxElevationDeg = 88f,
+        BarrelTag = "lens", ChargeMJ = 0.5f / 3f, Beam = true, PointDefense = true, BeamRangeM = 1000f, Label = "Laser",
     };
 
     /// <summary>Close-in weapon system: a 20 mm gatling firing bursts of five, for shooting down missiles and bombs.</summary>
@@ -487,10 +491,10 @@ public static class BlockCatalog
         MaxElevationDeg = 85f, MinElevationDeg = 45f, HighArc = true, Heavy = true, Label = "160 mm Heavy Mortar",
     };
 
-    /// <summary>Heavy railgun: a 120 mm slug at well over 3 km/s that goes through anything. 150 MJ a shot. A heavy weapon.</summary>
+    /// <summary>Heavy railgun: a 120 mm slug at 6 to 11 km/s that goes through anything. 150 MJ a shot. A heavy weapon.</summary>
     public static readonly BreechSpec HeavyRail = new()
     {
-        CaliberMm = 120, ShellMassKg = 30f, BaseVelocity = 2000, BasePenMm = 380,
+        CaliberMm = 120, ShellMassKg = 10f, BaseVelocity = 6000, BasePenMm = 380,
         ApDamage = 1700, HeDamage = 0, HeRadiusM = 0, ReloadS = 8f, ShellUnits = 16, DragK = 0.00001f,
         MaxElevationDeg = 30f, BarrelTag = "rail", ChargeMJ = 150f, Rail = true, Heavy = true, Label = "Heavy Railgun",
     };
@@ -499,8 +503,8 @@ public static class BlockCatalog
     public static readonly BreechSpec LaserBattery = new()
     {
         CaliberMm = 30, ShellMassKg = 0, BaseVelocity = 100000, BasePenMm = 1,
-        ApDamage = 75, ReloadS = 0.1f, ShellUnits = 1, MaxElevationDeg = 88f,
-        BarrelTag = "lens", ChargeMJ = 2.5f, Beam = true, PointDefense = true, BeamRangeM = 2200f, Heavy = true, Label = "Laser Battery",
+        ApDamage = 25f, ReloadS = 1f / 30f, ShellUnits = 1, MaxElevationDeg = 88f,
+        BarrelTag = "lens", ChargeMJ = 2.5f / 3f, Beam = true, PointDefense = true, BeamRangeM = 2200f, Heavy = true, Label = "Laser Battery",
     };
 
     private static readonly List<BlockDef> Defs = new()
@@ -1356,7 +1360,7 @@ public static class BlockCatalog
         new BlockDef
         {
             Id = "rail_breech", Name = "Railgun Breech", Category = "Weapons", Kind = BlockKind.Breech, Breech = Rail40,
-            Description = "Throws 40 mm slugs at over 2 km/s with magnets: flat, fast and very hard-hitting. Put Rail Segments in front (the arrow side) and feed it slugs from AP racks. Every shot takes 20 MJ, so it needs a Generator or Reactor and Capacitor Banks.",
+            Description = "Throws 40 mm slugs at 4 to 8 km/s with magnets: dead straight, there almost as you fire, and very hard-hitting. Put Rail Segments in front (the arrow side) and feed it slugs from AP racks. Every shot takes 20 MJ, so it needs a Generator or Reactor and Capacitor Banks.",
             MassKg = 900, Hp = 220, ArmorMm = 40, Watertight = false,
             ColorR = 0.2f, ColorG = 0.22f, ColorB = 0.26f, Metallic = 0.85f, Roughness = 0.3f,
         },
@@ -1538,7 +1542,7 @@ public static class BlockCatalog
         new BlockDef
         {
             Id = "heavy_rail_breech", Name = "Heavy Railgun Breech (3×3×3)", Category = "Weapons", Kind = BlockKind.Breech, Breech = HeavyRail, Size = new Int3(3, 3, 3),
-            Description = "A heavy weapon: a 120 mm slug at over 3 km/s that goes through anything. Rail Segments in front, slugs from AP Shell Magazines, and 150 MJ a shot (a reactor's work). Full rate from a building; on a land vehicle only stopped and braced.",
+            Description = "A heavy weapon: a 120 mm slug at 6 to 11 km/s that goes through anything. Rail Segments in front, slugs from AP Shell Magazines, and 150 MJ a shot (a reactor's work). Full rate from a building; on a land vehicle only stopped and braced.",
             MassKg = 26000, Hp = 1400, ArmorMm = 60, Watertight = false,
             ColorR = 0.2f, ColorG = 0.22f, ColorB = 0.26f, Metallic = 0.85f, Roughness = 0.3f,
         },

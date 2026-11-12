@@ -15,6 +15,12 @@ public partial class ReticleOverlay : Control
     public Vector2? BombMark;
     public Vector2? LockMark;
 
+    /// <summary>
+    /// Lead markers: for each enemy aircraft in reach, where it is and where to aim so your rounds meet it (its speed,
+    /// yours and the rounds' drop allowed for).
+    /// </summary>
+    public readonly List<(Vector2 target, Vector2 lead)> Leads = new();
+
     public override void _Draw()
     {
         Vector2 c = Size / 2f;
@@ -44,6 +50,17 @@ public partial class ReticleOverlay : Control
         {
             var lc = new Color(1f, 0.35f, 0.3f, 0.95f);
             DrawRect(new Rect2(l - new Vector2(14, 14), new Vector2(28, 28)), lc, false, 2f);
+        }
+
+        foreach ((Vector2 target, Vector2 lead) in Leads)
+        {
+            // Green when the crosshair is on it: fire now.
+            bool on = lead.DistanceTo(c) < 14f;
+            var lc = on ? new Color(0.45f, 1f, 0.5f, 0.95f) : new Color(1f, 0.85f, 0.4f, 0.85f);
+            Vector2 d = lead - target;
+            if (d.Length() > 16f) DrawLine(target + d.Normalized() * 6f, lead - d.Normalized() * 11f, new Color(lc, 0.45f), 1.2f);
+            DrawArc(lead, 11f, 0, Mathf.Tau, 32, lc, 2f);
+            DrawCircle(lead, 2f, lc);
         }
 
         foreach ((Vector2 pos, bool ready) in Marks)

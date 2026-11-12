@@ -70,6 +70,16 @@ public partial class TestRange : Node3D
     private Camera3D _cam;
     private float _yaw;
     private float _pitch = -0.28f;
+
+    // Flying a plane directly: the mouse moves the stick (it springs back to the middle), the camera rides behind the
+    // plane; holding C frees the camera to look round. U swaps to the instructor (the plane flies where you look).
+    private bool _directFlight = true;
+    private Vector2 _stick;
+    private Basis _chaseBasis = Basis.Identity;
+    private bool _chasing;
+
+    private bool FlyingDirect => _directFlight && Mounted && _mount.PlayerSeat?.Role == SeatRole.Driver && _mount.FlightMode == MobilityMode.Plane && !_remote;
+    private bool FreeLook => Input.IsActionPressed("dive");
     private float _dist = 13f;
     private Vector3 _follow;
     private VehicleBody _camFor;
@@ -786,7 +796,10 @@ public partial class TestRange : Node3D
             bool air = _mount.IsAir;
             bool telegraph = naval || _mount.FlightMode == MobilityMode.Airship;
             bool hover = _mount.FlightMode is MobilityMode.Helicopter or MobilityMode.Hover or MobilityMode.Airship;
-            float lift = captured && driving && air ? (Input.IsActionPressed("brake") ? 1f : 0f) - (Input.IsActionPressed("dive") ? 1f : 0f) : 0f;
+            float lift = captured && driving && air && !(FlyingDirect) ? (Input.IsActionPressed("brake") ? 1f : 0f) - (Input.IsActionPressed("dive") ? 1f : 0f) : 0f;
+            bool direct = FlyingDirect;
+            // The stick drifts back to the middle when you stop moving the mouse.
+            _stick = direct ? _stick * Mathf.Exp(-dt * 1.6f) : Vector2.Zero;
             _mount.PlayerInput = new VehicleControls
             {
                 // Ships and airships take their speed from the telegraph (W / S taps, in _UnhandledInput).
@@ -798,6 +811,9 @@ public partial class TestRange : Node3D
                 HasAim = true,
                 Aim = hit.Count > 0 ? hit["position"].AsVector3() : o + d * 1500f,
                 Fire = captured && !_holdFire && Input.IsActionPressed("fire"),
+                Direct = direct,
+                Stick = captured ? _stick : Vector2.Zero,
+                Rudder = captured && driving && direct ? Input.GetAxis("steer_left", "steer_right") : 0f,
             };
             if (captured && driving && _mount.IsSubmarine)
             {
@@ -955,7 +971,22 @@ public partial class TestRange : Node3D
             _follow = _mount.IsAir ? target : _follow.Lerp(target, Mathf.Min(1f, dt * 14f));
         }
 
-        _pivot.Rotation = new Vector3(_pitch, _yaw, 0);
+        if (FlyingDirect && !FreeLook)
+        {
+            // Riding behind the plane, through loops and rolls, looking a little down onto it.
+            Basis want = _mount.GlobalBasis.Orthonormalized() * new Basis(Vector3.Right, -0.1f);
+            _chaseBasis = _chasing ? _chaseBasis.Slerp(want, Mathf.Min(1f, dt * 9f)) : want;
+            _chasing = true;
+            _pivot.GlobalBasis = _chaseBasis;
+            Vector3 f = -_chaseBasis.Z;
+            _yaw = Mathf.Atan2(-f.X, -f.Z);
+            _pitch = Mathf.Clamp(Mathf.Asin(Mathf.Clamp(f.Y, -1f, 1f)), -1.45f, 1.45f);
+        }
+        else
+        {
+            _chasing = false;
+            _pivot.Rotation = new Vector3(_pitch, _yaw, 0);
+        }
         float arm = _zoom ? Mathf.Min(_dist, 8f) : _dist;
         if (Mounted)
         {
@@ -1085,6 +1116,14 @@ public partial class TestRange : Node3D
         }
 
         bool captured = Input.MouseMode == Input.MouseModeEnum.Captured;
+        if (e is InputEventMouseMotion sm && captured && FlyingDirect && !FreeLook)
+        {
+            // The mouse is the stick: right rolls right, up pulls the nose up.
+            _stick += new Vector2(sm.Relative.X, -sm.Relative.Y) * 0.0032f;
+            if (_stick.Length() > 1f) _stick = _stick.Normalized();
+            return;
+        }
+
         if (e is InputEventMouseMotion mm && captured && Mounted)
         {
             float sens = _zoom ? (_mount.PlayerSeat?.Role == SeatRole.Commander ? 0.0004f : 0.0009f) : 0.0028f;
@@ -1211,6 +1250,7 @@ public partial class TestRange : Node3D
             _atmosphere.NextWeather();
             Big(_atmosphere.Describe());
         }
+        else if (e.IsActionPressed("flight_mode")) ToggleFlightMode();
         else if (e.IsActionPressed("perf_overlay")) _perf.Toggle();
         else if (e.IsActionPressed("to_builder")) ExitRequested?.Invoke();
         else if (e.IsActionPressed("help")) _help.Visible = !_help.Visible;
@@ -1390,6 +1430,8 @@ public partial class TestRange : Node3D
             Blade = () => { if (Mounted && _mount.HasBlade) _mount.ToggleBlade(); },
             LiveFire = ToggleLiveFire,
             LiveFireOn = () => _liveFire,
+            Flight = ToggleFlightMode,
+            DirectFlight = () => _directFlight,
             Ammo = () => { if (Mounted) _mount.ToggleAmmo(); },
             Overlay = s =>
             {
@@ -1671,6 +1713,8 @@ public partial class TestRange : Node3D
         Vector3? lockAt = mounted && _lock != null && IsInstanceValid(_lock) ? _lock.GlobalTransform * _lock.CenterOfMass : null;
         // (The Glass overlay draws its own brackets round the lock.)
         _reticle.LockMark = lockAt is Vector3 la && !cam.IsPositionBehind(la) && !(mounted && _mount.OverlayShown == OverlayStyle.Glass) ? cam.UnprojectPosition(la) : null;
+        _reticle.Leads.Clear();
+        if (mounted) AddLeads(_mount, cam);
         _reticle.QueueRedraw();
 
         if (!_me.Alive)
@@ -1693,6 +1737,40 @@ public partial class TestRange : Node3D
         // (A click that closes the panel mustn't also fire the guns.)
         if (!_optionsOpen) _holdFire = true;
         Input.MouseMode = _optionsOpen || Bench.Active ? Input.MouseModeEnum.Visible : Input.MouseModeEnum.Captured;
+    }
+
+    /// <summary>Swaps how planes are flown: directly (stick and rudder), or by the instructor (it flies where you look).</summary>
+    private void ToggleFlightMode()
+    {
+        _directFlight = !_directFlight;
+        _stick = Vector2.Zero;
+        Big(_directFlight
+            ? "Direct flight: the mouse is the stick, A / D the rudder, hold C to look round"
+            : "Instructor: the plane flies where you look");
+    }
+
+    /// <summary>
+    /// Lead markers for the guns of what you're driving: for each enemy aircraft within 2.5 km in front of you, where to
+    /// aim so a round meets it. Rounds leave with your own speed added, so the lead is worked out from how the target
+    /// moves relative to you, and the aim is raised by how far the round drops on the way.
+    /// </summary>
+    private void AddLeads(VehicleBody v, Camera3D cam)
+    {
+        VehicleBody.GunRt gun = v.Guns.FirstOrDefault(g => g.Alive && !g.Info.BreechDef.Breech.Beam);
+        if (gun == null) return;
+        float speed = v.SelectedAmmo == AmmoType.AP ? gun.Stats.MuzzleVelocity : gun.Stats.HeVelocity;
+        Vector3 from = v.GlobalTransform * v.CenterOfMass, mine = v.LinearVelocity;
+        foreach (IGridHost h in GridRegistry.Hosts)
+        {
+            if (h is not VehicleBody t || t == v || !IsInstanceValid(t) || t.Faction == v.Faction || !t.IsAir || t.OnGround) continue;
+            Vector3 at = t.GlobalTransform * t.CenterOfMass;
+            if (at.DistanceTo(from) > 2500f || cam.IsPositionBehind(at)) continue;
+            System.Numerics.Vector3 aim = GunMath.LeadTarget(from.N(), at.N(), (t.LinearVelocity - mine).N(), speed);
+            float time = System.Numerics.Vector3.Distance(from.N(), aim) / Mathf.Max(speed, 1f);
+            Vector3 lead = aim.G() + Vector3.Up * (0.5f * GunMath.Gravity * time * time);
+            if (cam.IsPositionBehind(lead)) continue;
+            _reticle.Leads.Add((cam.UnprojectPosition(at), cam.UnprojectPosition(lead)));
+        }
     }
 
     /// <summary>

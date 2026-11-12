@@ -35,6 +35,14 @@ public struct VehicleControls
     /// <summary>Aircraft: climb (+1) or descend (-1), and the direction the player wants to fly (from the camera).</summary>
     public float Lift;
     public Vector3 AimDir;
+
+    /// <summary>
+    /// Planes flown directly: the stick (x rolls right, y pulls the nose up, each -1 to 1) and the rudder (-1 left to 1
+    /// right). When <see cref="Direct"/> is off, the instructor flies toward <see cref="AimDir"/> instead.
+    /// </summary>
+    public bool Direct;
+    public Vector2 Stick;
+    public float Rudder;
 }
 
 public enum WeldState

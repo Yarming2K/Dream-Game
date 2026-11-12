@@ -19,9 +19,9 @@ public enum CrewOrder
 /// <summary>What the options panel can ask the range to do.</summary>
 public sealed class OptionActions
 {
-    public Action Lights, Smoke, Blade, LiveFire, Ammo;
+    public Action Lights, Smoke, Blade, LiveFire, Ammo, Flight;
     public Action<OverlayStyle> Overlay;
-    public Func<bool> LiveFireOn;
+    public Func<bool> LiveFireOn, DirectFlight;
 }
 
 /// <summary>
@@ -36,7 +36,7 @@ public partial class HudOptions : Control
     private readonly VBoxContainer _stack;
     private readonly List<(Button button, CrewOrder order)> _orders = new();
     private readonly List<(Button button, OverlayStyle style)> _styles = new();
-    private Button _lights, _smoke, _blade, _live, _ammo;
+    private Button _lights, _smoke, _blade, _live, _ammo, _flight;
     private GlassPanel _ordersPanel, _systemsPanel, _ammoPanel, _stylePanel;
     private VehicleBody _v;
     private Vector2 _pos;
@@ -142,7 +142,9 @@ public partial class HudOptions : Control
         _smoke = GlassButton("SMOKE  [Z]", 46, () => { _act.Smoke?.Invoke(); Sync(); });
         _blade = GlassButton("BLADE  [K]", 46, () => { _act.Blade?.Invoke(); Sync(); }, toggle: true);
         _live = GlassButton("LIVE FIRE  [L]", 46, () => { _act.LiveFire?.Invoke(); Sync(); }, toggle: true);
-        foreach (Button b in new[] { _lights, _smoke, _blade, _live })
+        _flight = GlassButton("DIRECT FLIGHT  [U]", 46, () => { _act.Flight?.Invoke(); Sync(); }, toggle: true);
+        _flight.TooltipText = "On: the mouse is the stick and A / D the rudder (hold C to look round). Off: the plane flies where you look.";
+        foreach (Button b in new[] { _lights, _smoke, _blade, _live, _flight })
         {
             b.SizeFlagsHorizontal = SizeFlags.ExpandFill;
             b.Alignment = HorizontalAlignment.Center;
@@ -227,6 +229,8 @@ public partial class HudOptions : Control
         _blade.Visible = v.HasBlade;
         _blade.SetPressedNoSignal(v.BladeDown);
         _live.SetPressedNoSignal(_act.LiveFireOn?.Invoke() ?? false);
+        _flight.Visible = v.FlightMode == MobilityMode.Plane;
+        _flight.SetPressedNoSignal(_act.DirectFlight?.Invoke() ?? false);
 
         _ammoPanel.Visible = v.Guns.Count > 0;
         string ammo = v.SelectedAmmo switch { AmmoType.HE => "HE", AmmoType.Flak => "FLAK", _ => "AP" };

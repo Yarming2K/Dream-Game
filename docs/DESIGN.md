@@ -186,8 +186,8 @@ The newer weapons are built the same way as guns: a breech with its own kind of 
 
 | Weapon | Breech + "barrel" | How it works |
 |---|---|---|
-| **Railgun** | Railgun Breech + Rail Segments | A 40 mm slug at about 2.4 km/s with eight rails: flat, fast, and harder-hitting than a 120 mm gun. Slugs come from AP racks. Every shot takes 20 MJ of electricity. |
-| **Laser** | Laser Emitter + Focusing Lenses | Ten pulses a second, each burning the first thing the beam touches. No drop, no lead, no ammo. Armor slows the burn but never stops it (heavy plate takes several seconds). Full strength out to about 1.3 km with two lenses, fading beyond. Takes 5 MW while it fires. |
+| **Railgun** | Railgun Breech + Rail Segments | A 40 mm slug at about 7.5 km/s with eight rails (made much faster on the owner's ask): dead straight, there almost as you fire, and harder-hitting than a 120 mm gun. The slug is light, so the kick is no worse than before. Slugs come from AP racks. Every shot takes 20 MJ of electricity. |
+| **Laser** | Laser Emitter + Focusing Lenses | A continuous beam while it fires, burning the first thing it touches (thirty burns a second, the beam following the turret as it moves). No drop, no lead, no ammo. Armor slows the burn but never stops it (heavy plate takes several seconds). Full strength out to about 1.3 km with two lenses, fading beyond. Takes 5 MW while it fires. |
 | **CIWS** | 20 mm Gatling + barrels | Bursts of five rounds, fifty a second, from HE racks. |
 | **Rocket artillery** | Rocket Launcher + Launch Tubes | Each tube pack adds two rockets to a salvo, rippled off five a second. Unguided, high explosive, reaching several kilometers. Rockets come from HE racks. |
 
@@ -306,7 +306,7 @@ Still to come with the campaign: what each front does in it (only land units cap
 - **Why build a fort: heavy weapons and a steady mount.**
   - Every gun on a building spreads 40% less.
   - **Heavy weapons** fire at full rate from a building. A land vehicle can carry one but can only fire it stopped with two or more **Stabilizers** braced against the ground (they swing down when it stops), and any vehicle reloads it at half the rate and spreads it twice as much. Ships count as braced (still half rate); aircraft can't fire them at all.
-  - The heavy weapons: the **420 mm Siege Mortar** (3×3×3, high-arc only, a 13 m blast, kilometers of range, from HE magazines), the **Heavy Railgun** (3×3×3, 120 mm slugs at about 3.4 km/s through 700 mm of armor, 150 MJ a shot), and the **Laser Battery** (3×3×2, point defense and anything else out to three or four kilometers, 25 MW while firing).
+  - The heavy weapons: the **420 mm Siege Mortar** (3×3×3, high-arc only, a 13 m blast, kilometers of range, from HE magazines), the **Heavy Railgun** (3×3×3, 120 mm slugs at about 10 km/s through 700 mm of armor, 150 MJ a shot), and the **Laser Battery** (3×3×2, point defense and anything else out to three or four kilometers, 25 MW while firing).
   - **The two big building weapons are for the sky and for lobbing:**
     - **128 mm Heavy Flak** (anti-aircraft only): it fires nothing but flak, and its crew never shoot it at the ground; with no aircraft up they keep it raised, watching the sky. Its crews pick out aircraft 7 km away; with eight Heavy Barrels its shells leave at about 820 m/s, burst within 6–7 m of an aircraft (bigger planes set them off further out) and fill 14 m of sky. 88° elevation, a shot every 3.5 s, fed from the new **Flak Magazine** (2×2×2, 192 heavy flak shells). Vehicles can approach a flak site safely: only its light guns fight them.
     - **160 mm Heavy Mortar** (one cell, two Heavy Barrels): lobs a 40 kg bomb at 45–85°, out to about 5–6 km, every 6 s, with a 6 m blast. Its crew picks the charge: full charge for far targets, fewer bags for close ones (down to a sixth), so the bomb still comes down steeply at about 70° instead of sailing over. Crews look out to 4.5 km. (The siege mortar picks its charge the same way.)
@@ -537,6 +537,11 @@ What still separates them from the real ones (for later passes): our fuselages a
 2. **Game mechanics**: jets built from parts, streamlining, engine tuning and heat (see Jets).
 3. **Campaign planning** *(done: see "Campaign plan")*.
 3a. **Sandbox: era looks, first pass** *(done: see "Era looks")*. Parts and paint so modern machines look modern, real-scale examples, and a comparison with photos of the real ones. Then the same for buildings *(done: see "Buildings")*: the fortification kit, all seven example buildings rebuilt from real fortifications, and village gables that follow the roof line. Then ships *(done)*, then aircraft from the Second World War to the near future *(done: see "Era looks")*.
+3d. **Pass: UI, controls and early systems** (asked for by the owner after the world's first pass), in this order:
+   - *Mechanics first* (no style decision needed): railguns much faster and lasers as a continuous beam; rounds fired at speed never hitting the shooter; lead markers on targets; flight you control directly (with the mouse-aim kept as an option) and vapor cones near the speed of sound; smarter AI (units and buildings that act sensibly on an attack order, AI pilots that fly with skill); the tactical map's lag.
+   - *Then one style for everything*: the vehicle HUD (out of the way, ready for a first-person view later), the builder (clearer, less scrambled) and the strategy map share one look, picked from mockups. Then tutorials in that style.
+   - *Kept in mind, not this pass*: missiles as things you build, store, load and arm yourself (big for air-to-air).
+   - *Next*: an optimization pass (a steady 60 FPS in the big battles, with at least two big structures or vehicles), then the next major pass: destruction (planes crashing, things exploding and throwing pieces, tougher vehicles), bug hunting, and a review of the blocks and systems.
 3c. **Campaign step 1, the world: geology** *(first pass built: see "The world: geology")*.
 3b. **Detour: in-vehicle instruments and options** *(Glass and the options panel built; Fighter HUD, Gauges and Tactical next; see "In-vehicle instruments")*.
 4. **Campaign building**: industry and the planet war (milestones 4 and 5 below).

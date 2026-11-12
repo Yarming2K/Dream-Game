@@ -18,11 +18,13 @@ public partial class Combat
 
     private struct BeamFx
     {
+        public object Key;
         public Vector3 From, To;
         public float Life;
     }
 
     private readonly List<BeamFx> _beams = new();
+    private float _beamTime;
     private static readonly Color BeamColor = new(1f, 0.25f, 0.18f, 0.9f);
 
     /// <summary>A missile or bomb was shot down (where, and whether the player's side did it).</summary>
@@ -34,8 +36,9 @@ public partial class Combat
     /// One laser pulse: burns the first thing along the line (a missile or bomb, a block, a person) at full
     /// strength out to <paramref name="rangeM"/>, weaker beyond as the beam spreads. Returns where it stopped.
     /// </summary>
-    public Vector3 FireBeam(VehicleBody owner, Vector3 from, Vector3 dir, float rangeM, float damage, bool byPlayer)
+    public Vector3 FireBeam(VehicleBody owner, Vector3 from, Vector3 dir, float rangeM, float damage, bool byPlayer, object key = null)
     {
+        _beamKey = key;
         // Fog and rain scatter the beam: it keeps its full strength over a shorter distance.
         rangeM *= Atmosphere.BeamFactor;
         float maxLen = Mathf.Max(rangeM * 3f, 50f);
@@ -127,14 +130,29 @@ public partial class Combat
         return end;
     }
 
+    private object _beamKey;
+
+    /// <summary>
+    /// A laser's beam: one per emitter, moved to each new burn's line and kept lit a little longer than the gap between
+    /// burns, so while it fires it's one steady beam that follows the turret, not a string of pulses left behind.
+    /// </summary>
     private void AddBeam(Vector3 from, Vector3 to)
     {
-        // A pulse shows for a little longer than the gap to the next one, so a firing laser is a steady beam.
-        _beams.Add(new BeamFx { From = from, To = to, Life = 0.12f });
+        object key = _beamKey;
+        if (key != null)
+            for (int i = 0; i < _beams.Count; i++)
+                if (_beams[i].Key == key)
+                {
+                    _beams[i] = new BeamFx { Key = key, From = from, To = to, Life = 0.09f };
+                    return;
+                }
+
+        _beams.Add(new BeamFx { Key = key, From = from, To = to, Life = 0.09f });
     }
 
     private void DrawBeams(float dt)
     {
+        _beamTime += dt;
         for (int i = _beams.Count - 1; i >= 0; i--)
         {
             BeamFx b = _beams[i];
@@ -147,7 +165,10 @@ public partial class Combat
             }
 
             _beams[i] = b;
-            _tracers.Beam(b.From, b.To, 0.035f, new Color(BeamColor.R, BeamColor.G, BeamColor.B, Mathf.Min(1f, b.Life / 0.06f)), 0.9f);
+            // A bright core in a soft red glow, shimmering a little.
+            float fade = Mathf.Min(1f, b.Life / 0.04f), shimmer = 0.85f + 0.15f * Mathf.Sin(_beamTime * 53f + i * 1.7f);
+            _tracers.Beam(b.From, b.To, 0.11f * shimmer, new Color(BeamColor.R, BeamColor.G * 0.8f, BeamColor.B * 0.8f, 0.28f * fade), 0f);
+            _tracers.Beam(b.From, b.To, 0.04f * shimmer, new Color(BeamColor.R, BeamColor.G, BeamColor.B, fade), 0.9f);
         }
     }
 

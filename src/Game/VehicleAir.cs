@@ -300,7 +300,8 @@ public partial class VehicleBody
         {
             case MobilityMode.Plane:
                 PlaneThrust(dt, xf, basis, vel, canRun);
-                PlaneControl(basis, vel, alpha);
+                if (playerFlies && PlayerInput.Direct) DirectControl(basis, vel);
+                else PlaneControl(basis, vel, alpha);
                 break;
             case MobilityMode.Helicopter:
             case MobilityMode.Hover:
@@ -592,6 +593,47 @@ public partial class VehicleBody
     }
 
     /// <summary>
+    /// Direct control: the stick and rudder move the control surfaces and the plane does what it's told and nothing
+    /// more. The stick sets how fast the nose pitches and the wings roll (held at what you set, steady when you centre it);
+    /// how hard you can pull is limited by speed (about 9 g, so tighter turns slow) and by how much bite the surfaces
+    /// have (sluggish when slow). Nothing levels the wings or stops a stall: pull too hard too slow and it stalls.
+    /// </summary>
+    private void DirectControl(Basis basis, Vector3 vel)
+    {
+        Vector3 fwd = -basis.Z, up = basis.Y, right = basis.X;
+        Vector2 stick = PlayerInput.Stick;
+        float airspeed = Mathf.Max(vel.Dot(fwd), 0f);
+        float pitchMax = Mathf.Clamp(9f * GunMath.Gravity / Mathf.Max(airspeed, 25f), 0.3f, 1.8f);
+        float pitchRate = stick.Y * pitchMax;
+        float rollRate = stick.X * 3.4f;
+        float yawRate = -PlayerInput.Rudder * 0.5f;
+        float q = 0.5f * Aero.AirDensity * airspeed * airspeed;
+        float wash = AirThrottle * 0.15f;
+        Vector3 rates = BodyRates(basis);
+        (float vecPitch, float vecYaw) = VectorAuthority();
+        // A softer grip than the instructor's: the plane takes a moment to answer, more so when slow.
+        Turn(right, pitchRate, rates.X, _inertia.X, q * _authPitch + vecPitch + _inertia.X * (0.05f + wash), 9f);
+        if (!OnGround) Turn(fwd, rollRate, rates.Z, _inertia.Z, q * _authRoll + _inertia.Z * 0.05f, 9f);
+        Turn(up, yawRate, rates.Y, _inertia.Y, q * _authYaw + vecYaw + _inertia.Y * (0.05f + wash), 9f);
+
+        float pitchCmd = Mathf.Clamp(stick.Y, -1, 1), rollCmd = Mathf.Clamp(stick.X, -1, 1), yawCmd = Mathf.Clamp(-PlayerInput.Rudder, -1, 1);
+        _nozzlePitch = pitchCmd;
+        _nozzleYaw = yawCmd;
+        foreach (SurfaceRt s in AirSurfaces)
+        {
+            Vector3 r = s.Local - CenterOfMass;
+            s.Deflection = s.Info.Role switch
+            {
+                SurfaceRole.Elevator => -pitchCmd * Mathf.Sign(r.Z),
+                SurfaceRole.Aileron => -rollCmd * Mathf.Sign(r.X),
+                SurfaceRole.Rudder => yawCmd * Mathf.Sign(r.Z),
+                SurfaceRole.Elevon => Mathf.Clamp(-pitchCmd * Mathf.Sign(r.Z) - rollCmd * Mathf.Sign(r.X), -1, 1),
+                _ => 0,
+            } * Aero.ControlThrow;
+        }
+    }
+
+    /// <summary>
     /// Helicopters and drones: W / S and A / D set the speed you want to go, and it tilts to get there and
     /// stops when you let go; Space and C climb and descend, otherwise it holds its height; it turns to face
     /// where you look.
@@ -739,8 +781,70 @@ public partial class VehicleBody
         Steer = 0;
     }
 
+    // ------------------------------------------------------------------ vapor
+
+    private MeshInstance3D _vapor;
+    private ShaderMaterial _vaporMat;
+    private float _vaporShown;
+
+    private const string VaporCode = @"
+shader_type spatial;
+render_mode blend_mix, cull_disabled, unshaded, depth_draw_never, shadows_disabled;
+
+uniform float strength = 0.0;
+
+void fragment() {
+	// Along the cone: a sharp front edge (the shock), thinning out behind.
+	float along = UV.y;
+	float fade = smoothstep(0.0, 0.12, along) * (1.0 - smoothstep(0.45, 1.0, along));
+	float n = (sin(UV.x * 41.0 + TIME * 23.0) * 0.5 + 0.5) * (sin(UV.x * 97.0 - TIME * 31.0 + along * 12.0) * 0.5 + 0.5);
+	float rim = pow(1.0 - abs(dot(NORMAL, VIEW)), 1.4);
+	float flick = 0.8 + 0.2 * sin(TIME * 47.0);
+	ALBEDO = vec3(0.95, 0.97, 1.0);
+	ALPHA = strength * fade * (0.3 + 0.7 * rim) * (0.55 + 0.45 * n) * flick * 0.85;
+}
+";
+
+    /// <summary>
+    /// A vapor cone: close to the speed of sound (Mach 0.9 to 1.1) a cone of cloud stands round the plane, sharp at its
+    /// front and fading behind, flickering as the shock moves. Pulling hard at speed wrings fainter vapor out of the air too.
+    /// </summary>
+    private void UpdateVapor(float dt)
+    {
+        if (FlightMode != MobilityMode.Plane) return;
+        float speed = LinearVelocity.Length(), mach = speed / 340f;
+        float want = Mathf.SmoothStep(0.9f, 0.97f, mach) * (1f - Mathf.SmoothStep(1.03f, 1.12f, mach));
+        want = Mathf.Max(want, 0.4f * Mathf.SmoothStep(8f, 14f, AngleOfAttackDeg) * Mathf.SmoothStep(160f, 230f, speed));
+        if (OnGround) want = 0f;
+        _vaporShown = Mathf.MoveToward(_vaporShown, want, dt * 3f);
+        if (_vaporShown < 0.01f)
+        {
+            if (_vapor != null) _vapor.Visible = false;
+            return;
+        }
+
+        if (_vapor == null)
+        {
+            // Round the whole plane at its widest, the narrow end forward.
+            float span = (Analysis.Max.X - Analysis.Min.X + 1) * Conv.CS, height = (Analysis.Max.Y - Analysis.Min.Y + 1) * Conv.CS;
+            float r = Mathf.Max(span * 0.42f, height * 0.6f);
+            _vaporMat = new ShaderMaterial { Shader = new Shader { Code = VaporCode } };
+            _vapor = new MeshInstance3D
+            {
+                Mesh = new CylinderMesh { TopRadius = r * 0.5f, BottomRadius = r * 1.15f, Height = r * 1.4f, CapTop = false, CapBottom = false, RadialSegments = 36, Rings = 3 },
+                MaterialOverride = _vaporMat, CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
+                Rotation = new Vector3(-Mathf.Pi * 0.5f, 0, 0), Position = CenterOfMass + new Vector3(0, 0, r * 0.2f),
+            };
+            AddChild(_vapor);
+        }
+
+        _vapor.Visible = true;
+        _vaporMat.SetShaderParameter("strength", _vaporShown);
+    }
+
     private void AnimateAir(float dt)
     {
+        UpdateVapor(dt);
         if (_bayDoors.Count > 0)
         {
             // The bay doors snap open for a launch and close behind it.

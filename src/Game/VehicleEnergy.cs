@@ -72,9 +72,10 @@ public partial class VehicleBody
         if (g.Masked) return false;
         g.Charging = !Electric.TryDraw(g.Stats.ChargeMJ);
         if (g.Charging) return false;
-        Combat.Instance.FireBeam(this, muzzle, dir, g.Stats.BeamRangeM, g.Stats.ApDamage, byPlayer);
+        Combat.Instance.FireBeam(this, muzzle, dir, g.Stats.BeamRangeM, g.Stats.ApDamage, byPlayer, g);
         g.ReloadLeft = ReloadFor(g);
-        if (_rng.Randf() < 0.5f) Sfx.At(GetParent<Node3D>(), muzzle, SoundId.LaserZap, -4f, _rng.RandfRange(0.92f, 1.08f), 14f, delayByDistance: false);
+        // A crackle now and then over the beam's hum (it burns thirty times a second).
+        if (_rng.Randf() < 0.15f) Sfx.At(GetParent<Node3D>(), muzzle, SoundId.LaserZap, -4f, _rng.RandfRange(0.92f, 1.08f), 14f, delayByDistance: false);
         Fired?.Invoke(g);
         _lastFiredAt = Time.GetTicksMsec() / 1000.0;
         return true;

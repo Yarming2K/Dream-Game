@@ -277,6 +277,9 @@ public partial class Combat : Node3D
         }
 
         CollectGridHits(from, dir, Mathf.Min(len, Mathf.Min(terrainT, bodyT)));
+        // A shell can't hit what fired it in its first half second: a fast plane moves meters between the shot and the
+        // shell's first step, and would otherwise fly into its own rounds.
+        if (p.Owner != null && p.Age < 0.5f) _hits.RemoveAll(h => h.Owner == p.Owner);
         if (_hits.Count == 0 && body != null)
         {
             if (p.Shell.Type == AmmoType.HE) Explode(bodyPos, p.Shell.HeRadiusM, p.Shell.HeDamage, p.ByPlayer, "HE");
