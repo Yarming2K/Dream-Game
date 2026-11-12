@@ -41,7 +41,7 @@ public partial class TestRange : Node3D
     private static readonly Vector3 HelipadCenter = new(Terrain.Helipad.X, Ground, Terrain.Helipad.Y);
 
     private bool _remote;
-    private bool _bombQueued, _vtolQueued;
+    private bool _bombQueued, _vtolQueued, _emergencyQueued;
     private Vector3? _bombImpact;
     private VehicleBody _lock;
 
@@ -788,6 +788,13 @@ public partial class TestRange : Node3D
                 if (_mount.ToggleVtol()) Big(_mount.FlightMode == MobilityMode.Plane ? "Wing-borne flight" : "Hovering");
             }
 
+            if (_emergencyQueued)
+            {
+                _emergencyQueued = false;
+                if (_mount.ToggleEmergencyPower())
+                    Big(_mount.EmergencyPower ? "EMERGENCY POWER: 15% more push, but the engines heat up" : "Normal power");
+            }
+
             _bombImpact = _mount.BombsLeft > 0 ? _mount.BombImpact(space) : null;
             bool radar = _mount.Analysis.Missiles.Any(m => m.Valid && m.Stats.Seeker == SeekerKind.Radar) && _mount.MissilesReady > 0;
             _lock = radar ? VehicleBody.RadarLock(o, d, _mount.Faction, 25f, _mount.HasSams ? 6000f : 4000f) : null;
@@ -798,7 +805,7 @@ public partial class TestRange : Node3D
         else
         {
             _impacts.Clear();
-            _torpedoQueued = _missileQueued = _bombQueued = _vtolQueued = false;
+            _torpedoQueued = _missileQueued = _bombQueued = _vtolQueued = _emergencyQueued = false;
             _bombImpact = null;
             _lock = null;
         }
@@ -1082,6 +1089,7 @@ public partial class TestRange : Node3D
         else if (e.IsActionPressed("missile") && Mounted) _missileQueued = true;
         else if (e.IsActionPressed("bomb") && Mounted) _bombQueued = true;
         else if (e.IsActionPressed("vtol") && Mounted) _vtolQueued = true;
+        else if (e.IsActionPressed("emergency_power") && Mounted) _emergencyQueued = true;
         else if (e.IsActionPressed("smoke") && Mounted) _smokeQueued = true;
         else if (e.IsActionPressed("blade") && Mounted)
         {
@@ -1450,7 +1458,7 @@ public partial class TestRange : Node3D
             "Holes below the waterline flood compartments: get out, weld them shut (3), and the bilge pumps clear the water. Stop inside the buoy ring to rearm and refuel.\n" +
             "In the water you swim: Space up, C down, E to climb into a boat you're looking at.\n\n" +
             "[b][color=#ffb845]In the air[/color][/b]\n" +
-            "Planes start on the airstrip in the western hills: W / S set the throttle, and the plane flies toward wherever you point the mouse (A / D roll, Space brakes on the ground). Open the throttle, let it run, and climb once you're past stall speed.\n" +
+            "Planes start on the airstrip in the western hills: W / S set the throttle, and the plane flies toward wherever you point the mouse (A / D roll, Space brakes on the ground). Open the throttle, let it run, and climb once you're past stall speed. Throttle all the way open lights a jet's afterburner; N gives its jets emergency power, 15% more push until they overheat (watch the engine heat).\n" +
             "Helicopters and drones start on the helipad: W A S D move, Space / C climb and descend, and they turn to face where you look. Let go and they stop and hover. V switches a VTOL between hovering and wing-borne flight.\n" +
             "Airships: W / S telegraph, A / D turn, Space / C order it higher or lower. B drops a bomb where the diamond is. F (or X) fires a missile: optical ones fly to your crosshair, radar ones chase the aircraft in the red box.\n" +
             "Q cycles AP, HE and FLAK: flak bursts near aircraft, or at the range you're aiming at. Drones are flown by remote: you stay standing where you were.\n\n" +
@@ -1725,7 +1733,14 @@ public partial class TestRange : Node3D
         switch (v.FlightMode)
         {
             case MobilityMode.Plane:
-                sb.Append($"Throttle [b]{v.AirThrottle * 100f:0}%[/b]{(v.Afterburning ? "  [color=#ffb050][b]AFTERBURNER[/b][/color]" : "")}   [color={dim}]W / S throttle · mouse steers · A / D roll{(v.OnGround ? " · Space brakes" : "")}[/color]\n");
+                sb.Append($"Throttle [b]{v.AirThrottle * 100f:0}%[/b]{(v.Afterburning ? "  [color=#ffb050][b]AFTERBURNER[/b][/color]" : "")}" +
+                          $"{(v.EmergencyPower ? "  [color=#ff6a40][b]EMERGENCY POWER[/b][/color]" : "")}   " +
+                          $"[color={dim}]W / S throttle · mouse steers · A / D roll{(v.HasJets ? " · N emergency power" : "")}{(v.OnGround ? " · Space brakes" : "")}[/color]\n");
+                // Engine heat, once it's worth watching: red past the limit, where the engines lose power and then burn.
+                if (v.EmergencyPower || v.HottestJet > 0.7f)
+                    sb.Append($"Engines [color={Ui.Hex(v.HottestJet > EngineHeat.Damaging ? Ui.Bad : v.HottestJet > EngineHeat.Limit ? Ui.Warn : Ui.Text)}][b]{v.HottestJet * 100f:0}%[/b][/color] hot" +
+                              (v.HottestJet > EngineHeat.Damaging ? " [color=" + Ui.Hex(Ui.Bad) + "]: burning out, ease off (N)[/color]"
+                                  : v.HottestJet > EngineHeat.Limit ? " [color=" + Ui.Hex(Ui.Warn) + "]: losing power[/color]" : "") + "\n");
                 if (v.Stalled) sb.Append($"[color={Ui.Hex(Ui.Bad)}][b]STALL[/b]: push the nose down and open the throttle.[/color]\n");
                 else if (!v.OnGround && v.AirspeedKmh < v.Analysis.Air.StallSpeedMs * 3.6f * 1.1f)
                     sb.Append($"[color={Ui.Hex(Ui.Warn)}]Slow: it stalls below about {v.Analysis.Air.StallSpeedMs * 3.6f:0} km/h.[/color]\n");

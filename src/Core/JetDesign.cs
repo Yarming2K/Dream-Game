@@ -203,3 +203,38 @@ public static class JetDesign
         return s;
     }
 }
+
+/// <summary>
+/// How hot a jet runs, and what that does. Run normally it settles well below its limit even at full throttle.
+/// <b>Emergency power</b> gives 15% more push but heats it past its limit in about half a minute at full throttle;
+/// past the limit it loses power, and further on it starts to hurt itself (and can catch fire). An engine without
+/// enough turbines runs hot too. Heat is a share of the limit: 1 is the limit.
+/// </summary>
+public static class EngineHeat
+{
+    public const float EmergencyThrust = 1.15f;
+
+    /// <summary>Past this heat the engine loses power; past <see cref="Damaging"/> it damages itself.</summary>
+    public const float Limit = 1f, Damaging = 1.3f;
+
+    /// <summary>Seconds to heat up toward where it settles, and to cool down.</summary>
+    public const float HeatUpS = 25f, CoolDownS = 15f;
+
+    /// <summary>Where the heat settles at a throttle setting (0 to 1).</summary>
+    public static float Settles(float throttle, bool emergency, float turbineShortfall) =>
+        Math.Clamp(throttle, 0f, 1f) * (0.55f + (emergency ? 0.95f : 0f) + 0.6f * Math.Clamp(turbineShortfall, 0f, 1f));
+
+    /// <summary>The heat a step of <paramref name="dt"/> seconds later.</summary>
+    public static float Step(float heat, float settles, float dt) =>
+        heat + (settles - heat) * (1f - MathF.Exp(-dt / (settles > heat ? HeatUpS : CoolDownS)));
+
+    /// <summary>The share of its push it still gives at this heat.</summary>
+    public static float ThrustFactor(float heat) => heat <= Limit ? 1f : MathF.Max(0.5f, 1f - (heat - Limit) * 1.6f);
+
+    /// <summary>Damage it does to its own core each second at this heat.</summary>
+    public static float DamagePerSecond(float heat) => heat <= Damaging ? 0f : (heat - Damaging) * 40f;
+
+    /// <summary>A built jet's missing turbines as a share of those it needs (0 for the ready-made jet).</summary>
+    public static float Shortfall(JetStats s) =>
+        s.Stock || s.TurbinesNeeded <= 0 ? 0f : MathF.Max(0f, (s.TurbinesNeeded - s.Turbines) / (float)s.TurbinesNeeded);
+}

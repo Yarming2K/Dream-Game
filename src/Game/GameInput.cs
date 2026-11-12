@@ -37,6 +37,7 @@ public static class GameInput
         AddKeys("lights", Key.H);
         AddKeys("smoke", Key.Z);
         AddKeys("blade", Key.K);
+        AddKeys("emergency_power", Key.N);
     }
 
     private static void AddKeys(string action, params Key[] keys)

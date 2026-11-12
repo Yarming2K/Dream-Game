@@ -171,4 +171,38 @@ public class JetDesignTests
         // The Lancer's intakes are open.
         Assert.All(VehicleAnalysis.Analyze(ExampleDesigns.Lancer()).BuiltJets, j => Assert.False(j.IntakeBlocked));
     }
+
+    private static float RunFor(float seconds, float throttle, bool emergency, float shortfall = 0, float heat = 0)
+    {
+        for (float t = 0; t < seconds; t += 0.1f) heat = EngineHeat.Step(heat, EngineHeat.Settles(throttle, emergency, shortfall), 0.1f);
+        return heat;
+    }
+
+    [Fact]
+    public void FlatOutNormallyAJetNeverOverheats()
+    {
+        float heat = RunFor(600, 1f, false);
+        Assert.True(heat < EngineHeat.Limit);
+        Assert.Equal(1f, EngineHeat.ThrustFactor(heat));
+        Assert.Equal(0f, EngineHeat.DamagePerSecond(heat));
+    }
+
+    [Fact]
+    public void EmergencyPowerOverheatsInAboutHalfAMinuteThenHurts()
+    {
+        float early = RunFor(15, 1f, true), late = RunFor(40, 1f, true), much = RunFor(120, 1f, true);
+        Assert.True(early < EngineHeat.Limit);
+        Assert.True(late > EngineHeat.Limit && EngineHeat.ThrustFactor(late) < 1f);
+        Assert.True(EngineHeat.DamagePerSecond(much) > 0);
+        // Throttle back and it cools down again.
+        Assert.True(RunFor(60, 0.3f, false, heat: much) < EngineHeat.Limit);
+    }
+
+    [Fact]
+    public void TooFewTurbinesRunHot()
+    {
+        Assert.True(RunFor(300, 1f, false, shortfall: 0.5f) > RunFor(300, 1f, false));
+        Assert.True(EngineHeat.Shortfall(Jet(4, 1)) > 0 && EngineHeat.Shortfall(Jet(4, 2)) == 0);
+        Assert.Equal(0f, EngineHeat.Shortfall(JetStats.ReadyMade));
+    }
 }
