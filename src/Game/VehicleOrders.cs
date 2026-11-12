@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Collections.Generic;
 using DreamGame.Core;
 using Godot;
@@ -88,6 +89,15 @@ public partial class VehicleBody
     /// </summary>
     public void GiveOrder(OrderKind kind, Vector3 point, VehicleBody target = null)
     {
+        // Told to attack something it can't hit: it says why and holds, instead of driving at it uselessly.
+        if (kind == OrderKind.Attack && target != null && CantAttack(target) is string why)
+        {
+            ReportGrouped("cant-attack", why + ": holding", CommandLog.Warn);
+            kind = OrderKind.Hold;
+            point = GlobalPosition;
+            target = null;
+        }
+
         Order = kind;
         OrderPoint = point;
         OrderTarget = target;
@@ -109,6 +119,38 @@ public partial class VehicleBody
                 break;
             }
         }
+    }
+
+    /// <summary>
+    /// Why this unit can't attack <paramref name="t"/>, or null if it can: no weapons, nothing that reaches aircraft (for an
+    /// aircraft target), only anti-aircraft guns (for anything on the ground), or (a building, which can't move) too far.
+    /// </summary>
+    private string CantAttack(VehicleBody t)
+    {
+        bool air = t.IsAir && !t.OnGround;
+        bool missiles = Analysis.Missiles.Count > 0;
+        if (!Guns.Exists(g => g.Alive) && !missiles && BombsLeft == 0) return "has no weapons";
+        if (air && !IsAir)
+        {
+            bool aa = HasFlak || HasSams || Guns.Exists(g => g.Alive && (g.Info.BreechDef.Breech.AntiAir ||
+                                                                          g.Info.BreechDef.Breech.PointDefense || g.Info.BreechDef.Breech.MaxElevationDeg >= 60f));
+            if (!aa) return "can't hit aircraft: no anti-aircraft weapons";
+        }
+        else if (!air)
+        {
+            bool ground = BombsLeft > 0 || Analysis.Missiles.Any(m => m.Stats.Seeker != SeekerKind.Radar) ||
+                          Guns.Exists(g => g.Alive && !g.Info.BreechDef.Breech.AntiAir);
+            if (!ground) return "its guns only fire at aircraft";
+        }
+
+        if (Analysis.IsBuilding)
+        {
+            float d = GlobalPosition.DistanceTo(t.GlobalPosition);
+            float reach = air ? (HasHeavyFlak ? 7000f : HasSams ? 6000f : 2500f) : Mathf.Max(AttackRange * 1.25f, missiles ? 4000f : 0f);
+            if (d > reach) return $"out of reach: {d / 1000f:0.0} km away, its weapons reach {reach / 1000f:0.0} km";
+        }
+
+        return null;
     }
 
     /// <summary>How close it closes in on an attack target before stopping to shoot.</summary>

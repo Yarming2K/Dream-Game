@@ -750,8 +750,15 @@ public partial class VehicleBody
     private void AiPilot(float dt, Vector3 comW, Vector3 fwd)
     {
         var c = new VehicleControls { AimDir = new Vector3(fwd.X, 0, fwd.Z).Normalized() };
-        if (FlightMode == MobilityMode.Plane)
+        VehicleBody target = FlightMode == MobilityMode.Plane ? PilotTarget(dt, comW) : null;
+        if (target != null)
         {
+            c.AimDir = AvoidGround(comW, AttackRun(dt, comW, fwd, target));
+            AirThrottle = Mathf.MoveToward(AirThrottle, 1f, dt * 0.5f);
+        }
+        else if (FlightMode == MobilityMode.Plane)
+        {
+            _extendLeft = 0f;
             if (Patrols)
             {
                 Vector3 r = comW - PatrolCenter;
@@ -764,6 +771,7 @@ public partial class VehicleBody
                 c.AimDir = (h + Vector3.Up * climb).Normalized();
             }
 
+            c.AimDir = AvoidGround(comW, c.AimDir);
             AirThrottle = Mathf.MoveToward(AirThrottle, Patrols ? 0.75f : Mathf.Max(AirThrottle, 0.6f), dt * 0.5f);
         }
 
@@ -840,6 +848,130 @@ void fragment() {
 
         _vapor.Visible = true;
         _vaporMat.SetShaderParameter("strength", _vaporShown);
+    }
+
+    // ------------------------------------------------------------------ the AI pilot in a fight
+
+    private VehicleBody _pilotTarget;
+    private float _pilotRetarget, _pilotMissileWait, _extendLeft;
+    private Vector3 _extendDir;
+
+    /// <summary>
+    /// Who the AI pilot goes after: what it was ordered to attack, otherwise (with its crew cleared to fight) the nearest
+    /// enemy it can see within 4 km. Planes with nothing to shoot with don't go looking.
+    /// </summary>
+    private VehicleBody PilotTarget(float dt, Vector3 comW)
+    {
+        if (Order == OrderKind.Attack && OrderTarget != null && IsInstanceValid(OrderTarget) && OrderTarget.Model.Blocks.Count > 0) return OrderTarget;
+        bool armed = Guns.Exists(g => g.Alive) || MissilesReady > 0 || BombsLeft > 0;
+        if (!AiCrewActive || Roe == Engagement.HoldFire || !armed || !CrewAboardAny) return null;
+        _pilotRetarget -= dt;
+        bool valid = _pilotTarget != null && IsInstanceValid(_pilotTarget) && _pilotTarget.IsInsideTree() && _pilotTarget.Model.Blocks.Count > 0;
+        if (_pilotRetarget > 0f && valid) return _pilotTarget;
+        _pilotRetarget = 1.5f;
+        VehicleBody best = null;
+        float bestD = 4000f;
+        foreach (IGridHost h in GridRegistry.Hosts)
+        {
+            if (h is not VehicleBody v || v == this || !IsInstanceValid(v) || v.Faction == Faction || v.Model.Blocks.Count == 0) continue;
+            if (Roe == Engagement.ReturnFire && v != LastAttacker) continue;
+            Vector3 p = v.GlobalTransform * v.CenterOfMass;
+            float d = p.DistanceTo(comW);
+            if (d >= bestD || !WorldQuery.LineClear(this, comW, p, this, v)) continue;
+            bestD = d;
+            best = v;
+        }
+
+        return _pilotTarget = best;
+    }
+
+    /// <summary>
+    /// One attack: against aircraft, lead pursuit (guns when lined up, radar missiles in a cone ahead, breaking away when
+    /// too close); against anything on the ground, a diving pass from height (guns, rockets and missiles on the way down,
+    /// bombs let go when they'd land on it), pulling out, extending away and coming round again.
+    /// </summary>
+    private Vector3 AttackRun(float dt, Vector3 comW, Vector3 fwd, VehicleBody t)
+    {
+        Vector3 tp = t.GlobalTransform * t.CenterOfMass;
+        bool air = t.IsAir && !t.OnGround;
+        Vector3 to = tp - comW;
+        float dist = to.Length();
+        GunRt gun = Guns.FirstOrDefault(g => g.Alive && g.Info.GunSection >= 0);
+        float shell = gun == null ? 800f : gun.Info.BreechDef.Breech.Beam ? 100000f : gun.Stats.MuzzleVelocity;
+        Vector3 lead = GunMath.LeadTarget(comW.N(), tp.N(), (t.LinearVelocity - LinearVelocity).N(), shell).G();
+        float tof = comW.DistanceTo(lead) / shell;
+        lead += Vector3.Up * (0.5f * GunMath.Gravity * tof * tof);
+        Vector3 want = (lead - comW).Normalized();
+
+        if (_extendLeft > 0f)
+        {
+            // Extending after a pass: away and climbing, then round again.
+            _extendLeft -= dt;
+            return (_extendDir + Vector3.Up * 0.3f).Normalized();
+        }
+
+        float agl = HeightAboveGroundM;
+        if (!air)
+        {
+            // Come in high, dive from 1.6 km, pull out 300 m short or 90 m above the ground.
+            if (dist > 1600f && agl < 350f) want = (Flat(to).Normalized() + Vector3.Up * 0.3f).Normalized();
+            if (dist < 300f || (agl < 90f && want.Y < 0f)) Extend(fwd, 6f);
+        }
+        else if (dist < 150f && to.Dot(t.LinearVelocity - LinearVelocity) < 0f)
+        {
+            // About to overshoot or collide: break away and come round.
+            Extend(fwd + Flat(to.Cross(Vector3.Up)).Normalized() * 0.6f, 3f);
+        }
+
+        if (Roe == Engagement.HoldFire) return want;
+        float off = Mathf.RadToDeg(fwd.AngleTo(want));
+        if (gun != null && off < 3f && dist < (air ? 1100f : 1500f))
+            foreach (GunRt g in Guns)
+            {
+                if (!g.Alive || g.ReloadLeft > 0f || g.Info.GunSection < 0) continue;
+                (Vector3 muzzle, Vector3 dir) = Muzzle(g);
+                if (Mathf.RadToDeg(dir.AngleTo((lead - muzzle).Normalized())) < 2.5f) FireGun(g, false, AmmoFor(g));
+            }
+
+        _pilotMissileWait -= dt;
+        if (_pilotMissileWait <= 0f && MissilesReady > 0 && off < 25f && dist > 500f && dist < (air ? 5000f : 4000f))
+            _pilotMissileWait = FireMissile(false, tp, m => air == (m.Stats.Seeker == SeekerKind.Radar)) ? 5f : 1f;
+
+        if (!air && BombsLeft > 0 && dist < 1500f && BombImpact(GetWorld3D().DirectSpaceState) is Vector3 hit && Flat(hit - tp).Length() < 25f)
+            DropBomb(false);
+        return want;
+    }
+
+    private void Extend(Vector3 dir, float seconds)
+    {
+        Vector3 h = Flat(dir);
+        _extendDir = h.LengthSquared() > 1e-4f ? h.Normalized() : Flat(-GlobalBasis.Z).Normalized();
+        _extendLeft = seconds;
+    }
+
+    /// <summary>
+    /// Keeps an AI plane off the ground: looking a few seconds ahead along its flight path, it pulls up if it would come
+    /// within 70 m of the ground or sea, and won't point down when already low.
+    /// </summary>
+    private Vector3 AvoidGround(Vector3 comW, Vector3 aim)
+    {
+        if (WorldQuery.Ground == null || OnGround) return aim;
+        Vector3 v = LinearVelocity;
+        float worst = float.MaxValue;
+        for (int i = 1; i <= 4; i++)
+        {
+            Vector3 p = comW + v * (i * 1.2f);
+            worst = Mathf.Min(worst, p.Y - Mathf.Max(WorldQuery.Ground.HeightAt(p.X, p.Z), Ocean.Level));
+        }
+
+        if (worst < 70f || HeightAboveGroundM < 60f)
+        {
+            Vector3 h = Flat(-GlobalBasis.Z);
+            return (h.Normalized() + Vector3.Up * 1.3f).Normalized();
+        }
+
+        if (HeightAboveGroundM < 140f && aim.Y < 0f) aim = new Vector3(aim.X, 0.05f, aim.Z).Normalized();
+        return aim;
     }
 
     private void AnimateAir(float dt)

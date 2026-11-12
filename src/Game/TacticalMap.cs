@@ -97,7 +97,8 @@ public partial class TacticalMap : Control
     {
         // The ground may have changed (craters, digging) since the map was last drawn.
         int version = Terrain.Earth?.Version ?? 0;
-        if (_terrain == null || version != _terrainVersion)
+        // (The world's map is drawn from its 20 m grid, which craters don't change: drawn once.)
+        if (_terrain == null || (version != _terrainVersion && World == null))
         {
             _terrain = BuildTerrain();
             _terrainVersion = version;
@@ -168,23 +169,13 @@ public partial class TacticalMap : Control
     {
         double now = Time.GetTicksMsec() / 1000.0;
         List<VehicleBody> all = Vehicles().ToList();
-        List<VehicleBody> eyes = all.Where(v => v.Faction == 0).ToList();
         foreach (VehicleBody e in all)
         {
             if (e.Faction == 0) continue;
             Vector3 ep = e.GlobalPosition;
-            bool seen = false;
-            foreach (VehicleBody f in eyes)
-            {
-                Vector3 fp = f.GlobalPosition;
-                if (fp.DistanceTo(ep) > f.SightM) continue;
-                // Hills block sight (the sea and the sky don't).
-                if (!WorldQuery.GroundRay(null, fp + Vector3.Up * 3f, ep + Vector3.Up * 2f, out _, out _))
-                {
-                    seen = true;
-                    break;
-                }
-            }
+            // What your side has spotted (worked out once for the whole game, a slice a frame), rather than the map
+            // casting a line from every unit of yours to every enemy itself, which stalled big battles.
+            bool seen = Spotting.IsSpotted(0, e);
 
             if (seen) _spotted[e] = (ep, now, true);
             else if (_spotted.TryGetValue(e, out var old)) _spotted[e] = (old.pos, old.seen, false);
@@ -249,7 +240,7 @@ public partial class TacticalMap : Control
         if (World != null) return WorldImage();
         HeightField f = WorldQuery.Ground;
         if (f == null) return null;
-        var img = Image.CreateEmpty(f.Width, f.Depth, false, Image.Format.Rgb8);
+        var px = new byte[f.Width * f.Depth * 3];
         var light = new Vector3(-1, 1.6f, -1).Normalized();
         for (int z = 0; z < f.Depth; z++)
         for (int x = 0; x < f.Width; x++)
@@ -278,10 +269,13 @@ public partial class TacticalMap : Control
                 if (stirred > 0) c = c.Lerp(new Color(0.24f, 0.19f, 0.14f), stirred * 0.7f);
             }
 
-            img.SetPixel(x, z, c);
+            int pi = (z * f.Width + x) * 3;
+            px[pi] = (byte)Mathf.Clamp(c.R * 255f, 0, 255);
+            px[pi + 1] = (byte)Mathf.Clamp(c.G * 255f, 0, 255);
+            px[pi + 2] = (byte)Mathf.Clamp(c.B * 255f, 0, 255);
         }
 
-        return ImageTexture.CreateFromImage(img);
+        return ImageTexture.CreateFromImage(Image.CreateFromData(f.Width, f.Depth, false, Image.Format.Rgb8, px));
     }
 
     /// <summary>
