@@ -33,6 +33,15 @@ public enum BlockKind
     ControlSurface,
     AirPropeller,
     JetEngine,
+
+    // Jets built from parts (see JetDesign), in a line through a Jet Core.
+    JetIntake,
+    JetFan,
+    JetCompressor,
+    JetCore,
+    JetTurbine,
+    JetAfterburner,
+    JetNozzle,
     Rotor,
     LiftFan,
     GasCell,
@@ -283,6 +292,9 @@ public sealed class BlockDef
     public float ThrustN;
     public SeekerKind Seeker;
 
+    /// <summary>Jet parts: the ramp intake and the variable nozzle, built for speeds past the speed of sound.</summary>
+    public bool HighSpeed;
+
     public float ColorR, ColorG, ColorB;
     public float Metallic = 0.6f;
     public float Roughness = 0.6f;
@@ -314,6 +326,9 @@ public sealed class BlockDef
     public bool IsSeat => Kind == BlockKind.DriverSeat || Kind == BlockKind.GunnerSeat || Kind == BlockKind.CommanderSeat ||
                           Kind == BlockKind.DroneCore;
     public bool IsMissilePart => Kind is BlockKind.MissileSeeker or BlockKind.MissileWarhead or BlockKind.MissileMotor or BlockKind.MissileFins;
+
+    public bool IsJetPart => Kind is BlockKind.JetIntake or BlockKind.JetFan or BlockKind.JetCompressor or BlockKind.JetCore
+        or BlockKind.JetTurbine or BlockKind.JetAfterburner or BlockKind.JetNozzle;
     public bool IsLiftingSurface => Kind is BlockKind.Wing or BlockKind.ControlSurface;
 }
 
@@ -875,6 +890,71 @@ public static class BlockCatalog
             Id = "jet_engine", Name = "Jet Engine", Category = "Air", Kind = BlockKind.JetEngine,
             Description = "Pushes the way its arrow points with 16 kN, all on its own: it needs fuel but no other engine. Keeps pushing at any speed, so jets are fast. Point it up and it lifts.",
             MassKg = 600, Hp = 120, ArmorMm = 10, ThrustN = 16000, Watertight = false,
+            ColorR = 0.3f, ColorG = 0.3f, ColorB = 0.32f, Metallic = 0.85f, Roughness = 0.3f,
+        },
+        new BlockDef
+        {
+            Id = "jet_core", Name = "Jet Core", Category = "Air", Kind = BlockKind.JetCore,
+            Description = "The heart of a jet built from parts: fuel burns here. It pushes the way its arrow points. In front of it (the arrow side) go compressor stages, a fan if you want one, then an intake; behind it, turbine stages, afterburner sections if you want them, then a nozzle. A well-built jet beats a pile of ready-made ones for push per tonne and per litre.",
+            MassKg = 220, Hp = 140, ArmorMm = 10, Watertight = false,
+            ColorR = 0.3f, ColorG = 0.3f, ColorB = 0.32f, Metallic = 0.85f, Roughness = 0.3f,
+        },
+        new BlockDef
+        {
+            Id = "jet_intake", Name = "Jet Intake", Category = "Air", Kind = BlockKind.JetIntake,
+            Description = "The front of a built jet: lets the air in. Fine below the speed of sound; past it, it chokes and the push falls away.",
+            MassKg = 40, Hp = 60, ArmorMm = 10, Watertight = false,
+            ColorR = 0.3f, ColorG = 0.3f, ColorB = 0.32f, Metallic = 0.85f, Roughness = 0.3f,
+        },
+        new BlockDef
+        {
+            Id = "jet_intake_ramp", Name = "Ramp Intake", Category = "Air", Kind = BlockKind.JetIntake,
+            Description = "A built jet's intake with an adjustable ramp: heavier, but it keeps feeding the engine well past the speed of sound.",
+            MassKg = 100, Hp = 80, ArmorMm = 10, Watertight = false,
+            HighSpeed = true,
+            ColorR = 0.3f, ColorG = 0.3f, ColorB = 0.32f, Metallic = 0.85f, Roughness = 0.3f,
+        },
+        new BlockDef
+        {
+            Id = "jet_fan", Name = "Jet Fan", Category = "Air", Kind = BlockKind.JetFan,
+            Description = "Goes just behind a built jet's intake: a big fan blowing extra air round the engine (a turbofan). Much more push at low speed for 30% less fuel, but it fades as speed rises. Needs one more turbine stage.",
+            MassKg = 160, Hp = 100, ArmorMm = 10, Watertight = false,
+            ColorR = 0.3f, ColorG = 0.3f, ColorB = 0.32f, Metallic = 0.85f, Roughness = 0.3f,
+        },
+        new BlockDef
+        {
+            Id = "jet_compressor", Name = "Compressor Stage", Category = "Air", Kind = BlockKind.JetCompressor,
+            Description = "Squeezes the air in front of a Jet Core: more push and better fuel use, each stage a little less than the one before. Every two stages need a turbine stage behind the core to drive them.",
+            MassKg = 60, Hp = 80, ArmorMm = 10, Watertight = false,
+            ColorR = 0.3f, ColorG = 0.3f, ColorB = 0.32f, Metallic = 0.85f, Roughness = 0.3f,
+        },
+        new BlockDef
+        {
+            Id = "jet_turbine", Name = "Turbine Stage", Category = "Air", Kind = BlockKind.JetTurbine,
+            Description = "Goes behind a Jet Core and drives its compressors: one turbine stage for every two compressor stages, and one more for a fan. Too few and the engine runs weak.",
+            MassKg = 70, Hp = 90, ArmorMm = 10, Watertight = false,
+            ColorR = 0.3f, ColorG = 0.3f, ColorB = 0.32f, Metallic = 0.85f, Roughness = 0.3f,
+        },
+        new BlockDef
+        {
+            Id = "jet_afterburner", Name = "Afterburner Section", Category = "Air", Kind = BlockKind.JetAfterburner,
+            Description = "Goes behind a built jet's turbines: burns extra fuel in the exhaust when the throttle is all the way open. The first section adds 55% push, a second adds less; each drinks a lot of fuel. Needs a Variable Nozzle to give its all.",
+            MassKg = 120, Hp = 100, ArmorMm = 10, Watertight = false,
+            ColorR = 0.3f, ColorG = 0.3f, ColorB = 0.32f, Metallic = 0.85f, Roughness = 0.3f,
+        },
+        new BlockDef
+        {
+            Id = "jet_nozzle", Name = "Jet Nozzle", Category = "Air", Kind = BlockKind.JetNozzle,
+            Description = "The back of a built jet. Simple and light, but it can't open up for an afterburner (half the extra push) and loses some push past the speed of sound.",
+            MassKg = 40, Hp = 70, ArmorMm = 10, Watertight = false,
+            ColorR = 0.3f, ColorG = 0.3f, ColorB = 0.32f, Metallic = 0.85f, Roughness = 0.3f,
+        },
+        new BlockDef
+        {
+            Id = "jet_nozzle_variable", Name = "Variable Nozzle", Category = "Air", Kind = BlockKind.JetNozzle,
+            Description = "The back of a built jet: petals that open and close to suit the speed and the afterburner. Heavier, but it gets the afterburner's full push and works at any speed.",
+            MassKg = 100, Hp = 80, ArmorMm = 10, Watertight = false,
+            HighSpeed = true,
             ColorR = 0.3f, ColorG = 0.3f, ColorB = 0.32f, Metallic = 0.85f, Roughness = 0.3f,
         },
         new BlockDef

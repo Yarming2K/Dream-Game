@@ -47,6 +47,26 @@ public sealed class ThrusterInfo
 
     /// <summary>Which way it pushes, in the design's frame (rotors push along their up axis).</summary>
     public Int3 Direction;
+
+    /// <summary>Jets: what it does (the ready-made block's figures, or those of a jet built from parts).</summary>
+    public JetStats Jet;
+
+    /// <summary>A jet built from parts: where its flame comes out (the nozzle), and its parts from the core forward and backward.</summary>
+    public Int3 FlameCell;
+    public List<Int3> Front, Back;
+    public bool Built => Front != null;
+}
+
+/// <summary>A jet built from parts in a line through a Jet Core (see <see cref="JetDesign"/>).</summary>
+public sealed class BuiltJet
+{
+    public Int3 Core;
+    public Int3 Forward;
+    public int Section;
+    public readonly List<Int3> Front = new(), Back = new();
+    public JetStats Stats;
+    public bool Runs;
+    public string Problem;
 }
 
 public struct MissileStats

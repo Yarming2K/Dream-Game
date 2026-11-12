@@ -188,6 +188,7 @@ public sealed class VehicleAnalysis
     public List<SurfaceInfo> Surfaces = new();
     public List<ThrusterInfo> Thrusters = new();
     public List<MissileInfo> Missiles = new();
+    public List<BuiltJet> BuiltJets = new();
     public List<Int3> BombRacks = new();
     public int GasCells;
     public AirStats Air;
@@ -254,6 +255,7 @@ public sealed class VehicleAnalysis
         foreach (Int3 c in a.Cells.Keys) a.SectionOf.TryAdd(c, 0);
         a.FindGuns();
         a.FindMissiles();
+        a.FindJets();
         a.FindDisconnected();
         a.Kit = Fittings.Count(a.Anchors.Where(c => !a.Disconnected.Contains(c)).Select(c => a.Defs[c]));
         a.ComputeMass();
@@ -804,6 +806,29 @@ public sealed class VehicleAnalysis
         return info;
     }
 
+    /// <summary>Jets built from parts: the line of jet parts through each Jet Core, facing the same way.</summary>
+    private void FindJets()
+    {
+        foreach (Int3 core in AnchorsOf(BlockKind.JetCore))
+        {
+            var j = new BuiltJet { Core = core, Forward = Orientations.Forward(Cells[core].O), Section = SectionOf[core] };
+            BuiltJets.Add(j);
+            bool Part(Int3 c) => Defs.TryGetValue(c, out BlockDef d) && d.IsJetPart && d.Kind != BlockKind.JetCore &&
+                                 Cells[c].Cell == c && Orientations.Forward(Cells[c].O) == j.Forward;
+            for (Int3 c = core + j.Forward; Part(c); c += j.Forward) j.Front.Add(c);
+            for (Int3 c = core - j.Forward; Part(c); c -= j.Forward) j.Back.Add(c);
+            j.Stats = JetDesign.Compute(Defs[core], j.Front.Select(c => Defs[c]).ToList(), j.Back.Select(c => Defs[c]).ToList(),
+                out string problem, out j.Runs);
+            if (problem != null) j.Problem = $"The jet at {core}: {problem}";
+            // A part next to the line facing another way is the usual mistake.
+            Int3 ahead = (j.Front.Count > 0 ? j.Front[^1] : core) + j.Forward, behind = (j.Back.Count > 0 ? j.Back[^1] : core) - j.Forward;
+            // (Said instead of "it has no intake", which is what it leads to.)
+            foreach (Int3 c in new[] { ahead, behind })
+                if (Defs.TryGetValue(c, out BlockDef d) && d.IsJetPart && d.Kind != BlockKind.JetCore && Orientations.Forward(Cells[c].O) != j.Forward)
+                    j.Problem = $"The jet at {core}: the {d.Name} at {c} faces a different way from its core. Turn it to match.";
+        }
+    }
+
     /// <summary>Missiles: the line of missile parts in front of each rail.</summary>
     private void FindMissiles()
     {
@@ -895,8 +920,20 @@ public sealed class VehicleAnalysis
                     Surfaces.Add(info);
                     break;
                 }
-                case BlockKind.AirPropeller:
                 case BlockKind.JetEngine:
+                    Thrusters.Add(new ThrusterInfo { Cell = c, Kind = d.Kind, Orientation = o, Direction = Orientations.Forward(o), Jet = JetStats.ReadyMade });
+                    break;
+                case BlockKind.JetCore:
+                    // A built jet counts as a jet engine with its own figures, once its line is complete.
+                    BuiltJet j = BuiltJets.First(x => x.Core == c);
+                    if (j.Runs)
+                        Thrusters.Add(new ThrusterInfo
+                        {
+                            Cell = c, Kind = BlockKind.JetEngine, Orientation = o, Direction = j.Forward, Jet = j.Stats,
+                            FlameCell = j.Back[^1], Front = j.Front, Back = j.Back,
+                        });
+                    break;
+                case BlockKind.AirPropeller:
                 case BlockKind.LiftFan:
                     Thrusters.Add(new ThrusterInfo { Cell = c, Kind = d.Kind, Orientation = o, Direction = Orientations.Forward(o) });
                     break;
@@ -937,13 +974,14 @@ public sealed class VehicleAnalysis
         float watts = PowerKw * 1000f;
         float liftShare = lifters.Count > 0 ? watts / lifters.Count : 0;
         float pushShare = pushers.Count > 0 ? watts / pushers.Count : 0;
-        float upJets = Thrusters.Count(t => t.Kind == BlockKind.JetEngine && Up(t)) * Aero.JetThrustN;
-        float fwdJets = Thrusters.Count(t => t.Kind == BlockKind.JetEngine && t.Direction.Y == 0) * Aero.JetThrustN;
+        float upJets = Thrusters.Where(t => t.Kind == BlockKind.JetEngine && Up(t)).Sum(t => t.Jet.Thrust(1f, 0f, false));
+        var fwdJetList = Thrusters.Where(t => t.Kind == BlockKind.JetEngine && t.Direction.Y == 0).ToList();
+        float fwdJets = fwdJetList.Sum(t => t.Jet.Thrust(1f, 0f, false));
         air.HoverThrustN = upJets + lifters.Sum(t =>
             Aero.RotorThrust(liftShare, Aero.DiskArea(t.Kind == BlockKind.Rotor ? Aero.RotorRadiusM : Aero.FanRadiusM)));
         float diskProp = Aero.DiskArea(Aero.PropRadiusM);
         // (Jets at full throttle, with their afterburners lit.)
-        float ThrustAt(float v) => fwdJets * Aero.AfterburnerThrust + pushers.Count * Aero.PropThrust(pushShare, v, diskProp);
+        float ThrustAt(float v) => fwdJetList.Sum(t => t.Jet.Thrust(1f, v, true)) + pushers.Count * Aero.PropThrust(pushShare, v, diskProp);
         air.StaticThrustN = ThrustAt(0);
 
         // Drag of the body: what it shows end-on, not counting wing panels (they have their own).
@@ -1117,6 +1155,8 @@ public sealed class VehicleAnalysis
         PowerWarnings();
         foreach (MissileInfo m in Missiles.Where(m => m.Problem != null))
             Warnings.Add(new DesignWarning(m.Valid ? Severity.Info : Severity.Warning, m.Problem));
+        foreach (BuiltJet j in BuiltJets.Where(j => j.Problem != null))
+            Warnings.Add(new DesignWarning(j.Runs ? Severity.Warning : Severity.Error, j.Problem));
         int loose = Disconnected.Count;
         if (loose > 0)
             Warnings.Add(new DesignWarning(Severity.Warning, $"{loose} block(s) aren't attached to the vehicle (shown in red) and will fall off."));
@@ -1190,6 +1230,8 @@ public sealed class VehicleAnalysis
         BladeWarnings();
         foreach (MissileInfo m in Missiles.Where(m => m.Problem != null))
             Warnings.Add(new DesignWarning(m.Valid ? Severity.Info : Severity.Warning, m.Problem));
+        foreach (BuiltJet j in BuiltJets.Where(j => j.Problem != null))
+            Warnings.Add(new DesignWarning(j.Runs ? Severity.Warning : Severity.Error, j.Problem));
 
         int blocked = Wheels.Count(w => w.Blocked);
         if (blocked > 0)
