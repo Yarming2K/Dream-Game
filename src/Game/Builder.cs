@@ -1678,6 +1678,8 @@ public partial class Builder : Node3D
                 chips.AddChild(Ui.Chip("Pitch", s.HasPitch ? "yes" : "no", s.HasPitch ? Ui.Good : Ui.Bad));
                 chips.AddChild(Ui.Chip("Turn", s.HasYaw ? "yes" : "no", s.HasYaw ? Ui.Good : Ui.Warn));
                 chips.AddChild(Ui.Chip("Balance", s.StaticMarginM >= 0 ? "stable" : "nose-up", s.StaticMarginM >= 0 ? Ui.Good : Ui.Warn));
+                // Slopes and rounded blocks at the nose and tail let the air slide past: less drag, more speed.
+                chips.AddChild(Ui.Chip("Streamlined", $"{s.Streamlining * 100f:0}%", s.Streamlining >= 0.15f ? Ui.Good : s.Streamlining >= 0.05f ? Ui.Text : Ui.Warn));
                 break;
             case MobilityMode.Airship:
                 _dash.AddChild(Ui.Small("Gas cells hold it up; it vents or tops up gas to hold the height you order."));

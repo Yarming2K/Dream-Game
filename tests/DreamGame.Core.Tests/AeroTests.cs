@@ -160,4 +160,27 @@ public class AeroTests
         VehicleAnalysis a = VehicleAnalysis.Analyze(Blueprint.FromCellMap("nose heavy", cells));
         Assert.Contains(a.Warnings, w => w.Text.Contains("Nose-heavy"));
     }
+
+    [Fact]
+    public void AStreamlinedNoseHasLessDragThanABluntOne()
+    {
+        // The Falcon with its rounded nose squared off into plain airframe blocks.
+        var sleek = ExampleDesigns.Falcon();
+        var blunt = Blueprint.FromCellMap("blunt", sleek.ToCellMap().Values
+            .Select(b => BlockCatalog.Get(b.Id).Shape != BlockShape.Cube && b.Id.StartsWith("airframe") ? new BlueprintBlock("airframe", b.Cell, 0) : b).ToList());
+        VehicleAnalysis a = A(sleek), b = A(blunt);
+        Assert.True(a.DragArea < b.DragArea);
+        Assert.True(a.Air.Streamlining > b.Air.Streamlining);
+        Assert.True(a.Air.TopSpeedMs > b.Air.TopSpeedMs);
+        Assert.InRange(a.Air.Streamlining, 0.05f, 0.6f);
+        // A flat face counts in full; a slope half.
+        Assert.Equal(1f, Aero.FaceDrag(BlockShape.Wedge, true));
+        Assert.Equal(0.5f, Aero.FaceDrag(BlockShape.Wedge, false));
+    }
+
+    [Fact]
+    public void ARampIntakeJetGoesPastTheSpeedOfSound()
+    {
+        Assert.True(A(ExampleDesigns.Lancer()).Air.TopSpeedMs > A(ExampleDesigns.Falcon()).Air.TopSpeedMs * 1.2f);
+    }
 }

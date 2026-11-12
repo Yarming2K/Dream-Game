@@ -127,6 +127,9 @@ public struct AirStats
     public bool HasRoll, HasPitch, HasYaw;
     public bool CanFly;
     public int Bombs;
+
+    /// <summary>How much less drag its body has than a box of the same outline (0 for a brick, 0.4 for a well-shaped one).</summary>
+    public float Streamlining;
 }
 
 /// <summary>Flying: lift and drag of wing panels, propellers and rotors, gas cells, bombs and missiles.</summary>
@@ -181,6 +184,29 @@ public static class Aero
 
     public static float DiskArea(float radius) => MathF.PI * radius * radius;
 
+    /// <summary>Drag of the body per cell of its outline seen end-on (m², coefficient included), for a flat front and back.</summary>
+    public static readonly float BodyDragPerCell = PanelArea * 0.35f;
+
+    /// <summary>How much the front and the back of the body count toward its drag (they add to 1).</summary>
+    public const float NoseShare = 0.6f, TailShare = 0.4f;
+
+    /// <summary>
+    /// How much drag the face a column of blocks meets the air with makes, against a flat face (1). A slope or a
+    /// rounded nose lets the air slide past; at the back, a tapering tail lets it close up behind instead of leaving
+    /// a wake.
+    /// </summary>
+    public static float FaceDrag(BlockShape shape, bool flatFace) => flatFace ? 1f : shape switch
+    {
+        BlockShape.Wedge => 0.5f,
+        BlockShape.ShallowLow or BlockShape.ShallowHigh => 0.4f,
+        BlockShape.Corner => 0.4f,
+        BlockShape.InnerCorner => 0.75f,
+        BlockShape.Round => 0.55f,
+        BlockShape.Octagon => 0.7f,
+        BlockShape.Half => 0.8f,
+        _ => 0.9f,
+    };
+
     /// <summary>Lift coefficient of a panel at angle of attack <paramref name="alpha"/> (radians): straight up to the stall, then it falls away.</summary>
     public static float LiftCoefficient(float alpha)
     {
@@ -230,7 +256,7 @@ public static class Aero
     public static float TopSpeed(Func<float, float> thrustAt, float massKg, float wingArea, float bodyDragArea)
     {
         float best = 0;
-        for (float v = 5f; v <= 260f; v += 1f)
+        for (float v = 5f; v <= 700f; v += 1f)
         {
             if (thrustAt(v) < LevelDrag(v, massKg, wingArea, bodyDragArea)) break;
             best = v;

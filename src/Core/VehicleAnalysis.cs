@@ -984,12 +984,24 @@ public sealed class VehicleAnalysis
         float ThrustAt(float v) => fwdJetList.Sum(t => t.Jet.Thrust(1f, v, true)) + pushers.Count * Aero.PropThrust(pushShare, v, diskProp);
         air.StaticThrustN = ThrustAt(0);
 
-        // Drag of the body: what it shows end-on, not counting wing panels (they have their own).
-        var frontal = new HashSet<(int, int)>();
+        // Drag of the body: what it shows end-on, not counting wing panels (they have their own). Each column of
+        // cells along its length counts by the shape of its front and its back: flat faces in full, slopes and
+        // rounded noses and tails much less (streamlining).
+        var columns = new Dictionary<(int, int), (Int3 front, Int3 back)>();
         foreach ((Int3 c, BlockDef d) in Defs)
-            if (!d.IsLiftingSurface && !Disconnected.Contains(c)) frontal.Add((c.X, c.Y));
+        {
+            if (d.IsLiftingSurface || Disconnected.Contains(c)) continue;
+            if (!columns.TryGetValue((c.X, c.Y), out var col)) columns[(c.X, c.Y)] = (c, c);
+            else columns[(c.X, c.Y)] = (c.Z < col.front.Z ? c : col.front, c.Z > col.back.Z ? c : col.back);
+        }
+
+        float FaceDrag(Int3 c, Int3 dir) => Aero.FaceDrag(Defs[c].Shape, Shapes.CoversFace(Defs[c].Shape, Cells[c].O, dir));
+        float shaped = 0;
+        foreach ((Int3 front, Int3 back) in columns.Values)
+            shaped += Aero.NoseShare * FaceDrag(front, new Int3(0, 0, -1)) + Aero.TailShare * FaceDrag(back, new Int3(0, 0, 1));
         // (A big design's frontal area grows with its cross-section, as it should.)
-        float bodyDrag = frontal.Count * Aero.PanelArea * 0.35f;
+        float bodyDrag = shaped * Aero.BodyDragPerCell;
+        air.Streamlining = columns.Count > 0 ? 1f - shaped / columns.Count : 0;
 
         float weight = MassKg * GunMath.Gravity;
         int rotors = Thrusters.Count(t => t.Kind == BlockKind.Rotor);
