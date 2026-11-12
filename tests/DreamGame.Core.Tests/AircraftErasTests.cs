@@ -252,4 +252,51 @@ public class AircraftErasTests
         Assert.False(Liveries.Get("olive_grey").IsBareMetal);
         foreach (string id in new[] { "temperate", "grey_mottle", "sea_camo", "prototype" }) Assert.Equal(id, Liveries.Get(id).Id);
     }
+
+    [Fact]
+    public void EveryCanopyIsOneSmoothLibraryShellWithItsInstrumentsShowingThrough()
+    {
+        var shells = new Dictionary<string, string>
+        {
+            ["canopy_bubble"] = "canopy_bubble", ["canopy_tandem"] = "canopy_tandem", ["canopy_stealth"] = "canopy_dart", ["canopy_framed"] = "canopy_bubble",
+        };
+        foreach ((string id, string shell) in shells)
+        {
+            BlockModel m = BlockModels.For(BlockCatalog.Get(id));
+            Assert.Contains(PartLibrary.Names, n => n == shell);
+            Assert.Contains(m.Parts, p => p.Model == shell && p.Paint is Paint.Glass or Paint.GlassTint);
+            // (The old egg shapes are only the fallback without the library.)
+            Assert.All(m.Parts.Where(p => p.Prim == Prim.Sphere), p => Assert.Equal(PartLibrary.Covered, p.Model));
+        }
+
+        foreach (string id in new[] { "canopy_bubble", "canopy_tandem", "canopy_stealth", "canopy_highback" })
+            Assert.Contains(BlockModels.For(BlockCatalog.Get(id)).Parts, p => p.Paint == Paint.Dark);
+        Assert.Equal(new Int3(3, 2, 4), BlockCatalog.Get("canopy_highback").Size);
+        Assert.Equal(new Int3(3, 2, 8), BlockCatalog.Get("canopy_tandem").Size);
+    }
+
+    [Fact]
+    public void TheStealthCanopyIsTintedAndCountsAsStealthSkin()
+    {
+        BlockDef dart = BlockCatalog.Get("canopy_stealth");
+        Assert.True(dart.Stealthy);
+        Assert.Contains(BlockModels.For(dart).Parts, p => p.Paint == Paint.GlassTint);
+        Blueprint nightjar = ExampleDesigns.Nightjar();
+        Blueprint clear = Swap(nightjar, b => b.Id == "canopy_stealth" ? new BlueprintBlock("canopy_bubble", b.Cell, b.O) : b);
+        Assert.True(A(nightjar).Signature < A(clear).Signature);
+        Assert.Contains(ExampleDesigns.Halcyon().Blocks, b => b.Id == "canopy_stealth");
+    }
+
+    [Fact]
+    public void TheTandemCanopyCoversAPilotAndAWeaponsOfficer()
+    {
+        Blueprint bp = ExampleDesigns.Seraph();
+        VehicleAnalysis a = A(bp);
+        BlueprintBlock canopy = bp.Blocks.Single(b => b.Id == "canopy_tandem");
+        var under = Footprint.Cells(BlockCatalog.Get("canopy_tandem"), canopy.Cell, canopy.O).Select(c => c + new Int3(0, -1, 0)).ToHashSet();
+        Assert.Contains(bp.Blocks, b => b.Id == "pilot_seat" && under.Contains(b.Cell));
+        Assert.Contains(bp.Blocks, b => b.Id == "gunner_seat" && under.Contains(b.Cell));
+        Assert.Empty(a.Disconnected);
+        Assert.Contains(ExampleDesigns.Tern().Blocks, b => b.Id == "canopy_highback");
+    }
 }

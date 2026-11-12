@@ -343,8 +343,8 @@ public static partial class ExampleDesigns
         bool Duct(Int3 c) => c.Y == 2 && ((Math.Abs(c.X) == 2 && c.Z >= -8 && c.Z <= -3) || (Math.Abs(c.X) <= 1 && c.Z == -3));
 
         d.Set(0, 2, -14, "radome");
-        d.Set(0, 3, -10, "pilot_seat");
-        d.Set(0, 4, -9, "canopy_framed");
+        d.Set(0, 3, -9, "pilot_seat");
+        d.Set(0, 4, -9, "canopy_highback");
 
         // The jet down the middle: the side intakes' ducts meet in front of its ramp intake.
         d.Set(0, 2, -2, "jet_intake_ramp");
@@ -433,8 +433,8 @@ public static partial class ExampleDesigns
 
         d.Set(0, 2, -17, "nose_cone", Pointing(new Int3(0, 0, -1)));
         d.Set(0, 2, -14, "radar");
-        d.Set(0, 3, -12, "pilot_seat");
-        d.Set(0, 4, -11, "canopy_bubble");
+        d.Set(0, 3, -11, "pilot_seat");
+        d.Set(0, 4, -11, "canopy_stealth");
         WeaponsBay(d, 1, skin);
 
         // Two jets fed by the ducts from the intakes: ramp intake, five compressors, core, three turbines, two
@@ -502,8 +502,8 @@ public static partial class ExampleDesigns
         d.Set(0, 2, -17, "laser_lens");
         d.Set(0, 2, -16, "laser_emitter");
         d.Set(0, 2, -14, "radar");
-        d.Set(0, 3, -11, "pilot_seat");
-        d.Set(0, 4, -10, "canopy_bubble");
+        d.Set(0, 3, -10, "pilot_seat");
+        d.Set(0, 4, -10, "canopy_stealth");
         d.Set(0, 2, -7, "generator");
         d.Set(0, 2, -6, "capacitor");
         d.Set(0, 2, -5, "capacitor");
@@ -575,8 +575,10 @@ public static partial class ExampleDesigns
 
         d.Set(0, 2, -15, "nose_cone", Pointing(new Int3(0, 0, -1)));
         d.Set(0, 2, -10, "radar");
+        // Two seats: the pilot, and a weapons officer behind under the same long canopy.
         d.Set(0, 3, -9, "pilot_seat");
-        d.Set(0, 4, -8, "canopy_bubble");
+        d.Set(0, 3, -6, "gunner_seat");
+        d.Set(0, 4, -8, "canopy_tandem");
         WeaponsBay(d, 1, skin);
 
         foreach (int s in new[] { -1, 1 })

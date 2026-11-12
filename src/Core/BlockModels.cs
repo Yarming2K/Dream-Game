@@ -47,6 +47,9 @@ public enum Paint
     Rubber,
     Glass,
 
+    /// <summary>Glass with a coating that turns radar and sunlight: a stealth fighter's gold-smoked canopy.</summary>
+    GlassTint,
+
     /// <summary>Lit from inside, never shaded: lamps, sights, exhaust glow.</summary>
     Glow,
 }
@@ -63,7 +66,7 @@ public static class PartLibrary
     {
         "tire", "rim", "hub", "roadwheel", "track_link", "muzzle_brake",
         "hatch", "periscope", "headlight", "toolbox", "smoke_tube", "muffler", "prop_blade",
-        "jet_engine", "jet_nozzle", "rotor_blade", "breech", "ogive",
+        "jet_engine", "jet_nozzle", "rotor_blade", "breech", "ogive", "canopy_bubble", "canopy_dart", "canopy_tandem",
     };
 
     /// <summary>Marks detail that a library part already has, so it's left out when the library is there.</summary>
@@ -1439,6 +1442,14 @@ public static class BlockModels
         k.Node = -1;
     }
 
+    /// <summary>Inside a canopy, in front of a seat at <paramref name="z"/>: the dark glare shield over the instruments and a head-up display's glass.</summary>
+    private static void Coaming(Maker k, float baseY, float z)
+    {
+        k.Bevel(new Vector3(0.5f, 0.09f, 0.28f), Paint.Dark, new Vector3(0, baseY + 0.07f, z), 0.02f);
+        k.Box(new Vector3(0.12f, 0.06f, 0.06f), Paint.Dark, new Vector3(0, baseY + 0.14f, z + 0.06f));
+        k.Box(new Vector3(0.2f, 0.16f, 0.012f), Paint.Glass, new Vector3(0, baseY + 0.24f, z + 0.08f), Rot(Vector3.UnitX, -0.35f));
+    }
+
     /// <summary>A small pseudo-random number (0 to 1) from a seed, so hand-placed clutter looks irregular but never changes.</summary>
     private static float Jitter(int seed)
     {
@@ -2215,14 +2226,88 @@ public static class BlockModels
                 break;
 
 
+            case BlockKind.Fairing when def.Id is "canopy_bubble" or "canopy_tandem":
+            {
+                // One smooth blown bubble from the part library (two seats under the tandem's, with a hoop between
+                // them), on sill rails, and in front of each seat the glare shield and head-up display showing through.
+                bool two = def.Id == "canopy_tandem";
+                float baseY = -ext.Y * 0.5f, len = ext.Z * 0.97f, h = 0.86f;
+                k.Box(new Vector3(1.0f, h, len), Paint.Glass, new Vector3(0, baseY - 0.04f + h * 0.5f, -ext.Z * 0.01f));
+                k.Lib(two ? "canopy_tandem" : "canopy_bubble");
+                k.Sphere(1f, Paint.Glass, new Vector3(0, baseY + 0.02f, -ext.Z * 0.13f), new Vector3(0.5f, 0.82f, ext.Z * 0.37f));
+                k.Sphere(1f, Paint.Glass, new Vector3(0, baseY + 0.02f, 0), new Vector3(0.43f, 0.6f, ext.Z * 0.5f));
+                k.CoverLast(2);
+                foreach (float x in new[] { -0.47f, 0.47f })
+                    k.Box(new Vector3(0.05f, 0.05f, len * 0.86f), Paint.Self, new Vector3(x, baseY + 0.02f, ext.Z * 0.02f));
+                k.Box(new Vector3(0.9f, 0.03f, 0.04f), Paint.SelfDark, new Vector3(0, baseY + 0.02f, -len * 0.45f));
+                foreach (float z in two ? new[] { -ext.Z * 0.29f, ext.Z * 0.09f } : new[] { -ext.Z * 0.28f })
+                    Coaming(k, baseY, z);
+                if (two)
+                    k.Torus(1f, 0.05f, Paint.Self, new Vector3(0, baseY, -ext.Z * 0.08f), AlongZ, new Vector3(0.48f, 1f, 0.84f));
+                break;
+            }
+
+            case BlockKind.Fairing when def.Id == "canopy_stealth":
+            {
+                // A long, low dart of gold-smoked glass with no frame over the pilot: a sill frame round its base,
+                // and the glare shield and head-up display just visible through the tint.
+                float baseY = -ext.Y * 0.5f, len = ext.Z * 0.98f, h = 0.74f;
+                k.Box(new Vector3(0.96f, h, len), Paint.GlassTint, new Vector3(0, baseY - 0.02f + h * 0.5f, 0));
+                k.Lib("canopy_dart");
+                k.Sphere(1f, Paint.GlassTint, new Vector3(0, baseY, 0), new Vector3(0.43f, h, len * 0.5f));
+                k.CoverLast(1);
+                foreach (int sx in new[] { -1, 1 })
+                {
+                    k.Box(new Vector3(0.05f, 0.05f, len * 0.62f), Paint.Self, new Vector3(sx * 0.46f, baseY + 0.02f, len * 0.06f));
+                    // The frame narrows to the point at the front.
+                    k.Rod(new Vector3(sx * 0.46f, baseY + 0.02f, -len * 0.25f), new Vector3(0, baseY + 0.02f, -len * 0.5f), 0.025f, Paint.Self, 8);
+                }
+
+                Coaming(k, baseY, -ext.Z * 0.22f);
+                break;
+            }
+
+            case BlockKind.Fairing when def.Id == "canopy_highback":
+            {
+                // A framed hood of flat panes leaning in toward a narrow roof: a windscreen leaning back with quarter
+                // panes, the sliding hood with its hoops and rails, and a solid metal back the fuselage spine runs on from.
+                float baseY = -ext.Y * 0.5f + 0.01f, w = 0.72f, hh = 0.5f, taper = 0.62f;
+                float lean = MathF.Atan(w * (1f - taper) * 0.5f / hh), top = w * taper;
+                Quaternion back = Rot(Vector3.UnitX, -0.7f);
+                k.Slab(new Vector3(w, hh, 1.15f), taper, 1f, Paint.Glass, new Vector3(0, baseY + hh * 0.5f, -0.02f));
+                k.Box(new Vector3(0.48f, 0.56f, 0.03f), Paint.Glass, new Vector3(0, baseY + 0.22f, -0.79f), back);
+                foreach (int sx in new[] { -1, 1 })
+                {
+                    Quaternion side = Rot(Vector3.UnitZ, sx * lean);
+                    float postX = sx * (w - (w - top) * 0.5f) * 0.5f;
+                    k.Box(new Vector3(0.03f, 0.4f, 0.34f), Paint.Glass, new Vector3(sx * 0.29f, baseY + 0.19f, -0.75f), side);
+                    k.Box(new Vector3(0.04f, 0.6f, 0.04f), Paint.Self, new Vector3(sx * 0.25f, baseY + 0.22f, -0.79f), back);
+                    k.Box(new Vector3(0.035f, 0.035f, 1.15f), Paint.Self, new Vector3(sx * top * 0.42f, baseY + hh, -0.02f));
+                    k.Box(new Vector3(0.035f, 0.035f, 1.15f), Paint.Self, new Vector3(sx * (w * 0.5f - (w - top) * 0.5f * 0.6f), baseY + hh * 0.6f, -0.02f));
+                    k.Box(new Vector3(0.05f, 0.05f, ext.Z * 0.95f), Paint.Self, new Vector3(sx * 0.37f, baseY + 0.02f, 0));
+                    foreach (float z in new[] { -0.58f, -0.19f, 0.19f, 0.56f })
+                        k.Box(new Vector3(0.035f, hh * 1.04f, 0.035f), Paint.Self, new Vector3(postX, baseY + hh * 0.5f, z), side);
+                }
+
+                k.Box(new Vector3(0.5f, 0.04f, 0.04f), Paint.Self, new Vector3(0, baseY + 0.47f, -0.62f));
+                foreach (float z in new[] { -0.58f, -0.19f, 0.19f, 0.56f })
+                    k.Box(new Vector3(top + 0.02f, 0.035f, 0.035f), Paint.Self, new Vector3(0, baseY + hh, z));
+                k.Slab(new Vector3(w + 0.02f, hh + 0.02f, 0.42f), taper, 1f, Paint.Self, new Vector3(0, baseY + hh * 0.5f, 0.79f));
+                Coaming(k, baseY, -0.45f);
+                break;
+            }
+
             case BlockKind.Fairing when def.Id == "canopy_framed":
             {
                 // A narrow propeller-era canopy: a long glass bubble 80 cm wide, the windscreen at its front framed with a
                 // thick armored-glass panel in the middle and a bow over the pilot, sliding rails along the sill, and the
                 // armor plate behind the seat showing through.
                 float baseY = -ext.Y * 0.5f + 0.02f, w = 0.4f;
+                k.Box(new Vector3(w * 2f, 0.68f, ext.Z * 0.9f), Paint.Glass, new Vector3(0, baseY - 0.04f + 0.34f, ext.Z * 0.02f));
+                k.Lib("canopy_bubble");
                 k.Sphere(1f, Paint.Glass, new Vector3(0, baseY, -ext.Z * 0.06f), new Vector3(w, 0.66f, ext.Z * 0.4f));
                 k.Sphere(1f, Paint.Glass, new Vector3(0, baseY, ext.Z * 0.12f), new Vector3(w * 0.82f, 0.5f, ext.Z * 0.36f));
+                k.CoverLast(2);
                 Quaternion lean = Rot(Vector3.UnitX, -0.62f);
                 k.Box(new Vector3(0.3f, 0.46f, 0.035f), Paint.Glass, new Vector3(0, baseY + 0.25f, -ext.Z * 0.33f), lean);
                 foreach (int s in new[] { -1, 1 })

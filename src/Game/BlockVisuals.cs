@@ -412,6 +412,7 @@ public static class BlockVisuals
         Paint.Red => Paintwork.PlainPart("redtip", new Color(0.75f, 0.12f, 0.08f), 0.4f, 0.5f, Paintwork.Finish.Paint),
         Paint.Rubber => Paintwork.PlainPart("rubber", new Color(0.06f, 0.06f, 0.06f), 0f, 0.95f, Paintwork.Finish.Other),
         Paint.Glass => Material("glass", new Color(0.1f, 0.16f, 0.2f), 0.3f, 0.06f),
+        Paint.GlassTint => Material("glass_tint", new Color(0.17f, 0.13f, 0.06f), 0.75f, 0.05f),
         _ => Glow(new Color(p.GlowColor.X, p.GlowColor.Y, p.GlowColor.Z), p.GlowEnergy),
     };
 

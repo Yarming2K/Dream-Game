@@ -1062,6 +1062,24 @@ public static class BlockCatalog
         },
         new BlockDef
         {
+            Id = "canopy_stealth", Name = "Stealth Canopy (3×2×6)", Category = "Air", Kind = BlockKind.Fairing, Size = new Int3(3, 2, 6), DragFace = 0.25f, Stealthy = true,
+            Description = "A long, low dart of gold-smoked glass for the newest fighters: no frame over the pilot, and a coating that turns radar away, so it counts as stealth skin. Sits on top of the fuselage with the Pilot Seat in the row under its middle.",
+            MassKg = 95, Hp = 70, ArmorMm = 4, ColorR = 0.33f, ColorG = 0.34f, ColorB = 0.36f, Metallic = 0.5f, Roughness = 0.45f,
+        },
+        new BlockDef
+        {
+            Id = "canopy_tandem", Name = "Tandem Canopy (3×2×8)", Category = "Air", Kind = BlockKind.Fairing, Size = new Int3(3, 2, 8), DragFace = 0.3f,
+            Description = "A long one-piece bubble over two seats one behind the other, for a two-seater: the pilot in front, a weapons officer behind (a Gunner Seat). A hoop between them carries the canopy. Seats go in the row under it, a cell or two from each end.",
+            MassKg = 130, Hp = 90, ArmorMm = 3, ColorR = 0.62f, ColorG = 0.64f, ColorB = 0.62f, Metallic = 0.75f, Roughness = 0.35f,
+        },
+        new BlockDef
+        {
+            Id = "canopy_highback", Name = "Framed Canopy: high back (3×2×4)", Category = "Air", Kind = BlockKind.Fairing, Size = new Int3(3, 2, 4), DragFace = 0.4f,
+            Description = "A hood of flat, framed panes with a solid metal back, the fuselage's spine running on behind it: the canopy of the early-war fighters, and of many Cold War jets. Sits on the fuselage with the Pilot Seat under its front half; build the spine on from its back.",
+            MassKg = 65, Hp = 60, ArmorMm = 8, ColorR = 0.62f, ColorG = 0.64f, ColorB = 0.62f, Metallic = 0.75f, Roughness = 0.35f,
+        },
+        new BlockDef
+        {
             Id = "canopy_framed", Name = "Framed Canopy (3×2×5)", Category = "Air", Kind = BlockKind.Fairing, Size = new Int3(3, 2, 5), DragFace = 0.35f,
             Description = "A propeller-era or early-jet canopy, 80 cm wide and two and a half metres long: a framed windscreen with a thick armored-glass panel in the middle, and a sliding bubble behind it. Sits on top of the fuselage with the Pilot Seat in the row under its front half.",
             MassKg = 70, Hp = 60, ArmorMm = 6, ColorR = 0.62f, ColorG = 0.64f, ColorB = 0.62f, Metallic = 0.75f, Roughness = 0.35f,

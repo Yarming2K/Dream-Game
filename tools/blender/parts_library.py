@@ -324,6 +324,62 @@ def ogive():
     ob = new_obj("ogive", lathe(prof, 64))
     return finish(ob, 0.0)
 
+def loft(stations, n=28, roundness=2.0):
+    """
+    A canopy-like shell from cross-sections, front (+Y) to back: each (y, half width, height) is the upper half of a
+    superellipse standing on z = 0 (2 is an ellipse; more is fuller in the shoulders), closed flat underneath.
+    """
+    bm = bmesh.new()
+    rings = []
+    for y, w, h in stations:
+        ring = []
+        for j in range(n + 1):
+            th = math.pi * j / n
+            c, s = math.cos(th), math.sin(th)
+            ring.append(bm.verts.new((max(w, 0.0005) * math.copysign(abs(c) ** (2 / roundness), c), y, max(h, 0.0005) * abs(s) ** (2 / roundness))))
+        rings.append(ring)
+    for a, b in zip(rings, rings[1:]):
+        for j in range(n):
+            bm.faces.new((a[j], b[j], b[j + 1], a[j + 1]))
+    bm.faces.new([r[0] for r in rings] + [r[n] for r in reversed(rings)])
+    bm.faces.new(rings[0])
+    bm.faces.new(rings[-1])
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    return bm
+
+def canopy_bubble():
+    # A one-piece blown canopy, 3 m long: a rounded front that rises quickly to its highest point a third of the
+    # way back (over the pilot's head), then a long smooth taper down onto the spine.
+    L, W, H, st = 3.0, 0.5, 0.85, []
+    for i in range(49):
+        t = (i / 48) ** 1.15
+        rise = math.sin(min(t / 0.34, 1.0) * math.pi / 2) ** 0.5
+        fall = math.cos(max(t - 0.34, 0.0) / 0.66 * math.pi / 2) ** 0.85
+        st.append((L / 2 - L * t, W * rise ** 0.75 * (0.42 + 0.58 * fall), H * rise * fall))
+    return finish(new_obj("canopy_bubble", loft(st, 32, 2.0)), 0.0)
+
+def canopy_tandem():
+    # A long blown canopy over two seats, 4 m long: a rounded front, a long high crown over both cockpits, and a
+    # short taper down onto the spine.
+    L, W, H, st = 4.0, 0.5, 0.86, []
+    for i in range(57):
+        t = i / 56
+        rise = math.sin(min(t / 0.22, 1.0) * math.pi / 2) ** 0.5
+        fall = math.cos(max(t - 0.68, 0.0) / 0.32 * math.pi / 2) ** 0.8
+        st.append((L / 2 - L * t, W * rise ** 0.75 * (0.5 + 0.5 * fall), H * rise * fall * (1 - 0.05 * math.sin(math.pi * min(max((t - 0.22) / 0.46, 0), 1)))))
+    return finish(new_obj("canopy_tandem", loft(st, 32, 2.0)), 0.0)
+
+def canopy_dart():
+    # A sleek, low canopy for the newest fighters, 3 m long: a sharp point at the front rising almost straight to its
+    # crown near the middle, a long fine taper behind, and slightly full shoulders, like a dart.
+    L, W, H, st = 3.0, 0.42, 0.6, []
+    for i in range(49):
+        t = i / 48
+        rise = min(t / 0.46, 1.0) ** 0.72
+        fall = math.cos(max(t - 0.46, 0.0) / 0.54 * math.pi / 2) ** 0.75
+        st.append((L / 2 - L * t, W * min(t / 0.34, 1.0) ** 0.6 * (0.3 + 0.7 * fall), H * rise * fall))
+    return finish(new_obj("canopy_dart", loft(st, 32, 2.4)), 0.0)
+
 def jet_nozzle():
     # A convergent nozzle: wide at the front (-Z), narrowing aft, made of overlapping petals, hollow.
     ob = new_obj("jet_nozzle", cylinder(0.19, 0.12, 32, r2=0.15))
@@ -386,7 +442,7 @@ def breech():
     return finish(ob, 0.006, 2, 35)
 
 PARTS = [tire, rim, hub, roadwheel, track_link, muzzle_brake, hatch, periscope, headlight, toolbox, smoke_tube, muffler, prop_blade,
-         jet_engine, jet_nozzle, rotor_blade, breech, ogive]
+         jet_engine, jet_nozzle, rotor_blade, breech, ogive, canopy_bubble, canopy_dart, canopy_tandem]
 made = [f() for f in PARTS]
 
 # Spread out for the preview only; reset before export.
