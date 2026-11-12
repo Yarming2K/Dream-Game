@@ -138,7 +138,13 @@ public partial class Combat
         // Find something to steer at.
         Vector3? aim = null;
         bool ownerOk = m.Owner != null && IsInstanceValid(m.Owner);
-        if (m.Stats.Seeker == SeekerKind.Optical && ownerOk) aim = m.Owner.GuidancePoint(m.ByPlayer);
+        if (m.Stats.Seeker is SeekerKind.Optical or SeekerKind.TopAttack && ownerOk)
+        {
+            aim = m.Owner.GuidancePoint(m.ByPlayer);
+            // It homes on what the crew can see: smoke between them and it blinds it, and it flies on straight.
+            if (aim.HasValue && WorldQuery.ThroughSmoke(m.Pos, aim.Value)) aim = null;
+            else if (aim.HasValue && m.Stats.Seeker == SeekerKind.TopAttack) aim = Aero.TopAttackAim(m.Pos.N(), aim.Value.N()).G();
+        }
         else if (m.Stats.Seeker == SeekerKind.Navigation && m.Goal.HasValue)
         {
             // Fired at a vehicle, its datalink keeps the target point on it as it moves.

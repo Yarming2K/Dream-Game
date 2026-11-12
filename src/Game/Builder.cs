@@ -1754,6 +1754,7 @@ public partial class Builder : Node3D
             string kind = !m.Valid ? "Not ready" : m.Stats.Seeker switch
             {
                 SeekerKind.Optical => "Optical: flies to your crosshair",
+                SeekerKind.TopAttack => "Top attack: dives onto your crosshair from above",
                 SeekerKind.Radar => "Radar: chases aircraft",
                 _ => "Unguided rocket",
             };

@@ -918,6 +918,8 @@ public partial class VehicleBody
     {
         SeekerKind.Radar => target.IsAir && !target.OnGround && d < (m.IsVls ? 6000f : 3000f),
         SeekerKind.Navigation => !target.IsAir && d > 400f && d < m.Stats.RangeM * 0.9f,
+        // Top attack is for armor on the ground, from far enough off to climb and dive.
+        SeekerKind.TopAttack => !target.IsAir && d > 250f && d < 2500f,
         _ => d < 1500f,
     };
 

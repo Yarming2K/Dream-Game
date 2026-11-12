@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Numerics;
 
 namespace DreamGame.Core;
 
@@ -27,6 +28,9 @@ public enum SeekerKind
 
     /// <summary>Flies itself to a spot on the ground picked when it's fired (cruise missiles).</summary>
     Navigation,
+
+    /// <summary>Like <see cref="Optical"/>, but it climbs on the way and dives onto the target from above, where armor is thinnest.</summary>
+    TopAttack,
 }
 
 /// <summary>A lifting surface: a wing panel or a control surface.</summary>
@@ -187,6 +191,20 @@ public static class Aero
     public const float BombDragK = 0.00005f;
 
     public static float DiskArea(float radius) => MathF.PI * radius * radius;
+
+    /// <summary>A top-attack missile dives once it's this close (horizontally) to its target, and climbs no higher than this above it.</summary>
+    public const float TopAttackDiveM = 120f, TopAttackCeilingM = 150f;
+
+    /// <summary>
+    /// Where a top-attack missile steers: well out, at a point high above the target (it climbs as it closes), then,
+    /// once within <see cref="TopAttackDiveM"/>, straight at the target, so it comes down on the roof.
+    /// </summary>
+    public static Vector3 TopAttackAim(Vector3 missile, Vector3 target)
+    {
+        float flat = new Vector2(target.X - missile.X, target.Z - missile.Z).Length();
+        if (flat <= TopAttackDiveM) return target;
+        return target + Vector3.UnitY * MathF.Min(flat * 0.6f, TopAttackCeilingM);
+    }
 
     /// <summary>Drag of the body per cell of its outline seen end-on (m², coefficient included), for a flat front and back.</summary>
     public static readonly float BodyDragPerCell = PanelArea * 0.35f;

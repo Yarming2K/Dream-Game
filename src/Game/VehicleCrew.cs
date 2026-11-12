@@ -100,6 +100,9 @@ public partial class VehicleBody
     private ICharacter _aiCharacterTarget;
     private float _aiRetarget;
     private float _aiOnTarget;
+
+    /// <summary>The AI's target is one the rest of its side spotted, not one its own crew can see.</summary>
+    private bool _aiIndirect;
     private Vector3 _aiOffset;
     private Vector3 _aiAim;
     private bool _aiHasAim;
@@ -368,7 +371,8 @@ public partial class VehicleBody
         _aiOnTarget += dt;
         float settle = commander ? 2.5f : 5f;
         float k = Mathf.Clamp(_aiOnTarget / settle, 0, 1);
-        float radius = Mathf.Lerp(commander ? 1.6f : 3f, 0.3f, k);
+        // Fire called in by someone else (indirect) lands much less tightly than at a target the crew can see.
+        float radius = Mathf.Lerp(commander ? 1.6f : 3f, 0.3f, k) * (_aiIndirect ? 4f : 1f);
         _aiAim = aim + _aiOffset * radius;
         _aiHasAim = true;
 
@@ -479,7 +483,11 @@ public partial class VehicleBody
         VehicleBody bestVehicle = null;
         ICharacter bestCharacter = null;
 
-        bool Visible(Vector3 point, IGridHost target) => WorldQuery.LineClear(this, eye, point, this, target);
+        // Its crew sees no further than its sight allows (night, fog and rain shorten it; radar doesn't care).
+        float sight = SightM;
+        bool Visible(Vector3 point, IGridHost target) => eye.DistanceTo(point) <= sight && WorldQuery.LineClear(this, eye, point, this, target);
+        // Mortars and rocket artillery can fire at what the rest of their side has spotted, out of their own sight.
+        bool indirect = Guns.Exists(g => g.Alive && (g.Info.BreechDef.Breech.HighArc || g.Info.BreechDef.Breech.Rocket));
 
         // Only vehicles in reach are considered (found through the world's grid, not by checking every
         // vehicle), nearest first, and only the first few get a line-of-sight check.
@@ -527,7 +535,9 @@ public partial class VehicleBody
             if (flak && v.IsAir && !v.OnGround)
             {
                 // Aircraft are for the flak guns, which reach much further.
-                if (bestAir == null && d < skyReach && airLooks++ < 4 && Visible(p, v)) bestAir = v;
+                // Aircraft stand out against the sky much further off than vehicles against the ground.
+                float skySight = Mathf.Max(sight, skyReach * (RadarAlive ? 1f : Atmosphere.SightFactor));
+                if (bestAir == null && d < Mathf.Min(skyReach, skySight) && airLooks++ < 4 && WorldQuery.LineClear(this, eye, p, this, v)) bestAir = v;
                 continue;
             }
 
@@ -536,6 +546,18 @@ public partial class VehicleBody
             best = d;
             bestVehicle = v;
         }
+
+        // Nothing in sight: an artillery crew takes the nearest enemy someone else has spotted.
+        _aiIndirect = false;
+        if (bestVehicle == null && indirect && !returnOnly)
+            foreach ((float d, VehicleBody v, Vector3 _) in _sorted)
+            {
+                if (d > reach || v.IsAir && !v.OnGround || !Spotting.IsSpotted(Faction, v)) continue;
+                best = d;
+                bestVehicle = v;
+                _aiIndirect = true;
+                break;
+            }
 
         if (bestAir != _aaTarget)
         {

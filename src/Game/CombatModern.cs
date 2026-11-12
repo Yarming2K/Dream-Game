@@ -36,6 +36,8 @@ public partial class Combat
     /// </summary>
     public Vector3 FireBeam(VehicleBody owner, Vector3 from, Vector3 dir, float rangeM, float damage, bool byPlayer)
     {
+        // Fog and rain scatter the beam: it keeps its full strength over a shorter distance.
+        rangeM *= Atmosphere.BeamFactor;
         float maxLen = Mathf.Max(rangeM * 3f, 50f);
         float stop = maxLen;
         Vector3 normal = -dir;
@@ -44,6 +46,14 @@ public partial class Combat
         {
             stop = from.DistanceTo(gp);
             normal = gn;
+        }
+
+        // A smoke screen soaks it up: nothing beyond is burned.
+        float smoke = WorldQuery.SmokeAlong(from, dir, stop);
+        if (smoke >= 0 && smoke < stop)
+        {
+            stop = smoke;
+            ground = false;
         }
 
         if (from.Y > Ocean.Level && dir.Y < -1e-3f)

@@ -183,4 +183,29 @@ public class AeroTests
     {
         Assert.True(A(ExampleDesigns.Lancer()).Air.TopSpeedMs > A(ExampleDesigns.Falcon()).Air.TopSpeedMs * 1.2f);
     }
+
+    [Fact]
+    public void NightFogAndRainShortenSightAndLasers()
+    {
+        Assert.Equal(1f, Sensors.Visibility(false, 0, 0));
+        Assert.True(Sensors.Visibility(true, 0, 0) < 0.5f);
+        Assert.True(Sensors.Visibility(false, 1, 0) < Sensors.Visibility(false, 0, 1));
+        Assert.True(Sensors.Visibility(true, 1, 1) >= 0.15f);
+        // Lasers don't mind the dark, but fog and rain scatter them.
+        Assert.Equal(1f, Sensors.BeamReach(0, 0));
+        Assert.True(Sensors.BeamReach(1, 0) < 0.5f && Sensors.BeamReach(0, 1) < 1f);
+    }
+
+    [Fact]
+    public void ATopAttackMissileClimbsThenDives()
+    {
+        var target = new System.Numerics.Vector3(0, 0, 0);
+        // Far out it steers for a point high above the target; close in, straight at it.
+        System.Numerics.Vector3 far = Aero.TopAttackAim(new System.Numerics.Vector3(0, 2, 800), target);
+        Assert.Equal(Aero.TopAttackCeilingM, far.Y, 1);
+        System.Numerics.Vector3 mid = Aero.TopAttackAim(new System.Numerics.Vector3(0, 60, 150), target);
+        Assert.InRange(mid.Y, 1f, Aero.TopAttackCeilingM);
+        Assert.Equal(target, Aero.TopAttackAim(new System.Numerics.Vector3(0, 100, 80), target));
+        Assert.Equal(SeekerKind.TopAttack, BlockCatalog.Get("seeker_top").Seeker);
+    }
 }

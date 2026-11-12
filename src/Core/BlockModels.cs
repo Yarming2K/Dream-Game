@@ -940,6 +940,14 @@ public static class BlockModels
                 k.Cyl(0.13f, 0.3f, Paint.Self, new Vector3(0, 0, 0.1f), AlongZ, sides: 24);
                 k.Sphere(0.12f, Paint.Glass, new Vector3(0, 0, -0.07f));
                 k.Cyl(0.132f, 0.02f, Paint.Steel, new Vector3(0, 0, -0.05f), AlongZ, sides: 24);
+                // The top-attack seeker's mark: a red band, and small canard fins for the climb and dive.
+                if (def.Seeker == SeekerKind.TopAttack)
+                {
+                    k.Cyl(0.134f, 0.03f, Paint.Red, new Vector3(0, 0, 0.04f), AlongZ, sides: 24);
+                    k.Box(new Vector3(0.36f, 0.015f, 0.06f), Paint.Dark, new Vector3(0, 0, 0.14f));
+                    k.Box(new Vector3(0.015f, 0.36f, 0.06f), Paint.Dark, new Vector3(0, 0, 0.14f));
+                }
+
                 break;
 
             case BlockKind.MissileWarhead:

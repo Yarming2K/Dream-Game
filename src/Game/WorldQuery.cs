@@ -224,6 +224,24 @@ public static class WorldQuery
     public static void AddSmoke(Vector3 center, float radius, float lifeS) =>
         Smoke.Add(new SmokeCloud(center, radius, Time.GetTicksMsec() / 1000.0 + lifeS));
 
+    /// <summary>How far along a line the first smoke screen starts (-1: none).</summary>
+    public static float SmokeAlong(Vector3 from, Vector3 dir, float len)
+    {
+        if (Smoke.Count == 0) return -1f;
+        float best = -1f;
+        foreach (SmokeCloud s in Smoke)
+        {
+            float t = (s.Center - from).Dot(dir);
+            if (t < 0 || t > len + s.Radius) continue;
+            float d2 = (from + dir * t).DistanceSquaredTo(s.Center), r2 = s.Radius * s.Radius;
+            if (d2 >= r2) continue;
+            float enter = Mathf.Max(0f, t - Mathf.Sqrt(r2 - d2));
+            if (best < 0 || enter < best) best = enter;
+        }
+
+        return best;
+    }
+
     /// <summary>Does a line of sight pass through a smoke screen?</summary>
     public static bool ThroughSmoke(Vector3 from, Vector3 to)
     {

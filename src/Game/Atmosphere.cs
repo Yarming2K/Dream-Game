@@ -22,6 +22,10 @@ public partial class Atmosphere : Node3D
 
     /// <summary>How wet everything is (0 dry to 1 soaked), for game code; the shaders read their own copy.</summary>
     public static float Wetness { get; private set; }
+
+    /// <summary>How far eyes see now, and how far a laser keeps its strength, as shares of a clear day (see <see cref="DreamGame.Core.Sensors"/>).</summary>
+    public static float SightFactor { get; private set; } = 1f;
+    public static float BeamFactor { get; private set; } = 1f;
     public Color FogColor { get; private set; } = new(0.66f, 0.7f, 0.73f);
 
     private Godot.Environment _env;
@@ -217,6 +221,9 @@ void sky() {
 
     private void Apply(Look l)
     {
+        float fog = Conditions == Weather.Fog ? 1f : 0f, rain = Conditions == Weather.Rain ? 1f : 0f;
+        SightFactor = DreamGame.Core.Sensors.Visibility(Hour == Time.Night, fog, rain);
+        BeamFactor = DreamGame.Core.Sensors.BeamReach(fog, rain);
         float el = Mathf.DegToRad(l.Elevation), az = Mathf.DegToRad(l.Azimuth);
         _sun.Rotation = new Vector3(-el, az, 0);
         _sun.LightColor = l.SunColor;

@@ -1141,6 +1141,7 @@ public partial class TestRange : Node3D
             string how = next?.Stats.Seeker switch
             {
                 SeekerKind.Optical => "keep the crosshair on the target",
+                SeekerKind.TopAttack => "keep the crosshair on the target: it climbs, then dives onto the roof",
                 SeekerKind.Radar => _lock != null ? $"locked on {_lock.DisplayName}" : "no lock: it will look for one",
                 SeekerKind.Navigation => "cruise missile: it flies itself to where you aimed",
                 _ => "unguided",

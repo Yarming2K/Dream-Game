@@ -27,6 +27,9 @@ public partial class VehicleBody
 
     private bool CrewAboard => Seats.Any(s => SeatAlive(s) && s.Occupant != Occupant.Empty);
 
+    /// <summary>Anyone aboard to look out (for spotting).</summary>
+    public bool CrewAboardAny => CrewAboard;
+
     /// <summary>A block was hit and survived: it may catch fire.</summary>
     public void HitBy(BlockInstance b, float damage)
     {

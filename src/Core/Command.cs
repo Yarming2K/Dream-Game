@@ -176,6 +176,17 @@ public static class Sensors
         return m;
     }
 
+    /// <summary>
+    /// How far eyes and optics reach in this light and weather, as a share of a clear day: night cuts it to 40%, fog
+    /// (0 to 1) by up to 65%, rain by up to 35%. Radar ignores all of it.
+    /// </summary>
+    public static float Visibility(bool night, float fog, float rain) =>
+        MathF.Max(0.15f, (night ? 0.4f : 1f) * (1f - 0.65f * Math.Clamp(fog, 0f, 1f)) * (1f - 0.35f * Math.Clamp(rain, 0f, 1f)));
+
+    /// <summary>A laser's full-strength range in this weather, as a share of a clear day: fog and rain scatter the beam (the dark doesn't).</summary>
+    public static float BeamReach(float fog, float rain) =>
+        MathF.Max(0.25f, (1f - 0.6f * Math.Clamp(fog, 0f, 1f)) * (1f - 0.3f * Math.Clamp(rain, 0f, 1f)));
+
     /// <summary>How far a command console's orders reach.</summary>
     public const float CommandRangeM = 4000f;
 }

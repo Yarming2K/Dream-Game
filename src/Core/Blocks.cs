@@ -1010,6 +1010,12 @@ public static class BlockCatalog
         },
         new BlockDef
         {
+            Id = "seeker_top", Name = "Top-Attack Seeker", Category = "Weapons", Kind = BlockKind.MissileSeeker, Seeker = SeekerKind.TopAttack,
+            Description = "Missile nose. Flies to your crosshair like the optical seeker, but climbs on the way and dives onto the target from above, where a tank's armor is thinnest. Needs a few hundred meters to climb; closer in it hits head-on. Smoke between it and the target blinds it.",
+            MassKg = 17, Hp = 20, ArmorMm = 2, HasCollider = false, Watertight = false, ColorR = 0.3f, ColorG = 0.32f, ColorB = 0.24f, Metallic = 0.5f, Roughness = 0.4f,
+        },
+        new BlockDef
+        {
             Id = "seeker_radar", Name = "Radar Seeker", Category = "Weapons", Kind = BlockKind.MissileSeeker, Seeker = SeekerKind.Radar,
             Description = "Missile nose. Locks on to the enemy aircraft nearest your crosshair and chases it on its own (fire and forget). Can't see ground targets.",
             MassKg = 18, Hp = 20, ArmorMm = 2, HasCollider = false, Watertight = false, ColorR = 0.85f, ColorG = 0.85f, ColorB = 0.8f, Metallic = 0.2f, Roughness = 0.6f,
