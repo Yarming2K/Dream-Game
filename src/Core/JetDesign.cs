@@ -21,6 +21,10 @@ public struct JetStats
     public float AfterburnerFuelMult;
 
     public bool Stock, Fan, RampIntake, VariableNozzle;
+
+    /// <summary>A swivelling nozzle: how far it turns the exhaust (degrees), and whether side to side as well as up and down.</summary>
+    public float VectorDeg;
+    public bool VectorYaw;
     public int Compressors, Turbines, TurbinesNeeded, Afterburners;
 
     /// <summary>Weight of all its parts (kg) and how many cells long it is.</summary>
@@ -159,6 +163,8 @@ public static class JetDesign
                 case BlockKind.JetNozzle:
                     nozzle = true;
                     s.VariableNozzle = d.HighSpeed;
+                    s.VectorDeg = d.VectorDeg;
+                    s.VectorYaw = d.VectorYaw;
                     break;
             }
         }

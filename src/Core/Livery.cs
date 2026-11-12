@@ -18,6 +18,13 @@ public enum LiveryPattern
 
     /// <summary>Bold slanted bands (dazzle, tiger stripes).</summary>
     Stripes,
+
+    /// <summary>
+    /// Aircraft countershading: soft patches of the first two colors on top and down the sides, and the third on
+    /// every surface that faces the ground (the belly and the undersides of the wings), so it's dark against the
+    /// ground seen from above and pale against the sky seen from below.
+    /// </summary>
+    Countershade,
 }
 
 /// <summary>A vehicle's paint job. Colors are 0-1 sRGB.</summary>
@@ -31,6 +38,11 @@ public sealed class Livery
 
     /// <summary>Roughly how big the pattern's patches are, in meters.</summary>
     public float Scale = 2.5f;
+
+    /// <summary>A bare-metal finish instead of paint: how metallic and how rough it is (below 0: ordinary paint).</summary>
+    public float Metal = -1f, Rough = -1f;
+
+    public bool IsBareMetal => Metal >= 0;
 
     public bool IsFactory => Pattern == LiveryPattern.Factory;
 }
@@ -126,6 +138,41 @@ public static class Liveries
             Id = "desert_digital", Name = "Desert digital", Pattern = LiveryPattern.Digital, Base = C(0.74f, 0.66f, 0.5f), Second = C(0.6f, 0.5f, 0.36f),
             Third = C(0.5f, 0.43f, 0.32f), Scale = 2f, Description = "Sand and tans in small squares: modern army camouflage for deserts.",
         },
+        new()
+        {
+            Id = "olive_grey", Name = "Olive drab over grey", Pattern = LiveryPattern.Countershade, Base = C(0.3f, 0.31f, 0.2f), Second = C(0.27f, 0.28f, 0.18f),
+            Third = C(0.56f, 0.57f, 0.56f), Scale = 3.5f,
+            Description = "Second World War aircraft: flat olive drab on top and down the sides, neutral grey underneath.",
+        },
+        new()
+        {
+            Id = "temperate", Name = "Green and earth over sky", Pattern = LiveryPattern.Countershade, Base = C(0.26f, 0.3f, 0.19f), Second = C(0.4f, 0.32f, 0.21f),
+            Third = C(0.67f, 0.7f, 0.6f), Scale = 3.5f,
+            Description = "Second World War fighters: big patches of dark green and dark earth on top, a pale duck-egg green underneath.",
+        },
+        new()
+        {
+            Id = "grey_mottle", Name = "Grey mottle over blue", Pattern = LiveryPattern.Countershade, Base = C(0.4f, 0.42f, 0.43f), Second = C(0.3f, 0.33f, 0.31f),
+            Third = C(0.62f, 0.69f, 0.75f), Scale = 2.2f,
+            Description = "Second World War fighters: two greys in soft patches on top, light blue underneath.",
+        },
+        new()
+        {
+            Id = "natural_metal", Name = "Natural metal", Pattern = LiveryPattern.Plain, Base = C(0.74f, 0.76f, 0.78f), Metal = 0.9f, Rough = 0.26f,
+            Description = "Bare polished aluminium, the shine of late-war propeller fighters and the first jets: lighter and faster without paint.",
+        },
+        new()
+        {
+            Id = "sea_camo", Name = "Jungle over white", Pattern = LiveryPattern.Countershade, Base = C(0.42f, 0.39f, 0.29f), Second = C(0.26f, 0.31f, 0.2f),
+            Third = C(0.8f, 0.8f, 0.77f), Scale = 3f,
+            Description = "Cold War jets over jungle: tan and green on top, off-white underneath.",
+        },
+        new()
+        {
+            Id = "prototype", Name = "Prototype", Pattern = LiveryPattern.Stripes, Base = C(0.86f, 0.87f, 0.88f), Second = C(0.15f, 0.16f, 0.18f),
+            Third = C(0.68f, 0.7f, 0.72f), Scale = 4f,
+            Description = "A test aircraft's paint: white and pale grey with bold black slashes, to show its shape and motion clearly on camera.",
+        },
     };
 
     public static Livery Get(string id)
@@ -172,10 +219,23 @@ public static class Liveries
         Noise(q) * 0.6f + Noise(q * 2.03f + new Vector3(17f, 3f, 9f)) * 0.3f + Noise(q * 4.07f + new Vector3(-7f, 11f, 5f)) * 0.1f;
 
     /// <summary>The paint job's color at a point on the vehicle (meters, in the vehicle's own frame).</summary>
+    /// <summary>
+    /// The color at a point on a surface facing <paramref name="normal"/>: as <see cref="ColorAt(Livery, Vector3)"/>, except that a
+    /// countershaded paint job turns pale on surfaces that face the ground.
+    /// </summary>
+    public static Vector3 ColorAt(Livery l, Vector3 p, Vector3 normal) =>
+        l.Pattern == LiveryPattern.Countershade && normal.Y < -CountershadeBelow ? l.Third : ColorAt(l, p);
+
+    /// <summary>A countershaded paint job's pale underside begins where the surface faces at least this far down (−normal.Y).</summary>
+    public const float CountershadeBelow = 0.3f;
+
     public static Vector3 ColorAt(Livery l, Vector3 p)
     {
         switch (l.Pattern)
         {
+            case LiveryPattern.Countershade:
+                // The top: soft patches of two colors (or one, where they're the same).
+                return Fbm(p / l.Scale) >= 0.55f ? l.Second : l.Base;
             case LiveryPattern.Plain:
             case LiveryPattern.Factory:
                 return l.Base;

@@ -332,6 +332,19 @@ public sealed class BlockDef
     /// </summary>
     public int MirrorAxis;
 
+    /// <summary>Air propellers: how far the blades reach from the hub (meters; 0 for the usual <see cref="Aero.PropRadiusM"/>).</summary>
+    public float BladeRadiusM;
+
+    /// <summary>
+    /// Jet nozzles: how far the nozzle can swivel to steer the plane with its exhaust (thrust vectoring, degrees;
+    /// 0 for a fixed nozzle), and whether it swivels side to side as well as up and down.
+    /// </summary>
+    public float VectorDeg;
+    public bool VectorYaw;
+
+    /// <summary>Radar-absorbent skin: an aircraft covered in it is spotted from much closer (see <see cref="Stealth"/>).</summary>
+    public bool Stealthy;
+
     public float ColorR, ColorG, ColorB;
     public float Metallic = 0.6f;
     public float Roughness = 0.6f;
@@ -989,6 +1002,12 @@ public static class BlockCatalog
         },
         new BlockDef
         {
+            Id = "airframe_stealth", Name = "Stealth Skin", Category = "Air", Kind = BlockKind.Armor, Stealthy = true,
+            Description = "Airframe skin of radar-absorbent composite, flat and dark. An aircraft skinned all over in it, with its missiles and bombs carried inside, is spotted by radar and watching eyes from much closer, down to about a third of the usual range; every missile, bomb or bare panel left hanging in the air gives some of that back. A little heavier than plain airframe, and no tougher. Comes in all the shapes: flat facets and sharp chines are the stealth look.",
+            MassKg = 13, Hp = 45, ArmorMm = 4, ColorR = 0.31f, ColorG = 0.32f, ColorB = 0.34f, Metallic = 0.2f, Roughness = 0.75f,
+        },
+        new BlockDef
+        {
             Id = "wing", Name = "Wing Panel", Category = "Air", Kind = BlockKind.Wing,
             Description = "Makes lift when air flows over it edge-on. Lay panels flat in rows for wings, stand them up (G) for a tail fin. More panels lift more, but the plane still needs speed: it stalls if it's too slow or pitched up too far.",
             MassKg = 5, Hp = 40, ArmorMm = 3, Watertight = false, ColorR = 0.55f, ColorG = 0.58f, ColorB = 0.52f, Metallic = 0.6f, Roughness = 0.45f,
@@ -1004,6 +1023,24 @@ public static class BlockCatalog
             Id = "wing_swept", Name = "Wing Panel: swept edge", Category = "Air", Kind = BlockKind.Wing, LiftArea = 0.5f, MirrorAxis = 1,
             Description = "A wing panel cut corner to corner. Put them along a wing's front edge for a straight swept edge instead of a staircase, at the tip for a raked wingtip, or stood up (G) on a fin. Half the area of a full panel, so half the lift. Turn it (R) until the cut faces forward.",
             MassKg = 3, Hp = 25, ArmorMm = 3, Watertight = false, ColorR = 0.55f, ColorG = 0.58f, ColorB = 0.52f, Metallic = 0.6f, Roughness = 0.45f,
+        },
+        new BlockDef
+        {
+            Id = "wing_round", Name = "Wing Panel: round tip", Category = "Air", Kind = BlockKind.Wing, LiftArea = 0.785f, MirrorAxis = 1,
+            Description = "A wing panel with one corner rounded off in a quarter circle, for the round wingtips, tailplanes and fin tops of propeller-era aircraft. Turn it (R) until the round edge faces out and forward (or out and back for the trailing corner).",
+            MassKg = 4, Hp = 32, ArmorMm = 3, Watertight = false, ColorR = 0.55f, ColorG = 0.58f, ColorB = 0.52f, Metallic = 0.6f, Roughness = 0.45f,
+        },
+        new BlockDef
+        {
+            Id = "wing_taper", Name = "Wing Panel: long edge", Category = "Air", Kind = BlockKind.Wing, LiftArea = 0.75f, MirrorAxis = 1,
+            Description = "The wide half of a long swept edge, one cell across for every two along, with a Wing Panel: long edge tip in front of it. Run the pair along the wing for a gentle 27° sweep or taper (straight-winged and early swept-wing aircraft, and forward-swept wings), or along the body for the steep 63° edge of a delta wing. Three quarters of a panel's lift.",
+            MassKg = 4, Hp = 32, ArmorMm = 3, Watertight = false, ColorR = 0.55f, ColorG = 0.58f, ColorB = 0.52f, Metallic = 0.6f, Roughness = 0.45f,
+        },
+        new BlockDef
+        {
+            Id = "wing_taper_tip", Name = "Wing Panel: long edge tip", Category = "Air", Kind = BlockKind.Wing, LiftArea = 0.25f, MirrorAxis = 1,
+            Description = "The narrow half of a long swept edge: a thin sliver of panel that goes just ahead of a Wing Panel: long edge, where the edge starts.",
+            MassKg = 2, Hp = 15, ArmorMm = 3, Watertight = false, ColorR = 0.55f, ColorG = 0.58f, ColorB = 0.52f, Metallic = 0.6f, Roughness = 0.45f,
         },
         new BlockDef
         {
@@ -1025,6 +1062,18 @@ public static class BlockCatalog
         },
         new BlockDef
         {
+            Id = "canopy_framed", Name = "Framed Canopy (3×2×5)", Category = "Air", Kind = BlockKind.Fairing, Size = new Int3(3, 2, 5), DragFace = 0.35f,
+            Description = "A propeller-era or early-jet canopy, 80 cm wide and two and a half metres long: a framed windscreen with a thick armored-glass panel in the middle, and a sliding bubble behind it. Sits on top of the fuselage with the Pilot Seat in the row under its front half.",
+            MassKg = 70, Hp = 60, ArmorMm = 6, ColorR = 0.62f, ColorG = 0.64f, ColorB = 0.62f, Metallic = 0.75f, Roughness = 0.35f,
+        },
+        new BlockDef
+        {
+            Id = "bay_door", Name = "Weapons Bay Door", Category = "Air", Kind = BlockKind.Fairing, Stealthy = true,
+            Description = "A flush door of stealth skin for the belly of an aircraft, under missiles carried inside (a weapons bay). It snaps open while a missile beside it launches and closes again, so the missiles stay out of the air and off enemy radar until they're needed.",
+            MassKg = 9, Hp = 35, ArmorMm = 4, Watertight = false, ColorR = 0.31f, ColorG = 0.32f, ColorB = 0.34f, Metallic = 0.2f, Roughness = 0.75f,
+        },
+        new BlockDef
+        {
             Id = "landing_gear", Name = "Landing Gear", Category = "Air", Kind = BlockKind.Wheel, WheelRadiusM = 0.3f, Retracts = true,
             Description = "A wheel on a sprung strut that folds up into the aircraft once it's well off the ground, and comes back down below about 8 m for landing. Folded away, it adds no drag. Put it on the bottom row with nothing underneath, like any wheel.",
             MassKg = 70, Hp = 60, ArmorMm = 5, HasCollider = false, Watertight = false, Displacement = 0.4f,
@@ -1039,6 +1088,13 @@ public static class BlockCatalog
         },
         new BlockDef
         {
+            Id = "landing_gear_tail", Name = "Landing Gear: tail wheel", Category = "Air", Kind = BlockKind.SteerWheel, WheelRadiusM = 0.15f, Retracts = true,
+            Description = "A small steering wheel under the tail, for an aircraft that sits on two main wheels ahead of its center of mass and a tail wheel behind it, as propeller-era fighters did. Folds away in flight like Landing Gear.",
+            MassKg = 25, Hp = 40, ArmorMm = 4, HasCollider = false, Watertight = false, Displacement = 0.2f,
+            ColorR = 0.72f, ColorG = 0.73f, ColorB = 0.72f, Metallic = 0.4f, Roughness = 0.5f,
+        },
+        new BlockDef
+        {
             Id = "air_propeller", Name = "Air Propeller", Category = "Air", Kind = BlockKind.AirPropeller,
             Description = "Pulls the aircraft the way its arrow points, using engine power. Strong at low speed, weaker the faster you go. Its blades sweep 1.3 m around it, so leave room.",
             MassKg = 60, Hp = 60, ArmorMm = 5, HasCollider = false, Watertight = false,
@@ -1046,10 +1102,24 @@ public static class BlockCatalog
         },
         new BlockDef
         {
+            Id = "air_propeller_large", Name = "Air Propeller: four-blade (3.4 m)", Category = "Air", Kind = BlockKind.AirPropeller, BladeRadiusM = 1.7f,
+            Description = "A fighter's propeller: four broad blades 3.4 m across on a pointed spinner, the size the last and fastest propeller aircraft swung. The bigger disc pushes harder from the same engine power, above all at take-off and in a climb. Its blades sweep 1.7 m around it, so leave room (and long landing gear).",
+            MassKg = 130, Hp = 80, ArmorMm = 5, HasCollider = false, Watertight = false,
+            ColorR = 0.12f, ColorG = 0.12f, ColorB = 0.12f, Metallic = 0.4f, Roughness = 0.55f,
+        },
+        new BlockDef
+        {
             Id = "aero_engine", Name = "Aero Engine", Category = "Air", Kind = BlockKind.Engine,
             Description = "A light, powerful engine built for aircraft: 800 kW for half a tonne. Thirsty, and lightly protected.",
             MassKg = 520, Hp = 90, ArmorMm = 8, PowerKw = 800, Watertight = false,
             ColorR = 0.34f, ColorG = 0.33f, ColorB = 0.3f, Metallic = 0.75f, Roughness = 0.4f,
+        },
+        new BlockDef
+        {
+            Id = "aero_engine_radial", Name = "Radial Engine (3×3×2)", Category = "Air", Kind = BlockKind.Engine, Size = new Int3(3, 3, 2), DragFace = 0.45f,
+            Description = "A big air-cooled radial: eighteen cylinders in two rows inside a round cowling 1.4 m across, with cooling gills round the back. 1,500 kW for just under a tonne, and tough for an aero engine. Put a propeller in front of the middle of it. The cowling is the nose of the aircraft: build the fuselage on behind.",
+            MassKg = 950, Hp = 220, ArmorMm = 10, PowerKw = 1500, Watertight = false,
+            ColorR = 0.34f, ColorG = 0.33f, ColorB = 0.3f, Metallic = 0.6f, Roughness = 0.45f,
         },
         new BlockDef
         {
@@ -1085,6 +1155,22 @@ public static class BlockCatalog
             Id = "jet_nozzle_large", Name = "Variable Nozzle: full size", Category = "Air", Kind = BlockKind.JetNozzle,
             Description = "A Variable Nozzle a metre across, the size of a real fighter engine's: it works exactly the same, but its petals reach out past its own cell. For full-size jets, with the tail built round it and the cells beside it left clear.",
             MassKg = 130, Hp = 100, ArmorMm = 10, Watertight = false,
+            HighSpeed = true,
+            ColorR = 0.3f, ColorG = 0.3f, ColorB = 0.32f, Metallic = 0.85f, Roughness = 0.3f,
+        },
+        new BlockDef
+        {
+            Id = "jet_nozzle_vectoring", Name = "Vectoring Nozzle: full size", Category = "Air", Kind = BlockKind.JetNozzle, VectorDeg = 20f, VectorYaw = true,
+            Description = "A full-size Variable Nozzle on a swivel: it turns its exhaust up to 20° up, down and to the sides, so the engine itself helps the plane point its nose (thrust vectoring). That works even when it's too slow for its control surfaces to bite: tight turns and steep climbs at low speed. Heavier than a plain variable nozzle.",
+            MassKg = 190, Hp = 100, ArmorMm = 10, Watertight = false,
+            HighSpeed = true,
+            ColorR = 0.3f, ColorG = 0.3f, ColorB = 0.32f, Metallic = 0.85f, Roughness = 0.3f,
+        },
+        new BlockDef
+        {
+            Id = "jet_nozzle_2d", Name = "Flat Vectoring Nozzle: full size", Category = "Air", Kind = BlockKind.JetNozzle, VectorDeg = 20f, Stealthy = true,
+            Description = "A full-size nozzle with a flat, wide mouth and flaps above and below that swing the exhaust up to 20° up or down (thrust vectoring for pitch). The flat shape hides the hot engine from behind, so it counts as stealth skin. Works like a Variable Nozzle for the afterburner.",
+            MassKg = 210, Hp = 100, ArmorMm = 10, Watertight = false,
             HighSpeed = true,
             ColorR = 0.3f, ColorG = 0.3f, ColorB = 0.32f, Metallic = 0.85f, Roughness = 0.3f,
         },
@@ -1585,6 +1671,20 @@ public static class BlockCatalog
         },
         new BlockDef
         {
+            Id = "exhaust_stacks", Name = "Exhaust Stacks", Category = "Details", Kind = BlockKind.Detail,
+            Description = "A row of six short exhaust pipes swept back, for the side of a piston engine's cowling, where a propeller fighter's engine breathes out.",
+            MassKg = 5, Hp = 20, ArmorMm = 3, HasCollider = false, Watertight = false, Displacement = 0f,
+            ColorR = 0.2f, ColorG = 0.17f, ColorB = 0.15f, Metallic = 0.7f, Roughness = 0.6f,
+        },
+        new BlockDef
+        {
+            Id = "formation_light", Name = "Formation Light Strip", Category = "Details", Kind = BlockKind.Detail,
+            Description = "A thin strip of soft green light set into the skin, so a wingman can keep station at night. Lay them along the fuselage, the wingtips and the fins.",
+            MassKg = 1, Hp = 10, ArmorMm = 2, HasCollider = false, Watertight = false, Displacement = 0f,
+            ColorR = 0.3f, ColorG = 0.32f, ColorB = 0.3f, Metallic = 0.4f, Roughness = 0.5f,
+        },
+        new BlockDef
+        {
             Id = "railing", Name = "Railing", Category = "Details", Kind = BlockKind.Detail,
             Description = "A guard rail along the back edge of the cell: decks, walkways, roofs. It keeps people from walking off the edge.",
             MassKg = 8, Hp = 25, ArmorMm = 3, HasCollider = true, Watertight = false, Displacement = 0f,
@@ -1656,7 +1756,7 @@ public static class BlockCatalog
         (BlockShape.Half, "half"), (BlockShape.Plate, "plate"), (BlockShape.Octagon, "octagon"),
     };
 
-    private static readonly string[] ShapedBases = { "armor_light", "armor_heavy", "armor_composite", "glazing", "airframe", "concrete", "brick", "timber", "roof_tile", "earth", "corrugated" };
+    private static readonly string[] ShapedBases = { "armor_light", "armor_heavy", "armor_composite", "glazing", "airframe", "airframe_stealth", "concrete", "brick", "timber", "roof_tile", "earth", "corrugated" };
 
     // After the lists above: static fields are set up in the order they're written.
     private static readonly Dictionary<string, BlockDef> ById = BuildIndex();
@@ -1698,7 +1798,7 @@ public static class BlockCatalog
                     Id = vid, Name = $"{b.Name}: {Shapes.NameOf(shape).ToLowerInvariant()}", Category = b.Category, Kind = b.Kind, Shape = shape,
                     BaseId = id, Glass = b.Glass, Description = $"{b.Description.Split('.')[0]}, shaped. {ShapeHint(shape)}",
                     MassKg = MathF.Round(b.MassKg * vol * 1.05f), Hp = MathF.Round(b.Hp * MathF.Max(vol, 0.35f)), ArmorMm = b.ArmorMm,
-                    HeVulnerability = b.HeVulnerability, Watertight = b.Watertight, Unpainted = b.Unpainted,
+                    HeVulnerability = b.HeVulnerability, Watertight = b.Watertight, Unpainted = b.Unpainted, Stealthy = b.Stealthy,
                     ColorR = b.ColorR, ColorG = b.ColorG, ColorB = b.ColorB, Metallic = b.Metallic, Roughness = b.Roughness,
                 });
             }

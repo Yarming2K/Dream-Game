@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using DreamGame.Core;
 using Godot;
 
 namespace DreamGame.Game;
@@ -58,7 +59,8 @@ public static class Spotting
             {
                 if (h is not VehicleBody eye || eye.Faction == target.Faction || looked.Contains(eye.Faction) || !eye.CrewAboardAny) continue;
                 Vector3 ep = eye.GlobalPosition + Vector3.Up * 3f;
-                if (ep.DistanceTo(tp) > eye.SightM || rays++ >= 6) continue;
+                // (A stealthy aircraft is seen from much closer; see Stealth.)
+                if (ep.DistanceTo(tp) > Stealth.SpotRangeM(eye.SightM, target.Analysis.Signature) || rays++ >= 6) continue;
                 if (WorldQuery.ThroughSmoke(ep, tp) || WorldQuery.GroundRay(null, ep, tp, out _, out _)) continue;
                 Seen[(eye.Faction, target)] = now;
                 looked.Add(eye.Faction);

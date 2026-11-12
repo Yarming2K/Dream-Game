@@ -13,6 +13,13 @@ public enum SurfaceRole
     Aileron,
     Elevator,
     Rudder,
+
+    /// <summary>
+    /// On a tailless aircraft (a delta or a flying wing, with no tailplane or canard to pitch it), the control surfaces
+    /// along the trailing edge do both jobs, mixed: they pitch by how far behind the center of mass they are and roll by
+    /// how far out.
+    /// </summary>
+    Elevon,
 }
 
 public enum SeekerKind
@@ -65,6 +72,9 @@ public sealed class ThrusterInfo
 
     /// <summary>A built jet whose intake has a block right in front of it.</summary>
     public bool IntakeBlocked;
+
+    /// <summary>Propellers, rotors and lift fans: how far the blades reach (meters).</summary>
+    public float BladeRadiusM;
 }
 
 /// <summary>A jet built from parts in a line through a Jet Core (see <see cref="JetDesign"/>).</summary>
@@ -136,6 +146,13 @@ public struct AirStats
     /// <summary>The most the elevators can pitch the wings up against the plane's own stability (degrees).</summary>
     public float MaxPitchDeg;
     public bool HasRoll, HasPitch, HasYaw;
+
+    /// <summary>
+    /// Thrust vectoring: the most turning force (N·m) the swivelling nozzles can put on the plane in pitch, with all
+    /// its jets at full dry push, and whether they swivel side to side (yaw) as well.
+    /// </summary>
+    public float VectorPitchNm;
+    public bool VectorYaw;
     public bool CanFly;
     public int Bombs;
 
@@ -156,6 +173,12 @@ public static class Aero
 
     /// <summary>How far control surfaces swing (radians).</summary>
     public const float ControlThrow = 0.35f;
+
+    /// <summary>
+    /// On an aircraft with no rudder, elevons split open as drag rudders: they turn it with this share of the force
+    /// they'd give as ailerons (drag is weaker than lift).
+    /// </summary>
+    public const float DragRudderShare = 0.35f;
 
     public const float PropRadiusM = 1.3f;
     public const float RotorRadiusM = 4.5f;
@@ -194,6 +217,14 @@ public static class Aero
     public const float BombDragK = 0.00005f;
 
     public static float DiskArea(float radius) => MathF.PI * radius * radius;
+
+    /// <summary>
+    /// Which way air runs across a lifting panel turned by <paramref name="orientation"/>: nose to tail for any panel
+    /// lying flat or standing upright along the aircraft (however it's turned: a cut-edge piece can lie with its own
+    /// axes any way round), and the panel's own forward axis only for one standing across the airflow.
+    /// </summary>
+    public static Int3 ChordOf(int orientation) =>
+        Orientations.Up(orientation).Z == 0 ? new Int3(0, 0, -1) : Orientations.Forward(orientation);
 
     /// <summary>A top-attack missile dives once it's this close (horizontally) to its target, and climbs no higher than this above it.</summary>
     public const float TopAttackDiveM = 120f, TopAttackCeilingM = 150f;

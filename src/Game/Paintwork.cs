@@ -52,6 +52,8 @@ global uniform float wetness;
 varying vec3 lpos;
 varying vec3 lnrm;
 varying vec3 ppos;
+// The surface's facing in the vehicle's frame (a part's own normal turned the way its block is turned).
+varying vec3 vnrm;
 
 uint hash3(ivec3 p) {
 	uint h = (uint(p.x) * 73856093u) ^ (uint(p.y) * 19349663u) ^ (uint(p.z) * 83492791u);
@@ -193,9 +195,16 @@ vec3 masonry_color(vec3 col, vec3 p, vec3 n, vec2 uv, float w) {
 	return col * (1.0 - 0.3 * band);
 }
 
-vec3 pattern_color(vec3 p) {
+vec3 pattern_color(vec3 p, vec3 nv) {
 	if (pattern <= 1) {
 		return color_a;
+	}
+	if (pattern == 5) {
+		// Countershading: pale on whatever faces the ground, soft patches of two colors elsewhere.
+		if (nv.y < -0.3) {
+			return color_c;
+		}
+		return fbm(p / pattern_scale) >= 0.55 ? color_b : color_a;
 	}
 	if (pattern == 4) {
 		float s = sin((p.x * 0.8 + p.z * 0.45 + p.y * 0.3) / pattern_scale * 3.14159265 + fbm(p / pattern_scale * 0.7) * 4.0);
@@ -227,6 +236,7 @@ void vertex() {
 	lpos = VERTEX;
 	lnrm = NORMAL;
 	ppos = per_part ? INSTANCE_CUSTOM.xyz + orient_basis(int(INSTANCE_CUSTOM.w + 0.5)) * VERTEX : VERTEX;
+	vnrm = per_part ? orient_basis(int(INSTANCE_CUSTOM.w + 0.5)) * NORMAL : NORMAL;
 }
 
 void fragment() {
@@ -249,7 +259,7 @@ void fragment() {
 		GLASS_ALPHA
 	} else {
 		vec3 p = per_part ? ppos : lpos;
-		col = pattern_color(p);
+		col = pattern_color(p, normalize(vnrm));
 		if (ship) {
 			if (p.y < waterline - boot_half) {
 				col = antifouling;
@@ -332,6 +342,7 @@ void fragment() {
         LiveryPattern.Blotches => 2,
         LiveryPattern.Digital => 3,
         LiveryPattern.Stripes => 4,
+        LiveryPattern.Countershade => 5,
         _ => 1,
     };
 
@@ -368,9 +379,10 @@ void fragment() {
         m.SetShaderParameter("color_c", C(l.Third));
         m.SetShaderParameter("pattern", PatternIndex(l));
         m.SetShaderParameter("pattern_scale", l.Scale);
-        // Paint is less shiny than bare metal.
-        m.SetShaderParameter("metal", Mathf.Min(def.Metallic, 0.45f));
-        m.SetShaderParameter("rough", Mathf.Max(def.Roughness, 0.55f));
+        // Paint is less shiny than bare metal; a bare-metal finish is the metal itself.
+        m.SetShaderParameter("metal", l.IsBareMetal ? l.Metal : Mathf.Min(def.Metallic, 0.45f));
+        m.SetShaderParameter("rough", l.IsBareMetal ? l.Rough : Mathf.Max(def.Roughness, 0.55f));
+        m.SetShaderParameter("finish", (int)(l.IsBareMetal ? Finish.Metal : Finish.Paint));
         m.SetShaderParameter("ship", waterline.HasValue);
         m.SetShaderParameter("waterline", waterline ?? 0f);
         m.SetShaderParameter("boot_half", Liveries.BootTopHalfM);
@@ -387,7 +399,7 @@ void fragment() {
             m.SetShaderParameter("use_shade", true);
             m.SetShaderParameter("panel_lines", def.Kind == BlockKind.Armor && MasonryOf(def) == 0 ? 1f : 0f);
             m.SetShaderParameter("masonry", MasonryOf(def));
-            m.SetShaderParameter("finish", (int)FinishOf(def));
+            m.SetShaderParameter("finish", (int)(l.IsBareMetal && FinishOf(def) == Finish.Paint ? Finish.Metal : FinishOf(def)));
             // The surface's corner shading averages a bit under 1, as with the plain materials.
             m.SetShaderParameter("darken", HullMesher.ShadeCompensation);
         });
@@ -458,7 +470,7 @@ void fragment() {
     {
         if (def.Glass) return new Color(def.ColorR, def.ColorG, def.ColorB);
         if (l == null || l.IsFactory) return own;
-        NVec c = waterline.HasValue ? Liveries.ShipColorAt(l, p, normal, waterline.Value, plating) : Liveries.ColorAt(l, p);
+        NVec c = waterline.HasValue ? Liveries.ShipColorAt(l, p, normal, waterline.Value, plating) : Liveries.ColorAt(l, p, normal);
         return new Color(c.X, c.Y, c.Z);
     }
 }

@@ -539,6 +539,7 @@ public partial class VehicleBody
                 // Aircraft are for the flak guns, which reach much further.
                 // Aircraft stand out against the sky much further off than vehicles against the ground.
                 float skySight = Mathf.Max(sight, skyReach * (RadarAlive ? 1f : Atmosphere.SightFactor));
+                skySight = Stealth.SpotRangeM(skySight, v.Analysis.Signature);
                 if (bestAir == null && d < Mathf.Min(skyReach, skySight) && airLooks++ < 4 && WorldQuery.LineClear(this, eye, p, this, v)) bestAir = v;
                 continue;
             }

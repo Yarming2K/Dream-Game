@@ -1681,6 +1681,8 @@ public partial class Builder : Node3D
                 chips.AddChild(Ui.Chip("Balance", s.StaticMarginM >= 0 ? "stable" : "nose-up", s.StaticMarginM >= 0 ? Ui.Good : Ui.Warn));
                 // Slopes and rounded blocks at the nose and tail let the air slide past: less drag, more speed.
                 chips.AddChild(Ui.Chip("Streamlined", $"{s.Streamlining * 100f:0}%", s.Streamlining >= 0.15f ? Ui.Good : s.Streamlining >= 0.05f ? Ui.Text : Ui.Warn));
+                // Swivelling nozzles steer with the engines' exhaust.
+                if (s.VectorPitchNm > 0) chips.AddChild(Ui.Chip("Thrust vectoring", s.VectorYaw ? "pitch & yaw" : "pitch", Ui.Accent));
                 break;
             case MobilityMode.Airship:
                 _dash.AddChild(Ui.Small("Gas cells hold it up; it vents or tops up gas to hold the height you order."));
@@ -1698,6 +1700,8 @@ public partial class Builder : Node3D
         }
 
         if (s.Bombs > 0) chips.AddChild(Ui.Chip("Bombs", $"{s.Bombs}", Ui.Accent));
+        // Stealth skin and weapons carried inside: spotted only from this share of the usual range.
+        if (a.Signature < 0.99f) chips.AddChild(Ui.Chip("Seen from", $"{a.Signature * 100f:0}% of the range", a.Signature < 0.6f ? Ui.Good : Ui.Text));
         if (a.Seats.Any(x => x.Remote)) chips.AddChild(Ui.Chip("Flown", "by remote", Ui.Info));
         _dash.AddChild(chips);
     }

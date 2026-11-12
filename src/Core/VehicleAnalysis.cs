@@ -193,6 +193,9 @@ public sealed class VehicleAnalysis
     public int GasCells;
     public AirStats Air;
 
+    /// <summary>How far off enemies spot it, as a share of the usual range (1; less for a stealthy aircraft, see <see cref="Stealth"/>).</summary>
+    public float Signature = 1f;
+
     public bool IsNaval => Mode is MobilityMode.Ship or MobilityMode.Submarine;
     public bool IsAir => Mode is MobilityMode.Plane or MobilityMode.Helicopter or MobilityMode.Hover or MobilityMode.Airship;
     public int Jets => Thrusters.Count(t => t.Kind == BlockKind.JetEngine);
@@ -262,6 +265,7 @@ public sealed class VehicleAnalysis
         a.ComputeMobility();
         a.ComputeNaval();
         a.ComputeAir();
+        a.Signature = Stealth.Signature(a);
         a.ComputeTurrets();
         a.ComputeArmor();
         a.AssignCrew();
@@ -974,10 +978,14 @@ public sealed class VehicleAnalysis
                     break;
                 case BlockKind.AirPropeller:
                 case BlockKind.LiftFan:
-                    Thrusters.Add(new ThrusterInfo { Cell = c, Kind = d.Kind, Orientation = o, Direction = Orientations.Forward(o) });
+                    Thrusters.Add(new ThrusterInfo
+                    {
+                        Cell = c, Kind = d.Kind, Orientation = o, Direction = Orientations.Forward(o),
+                        BladeRadiusM = d.Kind == BlockKind.LiftFan ? Aero.FanRadiusM : d.BladeRadiusM > 0 ? d.BladeRadiusM : Aero.PropRadiusM,
+                    });
                     break;
                 case BlockKind.Rotor:
-                    Thrusters.Add(new ThrusterInfo { Cell = c, Kind = d.Kind, Orientation = o, Direction = Orientations.Up(o) });
+                    Thrusters.Add(new ThrusterInfo { Cell = c, Kind = d.Kind, Orientation = o, Direction = Orientations.Up(o), BladeRadiusM = Aero.RotorRadiusM });
                     break;
                 case BlockKind.GasCell:
                     GasCells += d.Volume;
@@ -990,6 +998,14 @@ public sealed class VehicleAnalysis
 
         if (Thrusters.Count == 0 && GasCells == 0 && Surfaces.Count == 0) return;
 
+        // Tailless: when elevators far from the center of mass (a tailplane or canards) give less than half the pitch
+        // that all the flat control surfaces could, the trailing edge's surfaces work as elevons.
+        float PitchArm(SurfaceInfo s) => s.Area * MathF.Abs(s.Cell.Z * cs - CenterOfMass.Z);
+        var flatControls = Surfaces.Where(s => s.Control && Math.Abs(Orientations.Up(s.Orientation).Y) == 1).ToList();
+        if (flatControls.Count > 0 && flatControls.Where(s => s.Role == SurfaceRole.Elevator).Sum(PitchArm) < 0.5f * flatControls.Sum(PitchArm))
+            foreach (SurfaceInfo s in flatControls.Where(s => s.Cell.Z * cs > CenterOfMass.Z))
+                s.Role = SurfaceRole.Elevon;
+
         var air = new AirStats { GasLiftKg = gasLift, Bombs = BombRacks.Count };
         var flat = Surfaces.Where(s => Math.Abs(Orientations.Up(s.Orientation).Y) == 1).ToList();
         float flatShare = flat.Sum(s => s.Area);
@@ -997,13 +1013,14 @@ public sealed class VehicleAnalysis
         air.LiftCenterZ = flatShare > 0 ? flat.Sum(s => s.Cell.Z * cs * s.Area) / flatShare : CenterOfMass.Z;
         air.StaticMarginM = air.LiftCenterZ - CenterOfMass.Z;
         // Elevator authority against stability: how far it can hold the nose up.
-        float elevator = Surfaces.Where(s => s.Role == SurfaceRole.Elevator)
+        float elevator = Surfaces.Where(s => s.Role is SurfaceRole.Elevator or SurfaceRole.Elevon)
             .Sum(s => Aero.PanelArea * s.Area * Aero.LiftSlope * Aero.ControlThrow * MathF.Abs(s.Cell.Z * cs - CenterOfMass.Z));
         float stiffness = air.WingAreaM2 * Aero.LiftSlope * MathF.Max(air.StaticMarginM, 0.02f);
         air.MaxPitchDeg = stiffness > 0 ? MathF.Min(elevator / stiffness, 1f) * 180f / MathF.PI : 0;
-        air.HasRoll = Surfaces.Any(s => s.Role == SurfaceRole.Aileron);
-        air.HasPitch = Surfaces.Any(s => s.Role == SurfaceRole.Elevator);
-        air.HasYaw = Surfaces.Any(s => s.Role == SurfaceRole.Rudder);
+        air.HasRoll = Surfaces.Any(s => s.Role is SurfaceRole.Aileron or SurfaceRole.Elevon);
+        air.HasPitch = Surfaces.Any(s => s.Role is SurfaceRole.Elevator or SurfaceRole.Elevon);
+        // (A tailless aircraft with no rudder turns with its elevons split open as drag rudders.)
+        air.HasYaw = Surfaces.Any(s => s.Role is SurfaceRole.Rudder or SurfaceRole.Elevon);
         air.StallSpeedMs = Aero.StallSpeed(MassKg, air.WingAreaM2);
 
         // Engines share their power between everything they turn.
@@ -1019,10 +1036,29 @@ public sealed class VehicleAnalysis
         float fwdJets = fwdJetList.Sum(t => t.Jet.Thrust(1f, 0f, false));
         air.HoverThrustN = upJets + lifters.Sum(t =>
             Aero.RotorThrust(liftShare, Aero.DiskArea(t.Kind == BlockKind.Rotor ? Aero.RotorRadiusM : Aero.FanRadiusM)));
-        float diskProp = Aero.DiskArea(Aero.PropRadiusM);
-        // (Jets at full throttle, with their afterburners lit.)
-        float ThrustAt(float v) => fwdJetList.Sum(t => t.Jet.Thrust(1f, v, true)) + pushers.Count * Aero.PropThrust(pushShare, v, diskProp);
+        // (Jets at full throttle, with their afterburners lit. A bigger propeller's disc pushes harder on the same power.)
+        float ThrustAt(float v) => fwdJetList.Sum(t => t.Jet.Thrust(1f, v, true)) + pushers.Sum(t => Aero.PropThrust(pushShare, v, Aero.DiskArea(t.BladeRadiusM)));
         air.StaticThrustN = ThrustAt(0);
+
+        // Thrust vectoring: nozzles that swivel turn the engine's push into a turning force at the tail, which helps the
+        // elevators (and rudders) point the nose, and works however slow it flies.
+        foreach (ThrusterInfo t in fwdJetList.Where(t => t.Jet.VectorDeg > 0))
+        {
+            Int3 at = t.Built ? t.FlameCell : t.Cell;
+            float arm = MathF.Abs(at.Z * cs - CenterOfMass.Z);
+            air.VectorPitchNm += t.Jet.Thrust(1f, 0f, false) * MathF.Sin(t.Jet.VectorDeg * MathF.PI / 180f) * arm;
+            air.VectorYaw |= t.Jet.VectorYaw;
+        }
+
+        if (air.VectorPitchNm > 0)
+        {
+            // At take-off speed, the swivelling nozzles add to what the elevators can do against the plane's stability.
+            float vTo = 1.2f * air.StallSpeedMs, q = 0.5f * Aero.AirDensity * vTo * vTo;
+            air.MaxPitchDeg = stiffness > 0 && q > 0 ? MathF.Min((elevator * q + air.VectorPitchNm) / (stiffness * q), 1f) * 180f / MathF.PI : 0;
+            air.HasPitch = true;
+        }
+
+        air.HasYaw |= air.VectorYaw;
 
         // Drag of the body: what it shows end-on, not counting wing panels (they have their own). Each column of
         // cells along its length counts by the shape of its front and its back: flat faces in full, slopes and
@@ -1159,7 +1195,7 @@ public sealed class VehicleAnalysis
 
         foreach (ThrusterInfo th in Thrusters)
         {
-            float radius = th.Kind switch { BlockKind.Rotor => Aero.RotorRadiusM, BlockKind.AirPropeller => Aero.PropRadiusM, _ => 0 };
+            float radius = th.Kind is BlockKind.Rotor or BlockKind.AirPropeller ? th.BladeRadiusM : 0;
             int hits = radius > 0 ? BladeStrikes(th, radius) : 0;
             if (hits > 0)
                 Warnings.Add(new DesignWarning(Severity.Warning,

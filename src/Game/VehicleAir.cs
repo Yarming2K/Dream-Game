@@ -32,6 +32,13 @@ public partial class VehicleBody
         public Node3D Spinner, Flame, Petals;
         public Vector3 Local, Dir;
 
+        /// <summary>A swivelling nozzle: where its petals and flame sit at rest (block frame), its pitch and yaw axes in that frame, and how far behind the center of mass it is.</summary>
+        public Vector3 PetalsRest, FlameRest, PitchAxis, YawAxis;
+        public float Arm;
+
+        /// <summary>Push it gave last tick (N).</summary>
+        public float Push;
+
         /// <summary>A jet's figures now: a built jet's change as its parts are shot off.</summary>
         public JetStats Jet;
 
@@ -41,6 +48,7 @@ public partial class VehicleBody
         public float Output;
         public float Spin;
         public bool Afterburner;
+        public Quaternion NozzleTurn = Quaternion.Identity;
 
         /// <summary>The afterburner's flame coming in and dying away (0 to 1), not at once.</summary>
         public float BurnerLevel;
@@ -97,6 +105,14 @@ public partial class VehicleBody
     private bool _trimSet;
     private float _pitchTrim;
 
+    /// <summary>What the controls last asked of the swivelling nozzles (-1 to 1).</summary>
+    private float _nozzlePitch, _nozzleYaw;
+
+    /// <summary>Weapons bay doors, and until when they stay open (seconds of game time).</summary>
+    private readonly List<(BlockInstance block, Node3D door)> _bayDoors = new();
+    private double _bayOpenUntil;
+    private float _bayOpen;
+
     private void SetupAir()
     {
         FlightMode = Analysis.Mode;
@@ -106,7 +122,7 @@ public partial class VehicleBody
             Vector3 n = Orientations.Up(s.Orientation).G();
             AirSurfaces.Add(new SurfaceRt
             {
-                Info = s, Block = b, Local = Conv.CellPos(s.Cell), Normal = n, Chord = Orientations.Forward(s.Orientation).G(),
+                Info = s, Block = b, Local = Conv.CellPos(s.Cell), Normal = n, Chord = Aero.ChordOf(s.Orientation).G(),
                 Flap = View.VisualOf(b)?.GetNodeOrNull<Node3D>("Flap"),
                 MainWing = s.Role == SurfaceRole.Wing && Mathf.Abs(n.Y) > 0.9f,
             });
@@ -117,14 +133,32 @@ public partial class VehicleBody
             if (!Model.Blocks.TryGetValue(t.Cell, out BlockInstance b)) continue;
             // A built jet's flame comes out of its nozzle, at the back of the line.
             Node3D flameAt = View.VisualOf(t.Built && Model.Blocks.TryGetValue(t.FlameCell, out BlockInstance nozzle) ? nozzle : b);
-            AirThrusters.Add(new ThrusterRt
+            var rt = new ThrusterRt
             {
                 Info = t, Block = b, Local = Conv.CellPos(t.Cell), Dir = t.Direction.G(), Jet = t.Jet,
                 Spinner = View.VisualOf(b)?.GetNodeOrNull<Node3D>("Spinner"),
                 Flame = flameAt?.GetNodeOrNull<Node3D>("Flame"),
                 Petals = flameAt?.GetNodeOrNull<Node3D>("Petals"),
-            });
+            };
+            if (rt.Petals != null) rt.PetalsRest = rt.Petals.Position;
+            if (rt.Flame != null) rt.FlameRest = rt.Flame.Position;
+            if (t.Jet.VectorDeg > 0 && Model.Blocks.TryGetValue(t.Built ? t.FlameCell : t.Cell, out BlockInstance noz))
+            {
+                // The vehicle's right and up axes in the nozzle block's own frame, to swing it about.
+                int o = noz.Orientation;
+                static int Dot(Int3 a, Int3 b) => a.X * b.X + a.Y * b.Y + a.Z * b.Z;
+                Vector3 R(Int3 v) => new(Dot(v, Orientations.Right(o)), Dot(v, Orientations.Up(o)), -Dot(v, Orientations.Forward(o)));
+                rt.PitchAxis = R(Int3.Right);
+                rt.YawAxis = R(Int3.Up);
+            }
+
+            AirThrusters.Add(rt);
         }
+
+        // Weapons bay doors, which open while a missile beside them launches.
+        foreach (BlockInstance b in Model.Instances)
+            if (b.Def.Id == "bay_door" && View.VisualOf(b)?.GetNodeOrNull<Node3D>("Door") is { } door)
+                _bayDoors.Add((b, door));
 
         _hasAirParts = AirSurfaces.Count > 0 || AirThrusters.Count > 0 || Analysis.GasCells > 0;
         var side = new HashSet<(int, int)>();
@@ -184,12 +218,20 @@ public partial class VehicleBody
                 case SurfaceRole.Elevator: _authPitch += perQ * s.Info.Area * Mathf.Abs(r.Z); break;
                 case SurfaceRole.Aileron: _authRoll += perQ * s.Info.Area * Mathf.Abs(r.X); break;
                 case SurfaceRole.Rudder: _authYaw += perQ * s.Info.Area * Mathf.Abs(r.Z); break;
+                case SurfaceRole.Elevon:
+                    // (Mixed: part of its throw pitches, part rolls. With no rudder at all, they also split open top
+                    // and bottom on one side as drag rudders, like a flying wing's, to turn it.)
+                    _authPitch += perQ * s.Info.Area * Mathf.Abs(r.Z) * 0.7f;
+                    _authRoll += perQ * s.Info.Area * Mathf.Abs(r.X) * 0.7f;
+                    if (!Analysis.Surfaces.Any(x => x.Role == SurfaceRole.Rudder)) _authYaw += perQ * s.Info.Area * Mathf.Abs(r.X) * Aero.DragRudderShare;
+                    break;
             }
         }
 
         foreach (ThrusterRt t in AirThrusters)
         {
             t.Alive = Model.Blocks.TryGetValue(t.Info.Cell, out BlockInstance b) && b == t.Block && b.Alive;
+            t.Arm = Mathf.Abs(Conv.CellPos(t.Info.Built ? t.Info.FlameCell : t.Info.Cell).Z - com.Z);
             if (!t.Alive || !t.Info.Built) continue;
             // A built jet runs on whatever's left of its line, from the core out to the first part shot away:
             // lose a compressor stage and it's weaker, lose the intake or nozzle and it stops.
@@ -400,7 +442,6 @@ public partial class VehicleBody
         int props = pushers.Count(t => t.Info.Kind == BlockKind.AirPropeller);
         int jets = pushers.Count - props;
         float share = PowerShare(props);
-        float disk = Aero.DiskArea(Aero.PropRadiusM);
         bool burner = cmd >= Aero.AfterburnerThrottle && jets > 0;
         float jetFuel = 0;
         foreach (ThrusterRt t in pushers)
@@ -408,8 +449,9 @@ public partial class VehicleBody
             Vector3 dir = (basis * t.Dir).Normalized();
             bool jet = t.Info.Kind == BlockKind.JetEngine;
             float along = Mathf.Max(vel.Dot(dir), 0);
-            float thrust = jet ? JetPush(t, cmd, along, burner) : Aero.PropThrust(share * cmd, along, disk);
+            float thrust = jet ? JetPush(t, cmd, along, burner) : Aero.PropThrust(share * cmd, along, Aero.DiskArea(BladeRadius(t)));
             t.Output = cmd;
+            t.Push = thrust;
             t.Afterburner = jet && burner && t.Jet.HasAfterburner;
             if (jet) jetFuel += JetFuel(t, cmd, burner);
             ApplyForce(dir * thrust, xf * t.Local - xf.Origin);
@@ -425,6 +467,26 @@ public partial class VehicleBody
         BurnFuel(dt, cmd, jetFuel);
         Afterburning = burner;
         _soundLoad = burner ? 1.12f : cmd;
+    }
+
+    private static float BladeRadius(ThrusterRt t) => t.Info.BladeRadiusM > 0 ? t.Info.BladeRadiusM : Aero.PropRadiusM;
+
+    /// <summary>
+    /// Thrust vectoring: the turning force the swivelling nozzles can add in pitch and in yaw right now (N·m), from
+    /// what each one is pushing and how far behind the center of mass it is.
+    /// </summary>
+    private (float pitch, float yaw) VectorAuthority()
+    {
+        float pitch = 0, yaw = 0;
+        foreach (ThrusterRt t in AirThrusters)
+        {
+            if (!t.Alive || t.Jet.VectorDeg <= 0) continue;
+            float m = t.Push * Mathf.Sin(Mathf.DegToRad(t.Jet.VectorDeg)) * t.Arm;
+            pitch += m;
+            if (t.Jet.VectorYaw) yaw += m;
+        }
+
+        return (pitch, yaw);
     }
 
     /// <summary>Burns the engines' fuel at <paramref name="engineLoad"/>, plus what the jets use (litres a second).</summary>
@@ -497,14 +559,17 @@ public partial class VehicleBody
         float q = 0.5f * Aero.AirDensity * speed * speed;
         float wash = AirThrottle * 0.15f;
         Vector3 rates = BodyRates(basis);
-        Turn(right, pitchRate, rates.X, _inertia.X, q * _authPitch + _inertia.X * (0.05f + wash), 20f);
+        (float vecPitch, float vecYaw) = VectorAuthority();
+        Turn(right, pitchRate, rates.X, _inertia.X, q * _authPitch + vecPitch + _inertia.X * (0.05f + wash), 20f);
         if (!OnGround) Turn(fwd, rollRate, rates.Z, _inertia.Z, q * _authRoll + _inertia.Z * 0.05f, 20f);
-        Turn(up, yawRate, rates.Y, _inertia.Y, q * _authYaw + _inertia.Y * (0.05f + wash), 20f);
+        Turn(up, yawRate, rates.Y, _inertia.Y, q * _authYaw + vecYaw + _inertia.Y * (0.05f + wash), 20f);
 
         // Control surfaces swing to match (for looks).
         float pitchCmd = Mathf.Clamp((pitchRate - rates.X) * 2f, -1, 1);
         float rollCmd = Mathf.Clamp((rollRate - rates.Z) * 2f, -1, 1);
         float yawCmd = Mathf.Clamp((yawRate - rates.Y) * 2f, -1, 1);
+        _nozzlePitch = pitchCmd;
+        _nozzleYaw = yawCmd;
         foreach (SurfaceRt s in AirSurfaces)
         {
             Vector3 r = s.Local - CenterOfMass;
@@ -513,6 +578,7 @@ public partial class VehicleBody
                 SurfaceRole.Elevator => -pitchCmd * Mathf.Sign(r.Z),
                 SurfaceRole.Aileron => -rollCmd * Mathf.Sign(r.X),
                 SurfaceRole.Rudder => yawCmd * Mathf.Sign(r.Z),
+                SurfaceRole.Elevon => Mathf.Clamp(-pitchCmd * Mathf.Sign(r.Z) - rollCmd * Mathf.Sign(r.X), -1, 1),
                 _ => 0,
             } * Aero.ControlThrow;
         }
@@ -563,7 +629,7 @@ public partial class VehicleBody
             float cmd = canRun ? Mathf.Max(Throttle, 0) : 0;
             Vector3 dir = (basis * t.Dir).Normalized();
             float push = t.Info.Kind == BlockKind.JetEngine ? JetPush(t, cmd, Mathf.Max(vel.Dot(dir), 0), false)
-                : Aero.PropThrust(share * cmd, Mathf.Max(vel.Dot(dir), 0), Aero.DiskArea(Aero.PropRadiusM));
+                : Aero.PropThrust(share * cmd, Mathf.Max(vel.Dot(dir), 0), Aero.DiskArea(BladeRadius(t)));
             t.Output = cmd;
             ApplyCentralForce(dir * push);
         }
@@ -668,6 +734,15 @@ public partial class VehicleBody
 
     private void AnimateAir(float dt)
     {
+        if (_bayDoors.Count > 0)
+        {
+            // The bay doors snap open for a launch and close behind it.
+            bool open = Time.GetTicksMsec() / 1000.0 < _bayOpenUntil;
+            _bayOpen = Mathf.MoveToward(_bayOpen, open ? 1f : 0f, dt * 5f);
+            foreach ((BlockInstance b, Node3D door) in _bayDoors)
+                if (b.Alive && IsInstanceValid(door)) door.Rotation = new Vector3(0, 0, _bayOpen * 1.75f);
+        }
+
         foreach (ThrusterRt t in AirThrusters)
         {
             if (t.Flame != null && IsInstanceValid(t.Flame))
@@ -686,6 +761,22 @@ public partial class VehicleBody
                     Exhaust.Drive(t.Flame, o, b);
                     // A variable nozzle's petals open wide for the afterburner.
                     if (t.Petals != null && IsInstanceValid(t.Petals)) t.Petals.Scale = new Vector3(1f + 0.18f * b, 1f + 0.18f * b, 1f);
+                }
+
+                // A swivelling nozzle turns with the controls (down to lift the nose, aside to swing it), its flame with it.
+                if (t.Jet.VectorDeg > 0 && t.Petals != null && IsInstanceValid(t.Petals))
+                {
+                    float max = Mathf.DegToRad(t.Jet.VectorDeg);
+                    var turn = new Quaternion(t.PitchAxis.Normalized(), _nozzlePitch * max);
+                    if (t.Jet.VectorYaw) turn *= new Quaternion(t.YawAxis.Normalized(), -_nozzleYaw * max);
+                    t.NozzleTurn = t.NozzleTurn.Slerp(turn, Mathf.Clamp(dt * 6f, 0, 1));
+                    Vector3 sc = t.Petals.Scale;
+                    t.Petals.Quaternion = t.NozzleTurn;
+                    t.Petals.Scale = sc;
+                    Vector3 fs = t.Flame.Scale;
+                    t.Flame.Position = t.PetalsRest + t.NozzleTurn * (t.FlameRest - t.PetalsRest);
+                    t.Flame.Quaternion = t.NozzleTurn;
+                    t.Flame.Scale = fs;
                 }
             }
 
@@ -798,6 +889,7 @@ public partial class VehicleBody
         Vector3 dir = (sec.Basis * f).Normalized();
         Vector3 center = sec * (Conv.CellPos(m.Rail) + f * Conv.CS * (m.Parts.Count + 1) * 0.5f);
 
+        if (_bayDoors.Count > 0) _bayOpenUntil = Time.GetTicksMsec() / 1000.0 + 1.6;
         var visual = new Node3D { Name = "Missile" };
         for (int i = 0; i < m.Parts.Count; i++)
         {
@@ -899,7 +991,8 @@ public partial class VehicleBody
         {
             if (h is not VehicleBody v || v.Faction == faction || !v.IsAir || v.Model.Blocks.Count == 0 || v.OnGround) continue;
             Vector3 to = v.GlobalTransform * v.CenterOfMass - from;
-            if (to.Length() > range) continue;
+            // (A stealthy aircraft is only picked up from much closer.)
+            if (to.Length() > Stealth.SpotRangeM(range, v.Analysis.Signature)) continue;
             float a = look.AngleTo(to);
             if (a >= bestAngle) continue;
             bestAngle = a;

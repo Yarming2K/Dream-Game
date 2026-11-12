@@ -256,8 +256,30 @@ public static class BlockModels
         public void Slab(Vector3 size, float taperX, float taperZ, Paint p, Vector3 pos, Quaternion? rot = null) =>
             Add(Prim.Slab, size, taperX, p, At(pos, rot), detail2: taperZ);
 
-        public void Torus(float ring, float tube, Paint p, Vector3 pos, Quaternion? rot = null) =>
-            Add(Prim.Torus, new Vector3(ring, tube, 0), 0, p, At(pos, rot));
+        public void Torus(float ring, float tube, Paint p, Vector3 pos, Quaternion? rot = null, Vector3? scale = null) =>
+            Add(Prim.Torus, new Vector3(ring, tube, 0), 0, p, At(pos, rot, scale));
+
+        /// <summary>
+        /// A flat fan of thin wedges from <paramref name="center"/> out to an arc of radius <paramref name="r"/> in the XZ
+        /// plane, from angle <paramref name="a0"/> to <paramref name="a1"/> (radians from +X toward +Z), with a darker strip
+        /// along the arc: a rounded panel edge.
+        /// </summary>
+        public void Fan(Vector3 center, float r, float a0, float a1, int steps, float thick, Paint p, Paint edge)
+        {
+            float da = (a1 - a0) / steps;
+            for (int i = 0; i < steps; i++)
+            {
+                float am = a0 + (i + 0.5f) * da;
+                var dir = new Vector3(MathF.Cos(am), 0, MathF.Sin(am));
+                float h = r * MathF.Cos(da * 0.5f), w = 2f * r * MathF.Sin(da * 0.5f);
+                Vector3 y = -dir, z = Vector3.UnitY, x = Vector3.Cross(y, z);
+                var m = new Matrix4x4(x.X, x.Y, x.Z, 0, y.X, y.Y, y.Z, 0, z.X, z.Y, z.Z, 0, 0, 0, 0, 1);
+                Quaternion q = Quaternion.CreateFromRotationMatrix(m);
+                // Base on the arc, point at the center (a slab narrowed to nothing at its far end).
+                Slab(new Vector3(w * 1.04f, h, thick), 0f, 1f, p, center + dir * (h * 0.5f), q);
+                Box(new Vector3(w * 1.06f, 0.03f, thick * 1.08f), edge, center + dir * (h - 0.012f), q);
+            }
+        }
 
         public void Sphere(float r, Paint p, Vector3 pos, Vector3? scale = null) => Add(Prim.Sphere, new Vector3(r, 0, 0), 0, p, At(pos, null, scale));
 
@@ -692,6 +714,32 @@ public static class BlockModels
                 k.Cyl(0.13f, 0.02f, Paint.Dark, new Vector3(0, 0.05f, 0.26f), AlongZ, sides: 20);
                 break;
 
+            case BlockKind.Wing when def.Id == "wing_round":
+                // A quarter disc: the corner toward −X −Z rounded off round the +X +Z corner.
+                k.Fan(new Vector3(H, 0, H), Full, MathF.PI, MathF.PI * 1.5f, 6, 0.06f, Paint.Self, Paint.SelfDark);
+                break;
+
+            case BlockKind.Wing when def.Id is "wing_taper" or "wing_taper_tip":
+            {
+                // Half of a long cut, one cell across for every two along: the edge runs from the front of the +X side
+                // to the back of the −X side over two cells, the narrow tip in front and the wide part behind.
+                bool tip = def.Id == "wing_taper_tip";
+                if (tip)
+                {
+                    k.Triangle(new Vector3(H, 0.06f, Full), Paint.Self, new Vector3(H * 0.5f, 0, 0));
+                }
+                else
+                {
+                    k.Box(new Vector3(H, 0.06f, Full), Paint.Self, new Vector3(H * 0.5f, 0, 0));
+                    k.Triangle(new Vector3(H, 0.06f, Full), Paint.Self, new Vector3(-H * 0.5f, 0, 0));
+                }
+
+                float len = MathF.Sqrt(H * H + Full * Full);
+                Quaternion along = Rot(Vector3.UnitY, MathF.Atan2(-Full, -H));
+                k.Box(new Vector3(len * 1.02f, 0.065f, 0.03f), Paint.SelfDark, new Vector3(tip ? H * 0.5f : -H * 0.5f, 0, 0) + new Vector3(-0.011f, 0, -0.005f), along);
+                break;
+            }
+
             case BlockKind.Wing when def.LiftArea < 1f:
             {
                 // Half a panel, cut corner to corner, with a darker leading edge along the cut.
@@ -708,6 +756,20 @@ public static class BlockModels
             case BlockKind.ShipFitting:
                 ShipFitting(k, def);
                 break;
+
+            case BlockKind.Fairing when def.Id == "bay_door":
+            {
+                // A flush door in the belly skin, hinged along its +X edge ("Door" swings it open), with a sawtooth
+                // seam round it (straight seams show up on radar).
+                k.Box(new Vector3(Full, 0.025f, 0.03f), Paint.SelfDark, new Vector3(0, -H + 0.012f, -H + 0.015f));
+                k.Box(new Vector3(Full, 0.025f, 0.03f), Paint.SelfDark, new Vector3(0, -H + 0.012f, H - 0.015f));
+                k.Node = k.AddNode("Door", new Vector3(H - 0.01f, -H + 0.02f, 0));
+                k.Box(new Vector3(Full * 0.97f, 0.035f, Full * 0.9f), Paint.Self, new Vector3(-H + 0.01f, 0, 0));
+                for (int i = 0; i < 3; i++)
+                    k.Triangle(new Vector3(0.08f, 0.04f, 0.08f), Paint.SelfDark, new Vector3(-Full + 0.07f, -0.002f, -0.16f + i * 0.16f), Rot(Vector3.UnitY, MathF.PI * 0.25f));
+                k.Node = -1;
+                break;
+            }
 
             case BlockKind.Fairing:
                 // A nose cone: a pointed ogive from a round base that fills the back face, and a seam ring at the base.
@@ -733,19 +795,32 @@ public static class BlockModels
 
             case BlockKind.AirPropeller:
             {
+                // A big fighter's propeller has broad paddle blades on a long pointed spinner; the small one a short cap.
+                float rr = def.BladeRadiusM > 0 ? def.BladeRadiusM : Aero.PropRadiusM;
+                bool big = rr > Aero.PropRadiusM + 0.1f;
+                float wide = big ? 1.55f : 1f;
                 k.Cyl(0.13f, 0.26f, Paint.Dark, new Vector3(0, 0, 0.08f), AlongZ, sides: 16);
                 k.Node = k.AddNode("Spinner", new Vector3(0, 0, -0.14f));
-                k.Cyl(0.14f, 0.2f, Paint.Self, new Vector3(0, 0, -0.1f), NoseZ, 0.02f, 20);
+                if (big)
+                {
+                    k.Ogive(0.26f, 0.62f, Paint.Self, new Vector3(0, 0, 0.36f), 8, 28);
+                    k.Cyl(0.265f, 0.04f, Paint.SelfDark, new Vector3(0, 0, 0.34f), AlongZ, sides: 28);
+                }
+                else
+                {
+                    k.Cyl(0.14f, 0.2f, Paint.Self, new Vector3(0, 0, -0.1f), NoseZ, 0.02f, 20);
+                }
+
                 for (int i = 0; i < 4; i++)
                 {
                     Quaternion q = Rot(Vector3.UnitZ, i * MathF.PI / 2);
-                    float rr = Aero.PropRadiusM;
                     // One whole twisted blade from the library, in place of the two halves.
-                    k.Slab(new Vector3(0.17f, rr * 0.5f, 0.035f), 0.78f, 0.85f, Paint.Self, Vector3.Transform(new Vector3(0, rr * 0.27f, 0), q), q * Rot(Vector3.UnitY, 0.32f));
-                    k.Lib("prop_blade", new Vector3(0.17f, rr * 0.98f, 0.035f), new Vector3(0, rr * 0.24f, 0));
-                    k.Slab(new Vector3(0.133f, rr * 0.48f, 0.03f), 0.6f, 0.8f, Paint.Self, Vector3.Transform(new Vector3(0, rr * 0.74f, 0), q), q * Rot(Vector3.UnitY, 0.2f));
+                    k.Slab(new Vector3(0.17f * wide, rr * 0.5f, 0.035f), 0.78f, 0.85f, Paint.Self, Vector3.Transform(new Vector3(0, rr * 0.27f, 0), q), q * Rot(Vector3.UnitY, 0.32f));
+                    k.Lib("prop_blade", new Vector3(0.17f * wide, rr * 0.98f, 0.035f), new Vector3(0, rr * 0.24f, 0));
+                    k.Slab(new Vector3(0.133f * wide, rr * 0.48f, 0.03f), 0.6f, 0.8f, Paint.Self, Vector3.Transform(new Vector3(0, rr * 0.74f, 0), q), q * Rot(Vector3.UnitY, 0.2f));
                     k.Covered();
-                    k.Box(new Vector3(0.075f, 0.08f, 0.026f), Paint.Brass, Vector3.Transform(new Vector3(0, rr * 0.97f, 0), q), q * Rot(Vector3.UnitY, 0.2f));
+                    // (Yellow tips, so the ground crew can see the blades turning.)
+                    k.Box(new Vector3(0.075f * wide, 0.08f * (big ? 1.6f : 1f), 0.026f), Paint.Brass, Vector3.Transform(new Vector3(0, rr * (big ? 0.95f : 0.97f), 0), q), q * Rot(Vector3.UnitY, 0.2f));
                 }
 
                 k.Node = -1;
@@ -828,8 +903,44 @@ public static class BlockModels
                     k.Cyl(0.23f, 0.02f, Paint.Steel, new Vector3(0, 0, z), AlongZ, sides: 24);
                 break;
 
-            case BlockKind.JetNozzle when def.Id == "jet_nozzle_large":
+            case BlockKind.JetNozzle when def.Id == "jet_nozzle_2d":
             {
+                // A flat nozzle: a square-ish casing as wide as the engine bay, and on the "Petals" node the flaps above
+                // and below (they swing the exhaust up and down, and part for the afterburner), their trailing edges cut
+                // in a sawtooth; side walls, and a wide slit of glow.
+                k.Bevel(new Vector3(1.0f, 0.62f, 0.3f), Paint.SelfDark, new Vector3(0, 0, -0.1f), 0.04f);
+                k.Node = k.AddNode("Petals", new Vector3(0, 0, 0.05f));
+                foreach (int s in new[] { -1, 1 })
+                {
+                    Quaternion q = Rot(Vector3.UnitX, -s * 0.2f);
+                    k.Box(new Vector3(0.94f, 0.04f, 0.44f), Paint.Dark, new Vector3(0, s * 0.2f, 0.2f), q);
+                    for (int i = 0; i < 4; i++)
+                        k.Triangle(new Vector3(0.16f, 0.041f, 0.16f), Paint.Dark, new Vector3(-0.35f + i * 0.235f, s * 0.155f, 0.45f), q * Rot(Vector3.UnitY, MathF.PI * 0.75f));
+                }
+
+                foreach (int s in new[] { -1, 1 }) k.Box(new Vector3(0.04f, 0.44f, 0.4f), Paint.SelfDark, new Vector3(s * 0.48f, 0, 0.18f));
+                k.Node = -1;
+                k.Glow(new Vector3(0.8f, 0.12f, 0.02f), new Vector3(1f, 0.55f, 0.2f), 2.5f, new Vector3(0, 0, 0.12f));
+                k.Node = k.AddNode("Flame", new Vector3(0, 0, 0.32f));
+                k.GlowCyl(0.3f, 1f, new Vector3(1f, 0.5f, 0.18f), 2.2f, new Vector3(0, 0, 0.5f), TailZ, 0.03f);
+                k.GlowCyl(0.17f, 0.55f, new Vector3(0.65f, 0.8f, 1f), 3f, new Vector3(0, 0, 0.275f), TailZ, 0.02f);
+                k.Node = -1;
+                break;
+            }
+
+            case BlockKind.JetNozzle when def.Id is "jet_nozzle_large" or "jet_nozzle_vectoring":
+            {
+                if (def.VectorDeg > 0)
+                {
+                    // The swivel: a heavy ring the nozzle turns in, and the rams that push it round.
+                    k.Torus(0.5f, 0.035f, Paint.Steel, new Vector3(0, 0, 0.06f), AlongZ);
+                    for (int i = 0; i < 4; i++)
+                    {
+                        float a = i * MathF.PI / 2f + MathF.PI / 4f;
+                        k.Cyl(0.03f, 0.3f, Paint.Steel, new Vector3(MathF.Cos(a) * 0.5f, MathF.Sin(a) * 0.5f, -0.05f), AlongZ, sides: 8);
+                    }
+                }
+
                 // A full-size nozzle: a casing ring as wide as the engine bay, the petals converging behind it
                 // (they open for the afterburner), seams between the petals, and a flame twice as wide.
                 k.Cyl(0.5f, 0.3f, Paint.SelfDark, new Vector3(0, 0, -0.1f), AlongZ, sides: 32);
@@ -1181,6 +1292,22 @@ public static class BlockModels
                     k.Cyl(0.012f, 0.44f, Paint.Steel, new Vector3(0, b + 0.018f, i * 0.14f + 0.06f), AlongX, sides: 6);
                 }
 
+                break;
+            case "exhaust_stacks":
+                // A fairing strip along the cowling and six stubby pipes on it, raked back (+Z).
+                k.Bevel(new Vector3(0.13f, 0.03f, 0.48f), Paint.SelfDark, new Vector3(0, b + 0.015f, 0), 0.01f);
+                for (int i = 0; i < 6; i++)
+                {
+                    var at = new Vector3(0, b + 0.06f, -0.2f + i * 0.08f);
+                    k.Cyl(0.026f, 0.1f, Paint.Self, at, Rot(Vector3.UnitX, 0.75f), 0.032f, 8);
+                    k.Cyl(0.017f, 0.012f, Paint.Dark, at + new Vector3(0, 0.035f, 0.032f), Rot(Vector3.UnitX, 0.75f), sides: 8);
+                }
+
+                break;
+            case "formation_light":
+                // A slim strip of soft green light on a dark backing, flush with the skin.
+                k.Box(new Vector3(0.07f, 0.012f, 0.46f), Paint.Dark, new Vector3(0, b + 0.006f, 0));
+                k.Glow(new Vector3(0.045f, 0.008f, 0.42f), new Vector3(0.6f, 1f, 0.45f), 1.6f, new Vector3(0, b + 0.014f, 0));
                 break;
             case "antenna":
                 k.Cyl(0.04f, 0.06f, Paint.Dark, new Vector3(0, b + 0.03f, 0), sides: 12);
@@ -1710,6 +1837,40 @@ public static class BlockModels
         float bevel = MathF.Min(0.06f, MathF.Min(ext.X, MathF.Min(ext.Y, ext.Z)) * 0.1f);
         switch (def.Kind)
         {
+            case BlockKind.Engine when def.Id == "aero_engine_radial":
+            {
+                // A radial in its round cowling, the opening at the front (−Z): a lip, the two rows of finned cylinders
+                // round a crankcase and its nose gearbox, the ignition ring, and cooling gills flared out at the back.
+                float r = MathF.Min(ext.X, ext.Y) * 0.47f, half = ext.Z * 0.5f;
+                k.Cyl(r, ext.Z * 0.86f, Paint.Self, new Vector3(0, 0, 0.05f), AlongZ, r * 0.93f, 40);
+                k.Torus(r * 0.9f, r * 0.1f, Paint.Self, new Vector3(0, 0, -half * 0.74f), AlongZ);
+                k.Cyl(r * 0.86f, 0.02f, Paint.Dark, new Vector3(0, 0, -half * 0.66f), AlongZ, sides: 36);
+                for (int row = 0; row < 2; row++)
+                    for (int i = 0; i < 9; i++)
+                    {
+                        float a = (i + row * 0.5f) * MathF.Tau / 9f;
+                        var dir = new Vector3(MathF.Cos(a), MathF.Sin(a), 0);
+                        float z = -half * (row == 0 ? 0.74f : 0.6f);
+                        k.Rod(dir * (r * 0.28f) + new Vector3(0, 0, z), dir * (r * 0.74f) + new Vector3(0, 0, z), r * 0.1f, row == 0 ? Paint.Dark : Paint.SelfDark, 12);
+                        k.Rod(dir * (r * 0.72f) + new Vector3(0, 0, z), dir * (r * 0.84f) + new Vector3(0, 0, z), r * 0.075f, Paint.Steel, 10);
+                        if (row == 0)
+                            for (int f = 1; f <= 3; f++)
+                                k.Cyl(r * 0.125f, 0.01f, Paint.Dark, dir * (r * (0.34f + f * 0.1f)) + new Vector3(0, 0, z), Rot(Vector3.Cross(Vector3.UnitY, dir).LengthSquared() > 1e-6f ? Vector3.Cross(Vector3.UnitY, dir) : Vector3.UnitX, MathF.Acos(Math.Clamp(Vector3.Dot(Vector3.UnitY, dir), -1f, 1f))), sides: 12);
+                    }
+
+                k.Cyl(r * 0.3f, 0.16f, Paint.SelfDark, new Vector3(0, 0, -half * 0.8f), AlongZ, r * 0.34f, 24);
+                k.Cyl(r * 0.16f, 0.12f, Paint.Steel, new Vector3(0, 0, -half * 0.98f), AlongZ, sides: 16);
+                k.Torus(r * 0.42f, 0.014f, Paint.Brass, new Vector3(0, 0, -half * 0.84f), AlongZ);
+                k.Cyl(r * 0.94f, 0.14f, Paint.SelfDark, new Vector3(0, 0, half * 0.86f), AlongZ, r * 0.98f, 40);
+                for (int i = 0; i < 18; i++)
+                {
+                    float a = i * MathF.Tau / 18f;
+                    k.Box(new Vector3(0.012f, 0.03f, 0.15f), Paint.Dark, new Vector3(MathF.Cos(a) * r * 0.97f, MathF.Sin(a) * r * 0.97f, half * 0.86f), Rot(Vector3.UnitZ, a));
+                }
+
+                break;
+            }
+
             case BlockKind.Engine:
             {
                 // A marine turbine: casing on a skid, flanged rings, and a gearbox at the back.
@@ -2053,6 +2214,29 @@ public static class BlockModels
                 ShipFittingBig(k, def, ext);
                 break;
 
+
+            case BlockKind.Fairing when def.Id == "canopy_framed":
+            {
+                // A narrow propeller-era canopy: a long glass bubble 80 cm wide, the windscreen at its front framed with a
+                // thick armored-glass panel in the middle and a bow over the pilot, sliding rails along the sill, and the
+                // armor plate behind the seat showing through.
+                float baseY = -ext.Y * 0.5f + 0.02f, w = 0.4f;
+                k.Sphere(1f, Paint.Glass, new Vector3(0, baseY, -ext.Z * 0.06f), new Vector3(w, 0.66f, ext.Z * 0.4f));
+                k.Sphere(1f, Paint.Glass, new Vector3(0, baseY, ext.Z * 0.12f), new Vector3(w * 0.82f, 0.5f, ext.Z * 0.36f));
+                Quaternion lean = Rot(Vector3.UnitX, -0.62f);
+                k.Box(new Vector3(0.3f, 0.46f, 0.035f), Paint.Glass, new Vector3(0, baseY + 0.25f, -ext.Z * 0.33f), lean);
+                foreach (int s in new[] { -1, 1 })
+                {
+                    k.Rod(new Vector3(s * 0.17f, baseY + 0.02f, -ext.Z * 0.43f), new Vector3(s * 0.12f, baseY + 0.45f, -ext.Z * 0.26f), 0.018f, Paint.Self, 8);
+                    k.Box(new Vector3(0.035f, 0.035f, ext.Z * 0.86f), Paint.Self, new Vector3(s * (w - 0.02f), baseY + 0.02f, 0));
+                }
+
+                k.Box(new Vector3(0.28f, 0.035f, 0.04f), Paint.Self, new Vector3(0, baseY + 0.46f, -ext.Z * 0.255f));
+                // (The ring is scaled before it's stood up: its local Z becomes the height.)
+                k.Torus(1f, 0.06f, Paint.Self, new Vector3(0, baseY, -ext.Z * 0.24f), AlongZ, new Vector3(w * 0.88f, 1f, 0.59f));
+                k.Box(new Vector3(0.5f, 0.42f, 0.04f), Paint.Dark, new Vector3(0, baseY + 0.24f, ext.Z * 0.04f));
+                break;
+            }
 
             case BlockKind.Fairing:
             {

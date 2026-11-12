@@ -5,7 +5,7 @@ using System.Linq;
 namespace DreamGame.Core;
 
 /// <summary>Ready-made designs to drive, take apart and learn from, plus test-range targets.</summary>
-public static class ExampleDesigns
+public static partial class ExampleDesigns
 {
     private sealed class Draft
     {
@@ -168,7 +168,7 @@ public static class ExampleDesigns
     {
         ("Land", new[] { Warden(), Vanguard(), Jackal(), Juggernaut(), Bulwark(), Hailstorm(), Skyguard(), PalisadeLauncher(), PalisadeRadar(), Mole() }),
         ("Sea", new[] { Corsair(), Trident(), Barracuda(), Colossus() }),
-        ("Air", new[] { Kestrel(), Falcon(), Lancer(), Starling(), Hornet(), Wasp(), Zephyr() }),
+        ("Air", new[] { Shrike(), Swallow(), Tern(), Starling(), Nightjar(), Halcyon(), Seraph(), Kestrel(), Falcon(), Lancer(), Hornet(), Wasp(), Zephyr() }),
     };
 
     public static IReadOnlyList<Blueprint> All => ByFront.SelectMany(g => g.Designs).ToArray();
