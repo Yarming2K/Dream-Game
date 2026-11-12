@@ -1856,6 +1856,27 @@ public static class ExampleDesigns
         for (int y = 1; y <= floor + 1; y++) d.Set(x, y, z + 3 * ladderSide, "ladder", Orient(new Int3(0, -1, 0), new Int3(0, 0, -ladderSide)));
     }
 
+    /// <summary>
+    /// A solid parapet round the edge of a roof x0..x1 × z0..z1: a wall at <paramref name="y"/>, its top row sloped
+    /// outward with corner pieces at the corners. <paramref name="notch"/> leaves gaps in the top row (embrasures
+    /// for guns). Never replaces what's there.
+    /// </summary>
+    private static void Parapet(Draft d, int x0, int x1, int y, int z0, int z1, Func<int, int, bool> notch = null)
+    {
+        for (int x = x0; x <= x1; x++)
+        for (int z = z0; z <= z1; z++)
+        {
+            bool edgeX = x == x0 || x == x1, edgeZ = z == z0 || z == z1;
+            if (!edgeX && !edgeZ) continue;
+            d.Fill(x, x, y, y, z, z, "concrete");
+            if (notch?.Invoke(x, z) == true) continue;
+            int sx = x == x0 ? -1 : 1, sz = z == z0 ? -1 : 1;
+            if (edgeX && edgeZ) d.Fill(x, x, y + 1, y + 1, z, z, "concrete_corner", CornerFacing(new Int3(sx, 1, 0), new Int3(0, 1, sz)));
+            else if (edgeX) d.Fill(x, x, y + 1, y + 1, z, z, "concrete_slope", Facing(new Int3(sx, 1, 0)));
+            else d.Fill(x, x, y + 1, y + 1, z, z, "concrete_slope", Facing(new Int3(0, 1, sz)));
+        }
+    }
+
     /// <summary>A camouflage net 2.5 m square on four posts, its middle at (x, y, z), over whatever is below.</summary>
     private static void NetOnPosts(Draft d, int x, int y, int z)
     {
@@ -1882,21 +1903,30 @@ public static class ExampleDesigns
     /// <summary>
     /// A gable roof over walls <paramref name="halfW"/> cells either side of the middle across and
     /// <paramref name="halfL"/> along, its eaves at height <paramref name="eaves"/>: tiled slopes on the long sides,
-    /// overhanging by a cell, the gable ends filled with <paramref name="gable"/>, tiles along the ridge.
+    /// overhanging the eaves by a cell, the gable ends filled with <paramref name="gable"/> right up under the tiles
+    /// (flush, so each gable's edge runs straight up the roof line), tiles along the ridge.
     /// </summary>
     private static void GableRoof(Draft d, int halfW, int halfL, int eaves, string gable, string tiles = "roof_tile")
     {
         for (int k = 0; k <= halfW + 1; k++)
         {
             int y = eaves + 1 + k, left = -halfW - 1 + k, right = halfW + 1 - k;
+            // (The end cells of each course are the gable's own material: a brick or timber verge up the edge.)
             if (left >= right)
             {
-                d.Fill(0, 0, y, y, -halfL - 1, halfL + 1, tiles + "_half");
+                foreach (int z in new[] { -halfL, halfL }) d.Fill(0, 0, y, y, z, z, gable + "_half");
+                d.Fill(0, 0, y, y, -halfL, halfL, tiles + "_half");
                 break;
             }
 
-            d.FillSlope(left, left, y, y, -halfL - 1, halfL + 1, tiles + "_slope", new Int3(-1, 1, 0));
-            d.FillSlope(right, right, y, y, -halfL - 1, halfL + 1, tiles + "_slope", new Int3(1, 1, 0));
+            foreach (int z in new[] { -halfL, halfL })
+            {
+                d.FillSlope(left, left, y, y, z, z, gable + "_slope", new Int3(-1, 1, 0));
+                d.FillSlope(right, right, y, y, z, z, gable + "_slope", new Int3(1, 1, 0));
+            }
+
+            d.FillSlope(left, left, y, y, -halfL, halfL, tiles + "_slope", new Int3(-1, 1, 0));
+            d.FillSlope(right, right, y, y, -halfL, halfL, tiles + "_slope", new Int3(1, 1, 0));
             if (right - left > 1)
                 foreach (int z in new[] { -halfL, halfL })
                     d.Fill(left + 1, right - 1, y, y, z, z, gable);
@@ -2071,15 +2101,22 @@ public static class ExampleDesigns
         foreach ((int x, int z) in new[] { (-4, -4), (-4, 4), (4, -4), (4, 4) }) d.Set(x, roof - 1, z, "lamp");
         for (int y = f3 + 1; y <= roof + 1; y++) d.Set(-11, y, 0, "ladder", Orient(new Int3(0, -1, 0), new Int3(1, 0, 0)));
 
-        // A gallery on the front and back of the top floor, each with two 40 mm flak guns and a railing.
+        // A gallery on the front and back of the top floor, each with two 40 mm flak guns behind a solid
+        // parapet, carried out from the wall on sloped corbels.
         foreach (int s in new[] { -1, 1 })
         {
             d.Fill(-7, 7, f3, f3, Math.Min(s * 13, s * 17), Math.Max(s * 13, s * 17), "concrete");
             foreach (int x in new[] { -4, 4 }) FlakMount(d, x, f3 + 1, s * 15, s < 0 ? Int3.Forward : Int3.Back);
-            for (int x = -7; x <= 7; x++) d.Set(x, f3 + 1, s * 17, "railing", Orient(new Int3(0, -1, 0), new Int3(0, 0, -s)));
+            for (int x = -7; x <= 7; x++) d.Fill(x, x, f3 + 1, f3 + 1, s * 17, s * 17, "concrete");
             for (int z = 13; z <= 16; z++)
                 foreach (int x in new[] { -7, 7 })
-                    d.Set(x, f3 + 1, s * z, "railing", Orient(new Int3(0, -1, 0), new Int3(-Math.Sign(x), 0, 0)));
+                    d.Fill(x, x, f3 + 1, f3 + 1, s * z, s * z, "concrete");
+            for (int x = -7; x <= 7; x++)
+            {
+                d.Set(x, f3 - 1, s * 13, "concrete");
+                d.Slope(x, f3 - 1, s * 14, "concrete_slope", new Int3(0, -1, s));
+                d.Slope(x, f3 - 2, s * 13, "concrete_slope", new Int3(0, -1, s));
+            }
         }
 
         // Walls, floors and the roof; the stairwells and the ladder hole.
@@ -2116,8 +2153,8 @@ public static class ExampleDesigns
             d.Fill(12, 12, f3 + 2, f3 + 3, i, i + 1, "glazing");
         }
 
-        // A sloped skirt round the foot (not in front of the doors), battlements round the roof, and the
-        // radar, searchlights and antenna between the guns.
+        // A sloped skirt round the foot (not in front of the doors), a solid sloped parapet round the roof, and
+        // the radar, searchlights and antenna between the guns.
         d.FillSlope(-13, -13, 1, 1, -13, 13, "concrete_slope", new Int3(-1, 1, 0));
         d.FillSlope(13, 13, 1, 1, -13, 13, "concrete_slope", new Int3(1, 1, 0));
         d.FillSlope(-12, 12, 1, 1, -13, -13, "concrete_slope", new Int3(0, 1, -1));
@@ -2128,9 +2165,7 @@ public static class ExampleDesigns
             d.Remove(x, 1, 13);
         }
 
-        for (int i = -12; i <= 12; i++)
-            foreach ((int x, int z) in new[] { (i, -12), (i, 12), (-12, i), (12, i) })
-                Battlement(d, x, roof + 1, z, i);
+        Parapet(d, -12, 12, roof + 1, -12, 12);
         d.Set(0, roof + 1, 0, "concrete");
         d.Set(0, roof + 2, 0, "radar");
         d.Set(0, roof + 1, -10, "searchlight");
@@ -2164,16 +2199,18 @@ public static class ExampleDesigns
     }
 
     /// <summary>
-    /// Mortar battery: four 160 mm heavy mortars on turntables in a walled pit, each in its own bay behind
-    /// a revetment, with ready racks beside it. An ammunition line under the floor runs back to the magazine
-    /// bunker, where four HE magazines are stacked. Behind it the crew dugout: bunks, lockers, first aid, a
-    /// workbench, the fire-direction console, and a periscope and antenna on the roof.
+    /// Mortar battery: four 160 mm heavy mortars on concrete plinths in a sandbagged pit, each in its own bay
+    /// between sandbag revetments, with ready racks beside it and earth banked round the outside. An
+    /// ammunition line under the floor runs back to the magazine bunker, where four HE magazines are stacked.
+    /// Behind the pit, the bunker and the crew dugout are buried under earth: bunks, lockers, first aid, a
+    /// workbench, the fire-direction console, and a periscope, radar and antenna poking out of the mound.
+    /// Wire across the front.
     /// </summary>
     public static Blueprint MortarBattery()
     {
         var d = new Draft();
         const int mz = -4;
-        d.Fill(-15, 15, 0, 0, -11, 11, "foundation");
+        d.Fill(-21, 21, 0, 0, -13, 17, "foundation");
 
         // The mortars, their ready racks and gunners, and the plinth round each ring.
         foreach (int mx in new[] { -9, -3, 3, 9 })
@@ -2194,10 +2231,7 @@ public static class ExampleDesigns
         foreach (int y in new[] { 1, 3 })
             d.Set(x, y, 4, "magazine_he");
 
-        // The magazine bunker in the middle of the back wall, and the crew dugout on either side of it.
-        d.Set(-1, 2, 10, "door");
-        d.Set(-11, 2, 10, "door");
-        d.Set(9, 2, 10, "door");
+        // The magazine bunker in the middle, and the crew dugout on either side of it, entered from the pit.
         d.Set(-13, 1, 7, "bunk");
         d.Set(12, 1, 7, "bunk");
         d.Set(-8, 2, 9, "weapon_locker");
@@ -2214,35 +2248,37 @@ public static class ExampleDesigns
         d.Fill(14, 14, 1, 5, 5, 9, "concrete");
         foreach (int x in new[] { -4, 3 }) d.Fill(x, x, 1, 5, 5, 9, "concrete");
         d.Fill(-14, 14, 6, 6, 4, 10, "concrete");
-        // Ways from the pit into the dugout and the bunker.
         foreach (int x in new[] { -8, -7, 7, 8 })
             for (int y = 1; y <= 4; y++)
                 d.Remove(x, y, 4);
-        d.Set(-12, 7, 7, "periscope");
-        d.Set(12, 7, 7, "antenna");
-        d.Set(0, 7, 7, "radar");
 
-        // The pit wall round the front and sides, with a sloped bank outside, and the revetments between bays.
-        d.Fill(-14, 14, 1, 2, -10, -10, "concrete");
-        d.Fill(-14, -14, 1, 2, -9, 3, "concrete");
-        d.Fill(14, 14, 1, 2, -9, 3, "concrete");
-        d.FillSlope(-15, 15, 1, 1, -11, -11, "concrete_slope", new Int3(0, 1, -1));
-        d.FillSlope(-15, -15, 1, 1, -10, 11, "concrete_slope", new Int3(-1, 1, 0));
-        d.FillSlope(15, 15, 1, 1, -10, 11, "concrete_slope", new Int3(1, 1, 0));
-        foreach (int x in new[] { -6, 0, 6 }) d.Fill(x, x, 1, 2, mz - 4, mz + 2, "concrete");
-        // A way in through each side of the pit.
-        foreach (int z in new[] { -1, 0 })
-        {
-            foreach (int x in new[] { -15, -14, 14, 15 }) d.Remove(x, 1, z);
-            foreach (int x in new[] { -14, 14 }) d.Remove(x, 2, z);
-        }
+        // Earth over the roof and banked up the sides and back, so the bunker is a grassy mound.
+        d.Fill(-14, 14, 7, 7, 4, 10, "earth");
+        ChamferEdge(d, -14, 14, 7, 4, 10, "earth");
+        Berm(d, -14, 14, 4, 10, 6, (x, z) => z < 4);
+        d.Set(-12, 8, 7, "periscope");
+        d.Set(12, 8, 7, "antenna");
+        d.Set(0, 8, 7, "radar");
+
+        // The pit: sandbag walls round the front and sides (a way in through each side), sandbag revetments
+        // between the bays, and a low earth bank outside.
+        for (int x = -14; x <= 14; x++) d.Fill(x, x, 1, 2, -10, -10, "sandbags");
+        for (int z = -9; z <= 3; z++)
+            if (z < -1 || z > 0)
+                foreach (int x in new[] { -14, 14 })
+                    d.Fill(x, x, 1, 2, z, z, "sandbags");
+        foreach (int x in new[] { -6, 0, 6 }) d.Fill(x, x, 1, 2, mz - 4, mz + 2, "sandbags");
+        Berm(d, -14, 14, -10, 3, 2, (x, z) => z > 3 || (z >= -1 && z <= 0 && Math.Abs(x) > 14));
+
+        for (int x = -21; x <= 21; x++) d.Set(x, 1, -13, "wire");
         return d.Build("Mortar battery (160 mm)", "olive");
     }
 
     /// <summary>
-    /// Siege fortress: a two-storey concrete bastion, 12 m square on a sloped glacis, with battlements round
-    /// its terrace. The 420 mm siege mortar stands on the top roof behind a parapet, fed by a hoist from the
-    /// magazine hall on the ground floor. A flak gun on each corner of the terrace. Inside: crew quarters with
+    /// Siege fortress: a two-storey concrete bastion 12 m square, half buried in an earth glacis, with a solid
+    /// sloped parapet round its terrace (notched for the guns) and armored cupolas on it. The 420 mm siege
+    /// mortar stands on the chamfered top roof behind a parapet, fed by a hoist from the magazine hall on the
+    /// ground floor. A flak gun on each corner of the terrace, a sandbagged way in, and wire all round. Inside: crew quarters with
     /// bunks, lockers and first aid, a workbench, stairs up to the command room (console, windows all round),
     /// lamps throughout, and a ladder from the terrace to the mortar.
     /// </summary>
@@ -2250,7 +2286,7 @@ public static class ExampleDesigns
     {
         var d = new Draft();
         const int l2 = 7, top = 13; // the terrace (the first floor's roof) and the top roof
-        d.Fill(-13, 13, 0, 0, -13, 13, "foundation");
+        d.Fill(-16, 16, 0, 0, -16, 16, "foundation");
 
         // The mortar on the top roof, and the hoist down to the magazine hall.
         d.Set(0, top + 1, 0, "turret_ring");
@@ -2317,23 +2353,27 @@ public static class ExampleDesigns
             for (int z = -6; z <= -1; z++)
                 d.Remove(x, l2, z);
 
-        // The glacis sloping up to the walls (not in front of the door), and battlements round the terrace.
-        d.FillSlope(-13, -13, 1, 1, -13, 13, "concrete_slope", new Int3(-1, 1, 0));
-        d.FillSlope(13, 13, 1, 1, -13, 13, "concrete_slope", new Int3(1, 1, 0));
-        d.FillSlope(-12, 12, 1, 1, -13, -13, "concrete_slope", new Int3(0, 1, -1));
-        d.FillSlope(-12, 12, 1, 1, 13, 13, "concrete_slope", new Int3(0, 1, 1));
-        foreach (int x in new[] { -1, 0 }) d.Remove(x, 1, -13);
-        for (int i = -12; i <= 12; i++)
-            foreach ((int x, int z) in new[] { (i, -12), (i, 12), (-12, i), (12, i) })
+        // A sandbagged way in to the door, then the earth glacis banked up the walls; a sloped parapet round the
+        // terrace, notched where the corner guns' barrels and racks reach it; a chamfered edge on the top roof.
+        for (int z = -15; z <= -13; z++)
+            foreach (int x in new[] { -3, 2 })
+                d.Fill(x, x, 1, 2, z, z, "sandbags");
+        Berm(d, -12, 12, -12, 12, 3, (x, z) => z < -12 && x >= -2 && x <= 1);
+        Parapet(d, -12, 12, l2 + 1, -12, 12, (x, z) =>
+            (Math.Abs(z) == 12 && Math.Abs(Math.Abs(x) - 10) <= 1) || (Math.Abs(x) == 12 && Math.Abs(Math.Abs(z) - 10) <= 1));
+        ChamferEdge(d, -8, 8, top, -8, 8);
+        d.Set(0, l2 + 1, -10, "cupola");
+        d.Set(0, l2 + 1, 10, "cupola");
+        for (int i = -16; i <= 16; i++)
+        {
+            if (i < -3 || i > 2) d.Set(i, 1, -16, "wire");
+            d.Set(i, 1, 16, "wire");
+            if (i > -16 && i < 16)
             {
-                d.Fill(x, x, l2 + 1, l2 + 1, z, z, "concrete");
-                if ((i & 1) == 0) d.Fill(x, x, l2 + 2, l2 + 2, z, z, "concrete");
+                d.Set(-16, 1, i, "wire");
+                d.Set(16, 1, i, "wire");
             }
-
-        // Embrasures where the corner guns' racks would touch the battlements.
-        foreach (int x in new[] { -12, 12 })
-        foreach (int z in new[] { -10, 10 })
-            d.Remove(x, l2 + 2, z);
+        }
 
         // A parapet round the mortar, a radar, searchlights and antennas on the top roof.
         for (int i = -6; i <= 6; i++)
@@ -2360,8 +2400,8 @@ public static class ExampleDesigns
     }
 
     /// <summary>
-    /// Coastal citadel: a sea fort 17 m long. Two heavy railguns in armored turret houses on its battlemented
-    /// deck face the sea; behind them a 16 m tower carries the laser battery, which burns missiles and
+    /// Coastal citadel: a sea fort 17 m long. Two heavy railguns in armored turret houses on its deck, behind a
+    /// sloped concrete parapet notched for their barrels, face the sea; behind them a 16 m tower carries the laser battery, which burns missiles and
     /// aircraft out of the sky for kilometers around. A close-in gatling on each corner and a block of missile
     /// cells in the deck. Below: two fusion reactors, a gallery of capacitors, the command bunker, crew
     /// quarters, a workbench and supply crates, and stairs up to the deck. A ladder climbs the tower inside.
@@ -2427,7 +2467,7 @@ public static class ExampleDesigns
             CiwsAt(d, x, deck + 1, 10, Int3.Back);
         }
 
-        // Walls and the deck, the stairwell through it, the glacis, and battlements round the deck.
+        // Walls and the deck, the stairwell through it, the glacis, and the parapet round the deck.
         d.Fill(-16, 16, 1, deck - 1, -12, -12, "concrete");
         d.Fill(-16, 16, 1, deck - 1, 12, 12, "concrete");
         d.Fill(-16, -16, 1, deck - 1, -11, 11, "concrete");
@@ -2442,12 +2482,8 @@ public static class ExampleDesigns
         d.FillSlope(-16, 16, 1, 1, 13, 13, "concrete_slope", new Int3(0, 1, 1));
         foreach (int x in new[] { -1, 0 }) d.Remove(x, 1, -13);
         foreach (int x in new[] { 8, 9 }) d.Remove(x, 1, 13);
-        for (int x = -16; x <= 16; x++)
-            foreach (int z in new[] { -12, 12 })
-                Battlement(d, x, deck + 1, z, x);
-        for (int z = -11; z <= 11; z++)
-            foreach (int x in new[] { -16, 16 })
-                Battlement(d, x, deck + 1, z, z);
+        // A sloped parapet round the deck, notched where the railguns' and gatlings' barrels cross it.
+        Parapet(d, -16, 16, deck + 1, -12, 12, (x, z) => (z == -12 && Math.Abs(x) == 7) || (Math.Abs(z) == 12 && Math.Abs(Math.Abs(x) - 14) <= 1));
         return d.Build("Coastal citadel", "urban");
     }
 
@@ -2475,13 +2511,6 @@ public static class ExampleDesigns
         for (int i = 1; i <= 3; i++) d.Set(x, y + 1, z + facing.Z * i, "barrel", Pointing(facing));
         d.Set(x, y + 1, z - facing.Z, "ammo_he");
         d.Set(x, y + 2, z - facing.Z, "ammo_he");
-    }
-
-    /// <summary>A stretch of parapet with a merlon on every other cell.</summary>
-    private static void Battlement(Draft d, int x, int y, int z, int along)
-    {
-        d.Fill(x, x, y, y, z, z, "concrete");
-        if ((along & 1) == 0) d.Fill(x, x, y + 1, y + 1, z, z, "concrete");
     }
 
     /// <summary>
