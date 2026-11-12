@@ -402,6 +402,17 @@ The goal is hundreds of vehicles and thousands of shells in the air at once, on 
 - **Big screens.** The HUD was laid out for about 1080 lines; on a taller screen it's scaled up to match (1.75× at 4K). The 3D world is drawn at about 1150 lines and sharpened up to the screen (FSR 1). A 4K window has about four times the pixels to light, fog and shade, and on most cards that costs more frame rate than the extra sharpness is worth. F4 switches to drawing every pixel and back; F3 says which is on.
 - **Not yet:** simplified far-off battles with no physics at all, and running the shell checks on several CPU cores. Both are planned once fleet command makes battles bigger than the island.
 
+## Campaign plan (decided with the owner)
+
+| Question | Decision |
+|---|---|
+| First campaign | **One planet.** Space and other planets come later and plug into the same campaign. |
+| World | **One seamless map** you can drive, sail and fly across, about **20 × 20 km**: an archipelago with open sea between the islands, so land, sea and air all matter. Full detail around the player; units far away still move and fight, simplified on the same Core rules, and switch back to full detail as you come near. |
+| Enemy | **One rival faction** fielding ready-made designs (like the examples, with variations), getting stronger as it researches. More rivals, and an AI that designs its own machines, come later. |
+| Tech | **Hybrid:** eras as tiers (WW2, Cold War, modern, future), with branches inside each (armor, air, naval, artillery, energy weapons). Enough research in an era opens the next; which branches is your choice. Salvaged enemy wrecks and captured sites jump you ahead in that branch. |
+| Victory | **Take their last base.** Losses are setbacks; a side is out when its last base falls. |
+| Economy | Being decided. |
+
 ## Technical approach
 
 - **Engine:** Godot 4.7 with C# and Jolt physics.
