@@ -167,4 +167,17 @@ public class PowerTests
         Assert.True(BlockCatalog.Gatling20.PointDefense);
         Assert.False(BlockCatalog.Heavy120.PointDefense);
     }
+
+    [Fact]
+    public void Missile_launch_cells_come_loaded()
+    {
+        // The Trident's cells and the Palisade's box launchers hold their missiles from the start, not only after a resupply.
+        foreach (Blueprint bp in new[] { ExampleDesigns.Trident(), ExampleDesigns.PalisadeLauncher() })
+        {
+            GridModel m = GridModel.FromBlueprint(bp);
+            List<BlockInstance> cells = m.Instances.Where(b => b.Def.Kind == BlockKind.VlsCell).ToList();
+            Assert.NotEmpty(cells);
+            Assert.All(cells, c => Assert.Equal(c.Def.AmmoUnits, c.AmmoUnits));
+        }
+    }
 }

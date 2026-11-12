@@ -180,7 +180,31 @@ public partial class HudGlass : Control
         return p;
     }
 
-    private static Vector2 ClusterSize => new(ColW * 2 + Gap, 590);
+    private Vector2 ClusterSize = new(ColW * 2 + Gap, 590);
+    private int _layout = -1;
+
+    /// <summary>
+    /// Stacks the panels this vehicle needs in two columns, each into whichever column is shorter: no weapons panel on
+    /// something unarmed, no systems panel when there's nothing to switch.
+    /// </summary>
+    private void Layout(bool weapons, bool systems)
+    {
+        int key = (weapons ? 1 : 0) | (systems ? 2 : 0);
+        if (key == _layout) return;
+        _layout = key;
+        _weapons.Visible = weapons;
+        _systems.Visible = systems;
+        var cols = new float[2];
+        foreach (GlassPanel p in new[] { _motion, _weapons, _systems, _engine, _damage, _radar })
+        {
+            if (!p.Visible) continue;
+            int c = cols[1] < cols[0] ? 1 : 0;
+            p.Position = new Vector2(c * (ColW + Gap), cols[c]);
+            cols[c] += p.Size.Y + Gap;
+        }
+
+        ClusterSize = new Vector2(ColW * 2 + Gap, Mathf.Max(cols[0], cols[1]) - Gap);
+    }
 
     /// <summary>Takes this frame's readings, moves the panels beside the vehicle and redraws them.</summary>
     public void Refresh(in GlassFeed f, float dt)
@@ -188,6 +212,7 @@ public partial class HudGlass : Control
         _f = f;
         VehicleBody v = f.Vehicle;
         if (v == null || !IsInstanceValid(v) || f.Camera == null) return;
+        Layout(v.Guns.Count > 0 || v.Analysis.Missiles.Count > 0 || v.Analysis.BombRacks.Count > 0, Systems(v).Count > 0);
         Vector2 view = GetViewportRect().Size;
         _scale = Mathf.Clamp(view.Y / 1080f, 0.6f, 1.6f) * 0.9f;
         _cluster.Scale = new Vector2(_scale, _scale);

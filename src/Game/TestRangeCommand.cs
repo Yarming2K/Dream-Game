@@ -12,7 +12,7 @@ namespace DreamGame.Game;
 /// </summary>
 public partial class TestRange
 {
-    private static readonly Vector3 CommandPostAt = new(-14, Ground, 132);
+    private Vector3 CommandPostAt = new(-14, Ground, 132);
     private StructureBody _commandPost;
     private TacticalMap _map;
     private readonly Dictionary<(Blueprint, int), Blueprint> _sideDesigns = new();
@@ -31,6 +31,8 @@ public partial class TestRange
                 Input.MouseMode = Input.MouseModeEnum.Captured;
                 Big("Command console lost");
             },
+            World = _world,
+            Travel = Travel,
         };
         root.AddChild(_map);
         // Your units' reports reach the message feed while the map is shut (the map shows its own log).
@@ -82,7 +84,7 @@ public partial class TestRange
             return;
         }
 
-        if (ActiveConsole() == null)
+        if (ActiveConsole() == null && !InWorld)
         {
             Big("No command console here");
             AddFeed($"[color={Ui.Hex(Ui.Dim)}]Command from a vehicle with a command console (build one in: Control), or stand at the command post by the depot.[/color]", true);

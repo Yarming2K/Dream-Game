@@ -27,6 +27,9 @@ public partial class Builder : Node3D
 
     public event Action<Blueprint> TestDriveRequested;
 
+    /// <summary>Drive this design in the campaign world instead of on the test range.</summary>
+    public event Action<Blueprint> WorldDriveRequested;
+
     /// <summary>Every filled cell (big blocks under each of their cells), and each block by its anchor.</summary>
     private readonly Dictionary<Int3, BlueprintBlock> _cells = new();
     private readonly Dictionary<Int3, BlueprintBlock> _blocks = new();
@@ -1372,7 +1375,8 @@ public partial class Builder : Node3D
         bar.AddChild(_armorButton);
         SetMirror(_mirror);
         bar.AddChild(Ui.Button("Help", () => _help.Visible = !_help.Visible, "Controls and how designs work (F1)", "GhostButton"));
-        bar.AddChild(Ui.Button("TEST DRIVE", RequestTestDrive, "Drive this design on the test range (Tab)", "PrimaryButton"));
+        bar.AddChild(Ui.Button("TEST DRIVE", () => RequestTestDrive(), "Drive this design on the test range (Tab)", "PrimaryButton"));
+        bar.AddChild(Ui.Button("WORLD", () => RequestTestDrive(true), "Take this design out into the campaign world: islands with mountains, fjords, canyons and a volcano", "PrimaryButton"));
 
         // Parts drawer on the left.
         var left = new PanelContainer();
@@ -2146,7 +2150,7 @@ public partial class Builder : Node3D
         }
     }
 
-    private void RequestTestDrive()
+    private void RequestTestDrive(bool world = false)
     {
         Blueprint bp = CurrentBlueprint();
         VehicleAnalysis a = VehicleAnalysis.Analyze(bp);
@@ -2158,6 +2162,7 @@ public partial class Builder : Node3D
             return;
         }
 
-        TestDriveRequested?.Invoke(bp);
+        if (world) WorldDriveRequested?.Invoke(bp);
+        else TestDriveRequested?.Invoke(bp);
     }
 }

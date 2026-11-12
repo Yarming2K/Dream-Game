@@ -415,6 +415,7 @@ public partial class Combat : Node3D
         {
             Terrain.Blast(center, radius, damage);
             Scatter.Instance?.Blast(center, radius, damage);
+            WorldScatter.Instance?.Blast(center, radius, damage);
         }
         Blast?.Invoke(center, radius, damage);
         var destroyedAll = new List<OrderedHit>();

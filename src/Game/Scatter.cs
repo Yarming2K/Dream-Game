@@ -27,7 +27,7 @@ public partial class Scatter : Node3D
     private readonly Dictionary<(int, int), List<int>> _grid = new();
     private float _tick;
 
-    private const string VegetationCode = @"
+    internal const string VegetationCode = @"
 shader_type spatial;
 render_mode cull_disabled;
 
@@ -108,10 +108,13 @@ void fragment() {
         if (Instance == this) Instance = null;
     }
 
-    private void Collect(Node n)
+    private void Collect(Node n) => Collect(n, _meshes);
+
+    /// <summary>The plant models in the scenery library, by kind.</summary>
+    internal static void Collect(Node n, Dictionary<PlantKind, Mesh> into)
     {
-        if (n is MeshInstance3D { Mesh: not null } mi && Enum.TryParse(mi.Name.ToString(), true, out PlantKind k)) _meshes[k] = mi.Mesh;
-        foreach (Node c in n.GetChildren()) Collect(c);
+        if (n is MeshInstance3D { Mesh: not null } mi && Enum.TryParse(mi.Name.ToString(), true, out PlantKind k)) into[k] = mi.Mesh;
+        foreach (Node c in n.GetChildren()) Collect(c, into);
     }
 
     /// <summary>Where nothing grows: the firing lane and everything on it, the airstrip, the helipad, the building pads, the village and the roads.</summary>
@@ -128,7 +131,7 @@ void fragment() {
 
     // ------------------------------------------------------------------ drawing
 
-    private ShaderMaterial Material(bool leaves)
+    internal static ShaderMaterial Material(bool leaves)
     {
         var m = new ShaderMaterial { Shader = new Shader { Code = VegetationCode } };
         m.SetShaderParameter("leaves", leaves);
@@ -208,9 +211,11 @@ void fragment() {
     }
 
     /// <summary>Standing, or lying where it fell.</summary>
-    private static Transform3D Placement(in Plant p)
+    private static Transform3D Placement(in Plant p) => Placement(p, WorldQuery.Ground.HeightAt(p.X, p.Z));
+
+    /// <summary>Standing on ground at <paramref name="y"/>, or lying where it fell.</summary>
+    internal static Transform3D Placement(in Plant p, float y)
     {
-        float y = WorldQuery.Ground.HeightAt(p.X, p.Z);
         var basis = new Basis(Vector3.Up, p.Yaw).Scaled(Vector3.One * p.Scale);
         if (p.Down)
         {

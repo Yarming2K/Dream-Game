@@ -42,6 +42,16 @@ public partial class TacticalMap : Control
     /// <summary>Called when the map closes itself (the console was lost), so the game can take the mouse back.</summary>
     public Action Closed;
 
+    /// <summary>In the campaign world: the world to draw (with its place names). The map opens anywhere there.</summary>
+    public WorldMap World;
+
+    /// <summary>In the campaign world: go to a place (picked from the list of places).</summary>
+    public Action<System.Numerics.Vector2> Travel;
+
+    private bool _worldPlaced;
+    private VBoxContainer _places;
+    private Control _deployPanel;
+
     private static readonly Color Friendly = new(0.35f, 0.62f, 1f), Enemy = new(1f, 0.36f, 0.3f), Mine = new(1f, 0.8f, 0.3f);
     private static readonly Color Sea = new(0.07f, 0.15f, 0.24f);
 
@@ -98,6 +108,19 @@ public partial class TacticalMap : Control
         {
             Vector3 p = console.Body.GlobalPosition;
             _center = new Vector2(p.X, p.Z);
+        }
+        else if (World != null)
+        {
+            Vector3 p = WorldQuery.Viewer;
+            _center = new Vector2(p.X, p.Z);
+        }
+
+        BuildPlaces();
+        if (World != null && !_worldPlaced)
+        {
+            // The first look at the world: zoomed out over the islands round you.
+            _worldPlaced = true;
+            _zoom = 0.09f;
         }
 
         _selected.RemoveWhere(v => !Alive(v));
@@ -178,7 +201,7 @@ public partial class TacticalMap : Control
         if (!Visible) return;
         float dt = (float)delta;
         IGridHost console = ConsoleHost?.Invoke();
-        if (console == null)
+        if (console == null && World == null)
         {
             Close();
             Closed?.Invoke();
@@ -223,6 +246,7 @@ public partial class TacticalMap : Control
 
     private ImageTexture BuildTerrain()
     {
+        if (World != null) return WorldImage();
         HeightField f = WorldQuery.Ground;
         if (f == null) return null;
         var img = Image.CreateEmpty(f.Width, f.Depth, false, Image.Format.Rgb8);
@@ -260,11 +284,129 @@ public partial class TacticalMap : Control
         return ImageTexture.CreateFromImage(img);
     }
 
+    /// <summary>
+    /// The whole world as a shaded relief map, from its 20 m grid: sea shading from the shallows to the deep, land
+    /// green through brown to grey rock and white snow, lit from the north-west.
+    /// </summary>
+    private ImageTexture WorldImage()
+    {
+        HeightField g = World.Coarse;
+        int n = g.Width;
+        var px = new byte[n * n * 3];
+        var light = new Vector3(-1, 1.4f, -1).Normalized();
+        for (int z = 0; z < n; z++)
+        for (int x = 0; x < n; x++)
+        {
+            float h = g.Heights[z * n + x];
+            Color c;
+            float hl = g.Heights[z * n + Math.Max(x - 1, 0)], hr = g.Heights[z * n + Math.Min(x + 1, n - 1)];
+            float hd = g.Heights[Math.Max(z - 1, 0) * n + x], hu = g.Heights[Math.Min(z + 1, n - 1) * n + x];
+            var nrm = new Vector3(hl - hr, 2f * g.Spacing, hd - hu).Normalized();
+            float shade = Mathf.Clamp(0.5f + 0.75f * nrm.Dot(light), 0.45f, 1.25f);
+            if (h < Ocean.Level)
+            {
+                float k = Mathf.Clamp(-h / 120f, 0, 1);
+                c = new Color(0.2f, 0.4f, 0.5f).Lerp(Sea, Mathf.Sqrt(k));
+            }
+            else
+            {
+                float steep = 1f - nrm.Y;
+                c = h < 2.5f ? new Color(0.66f, 0.6f, 0.45f)
+                    : new Color(0.3f, 0.4f, 0.22f).Lerp(new Color(0.5f, 0.45f, 0.3f), Mathf.Clamp(h / 500f, 0, 1));
+                c = c.Lerp(new Color(0.5f, 0.48f, 0.45f), Mathf.Clamp((steep - 0.25f) * 3f, 0, 0.8f));
+                if (h > 820f) c = c.Lerp(new Color(0.93f, 0.94f, 0.96f), Mathf.Clamp((h - 820f) / 120f, 0, 1));
+                c = new Color(c.R * shade, c.G * shade, c.B * shade);
+            }
+
+            int i = (z * n + x) * 3;
+            px[i] = (byte)Mathf.Clamp(c.R * 255f, 0, 255);
+            px[i + 1] = (byte)Mathf.Clamp(c.G * 255f, 0, 255);
+            px[i + 2] = (byte)Mathf.Clamp(c.B * 255f, 0, 255);
+        }
+
+        return ImageTexture.CreateFromImage(Image.CreateFromData(n, n, false, Image.Format.Rgb8, px));
+    }
+
+    /// <summary>The world's place names, bigger for islands and ranges, the small ones only when zoomed in.</summary>
+    private void DrawPlaces()
+    {
+        Font font = Ui.HeadingBoldFont;
+        foreach (Feature f in World.Features)
+        {
+            (int size, float minZoom, Color col) = f.Kind switch
+            {
+                FeatureKind.Island => (20, 0f, new Color(1f, 0.95f, 0.85f)),
+                FeatureKind.Range => (16, 0.05f, new Color(0.95f, 0.9f, 0.8f)),
+                FeatureKind.Peak or FeatureKind.Volcano => (13, 0.07f, new Color(1f, 1f, 1f)),
+                FeatureKind.Harbour => (14, 0f, Mine),
+                FeatureKind.Slot or FeatureKind.Stacks => (12, 0.2f, new Color(0.9f, 0.85f, 0.75f)),
+                _ => (12, 0.1f, new Color(0.88f, 0.9f, 0.86f)),
+            };
+            if (_zoom < minZoom) continue;
+            Vector2 at = ToScreen(new Vector3(f.At.X, 0, f.At.Y));
+            if (at.X < -200 || at.Y < -40 || at.X > Size.X + 40 || at.Y > Size.Y + 40) continue;
+            string text = f.Kind is FeatureKind.Peak or FeatureKind.Volcano or FeatureKind.Pass ? $"{f.Name}  {f.Height:0} m" : f.Name;
+            if (f.Kind is FeatureKind.Peak or FeatureKind.Volcano) DrawPolygon(new[] { at + new Vector2(0, -6), at + new Vector2(5, 3), at + new Vector2(-5, 3) }, new[] { col });
+            else if (f.Kind != FeatureKind.Island && f.Kind != FeatureKind.Range) DrawCircle(at, 2.5f, col);
+            Vector2 tp = at + new Vector2(f.Kind is FeatureKind.Island or FeatureKind.Range ? -text.Length * size * 0.28f : 8f, 5f);
+            DrawStringOutline(font, tp, text, HorizontalAlignment.Left, -1, size, 5, new Color(0, 0, 0, 0.75f));
+            DrawString(font, tp, text, HorizontalAlignment.Left, -1, size, col);
+        }
+    }
+
+    /// <summary>The list of places to go to, in the world (right side).</summary>
+    private void BuildPlaces()
+    {
+        if (World == null || _places != null) return;
+        // The places take the deploy panel's side of the screen.
+        if (_deployPanel != null) _deployPanel.Visible = false;
+        var panel = new PanelContainer { MouseFilter = MouseFilterEnum.Stop };
+        AddChild(panel);
+        panel.SetAnchorsAndOffsetsPreset(LayoutPreset.RightWide);
+        panel.OffsetLeft = -290;
+        panel.OffsetRight = -14;
+        panel.OffsetTop = 80;
+        panel.OffsetBottom = -90;
+        VBoxContainer col = Ui.Column(4);
+        panel.AddChild(col);
+        col.AddChild(Ui.Heading("Go to"));
+        col.AddChild(Ui.Wrapped("Takes you (and whatever you're driving) straight there, to look round.", 13, Ui.Dim));
+        var scroll = new ScrollContainer { SizeFlagsVertical = SizeFlags.ExpandFill, HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled };
+        col.AddChild(scroll);
+        _places = Ui.Column(2);
+        _places.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+        scroll.AddChild(_places);
+        FeatureKind[] order =
+        {
+            FeatureKind.Harbour, FeatureKind.Island, FeatureKind.Peak, FeatureKind.Pass, FeatureKind.Valley, FeatureKind.Fjord, FeatureKind.Canyon,
+            FeatureKind.Slot, FeatureKind.Mesa, FeatureKind.Buttes, FeatureKind.Volcano, FeatureKind.Crater, FeatureKind.Moor, FeatureKind.Stacks,
+        };
+        foreach (FeatureKind k in order)
+        foreach (Feature f in World.Features.Where(x => x.Kind == k))
+        {
+            Feature go = f;
+            Button b = Ui.Button(f.Name, () =>
+            {
+                Travel?.Invoke(go.At);
+                Close();
+            }, $"{k}: {f.Height:0} m", "Pill");
+            b.Alignment = HorizontalAlignment.Left;
+            b.FocusMode = FocusModeEnum.None;
+            _places.AddChild(b);
+        }
+    }
+
     public override void _Draw()
     {
         DrawRect(new Rect2(Vector2.Zero, Size), Sea);
         HeightField f = WorldQuery.Ground;
-        if (_terrain != null && f != null)
+        if (_terrain != null && World != null)
+        {
+            Vector2 a = ToScreen(new Vector3(-WorldMap.Half, 0, -WorldMap.Half)), b = ToScreen(new Vector3(WorldMap.Half, 0, WorldMap.Half));
+            DrawTextureRect(_terrain, new Rect2(a, b - a), false);
+            DrawPlaces();
+        }
+        else if (_terrain != null && f != null)
         {
             Vector2 a = ToScreen(new Vector3(f.Origin.X, 0, f.Origin.Y));
             Vector2 b = ToScreen(new Vector3(f.Origin.X + (f.Width - 1) * f.Spacing, 0, f.Origin.Y + (f.Depth - 1) * f.Spacing));
@@ -628,7 +770,7 @@ public partial class TacticalMap : Control
     private void ZoomAt(Vector2 screen, float k)
     {
         Vector2 before = ToWorld2(screen);
-        _zoom = Mathf.Clamp(_zoom * k, 0.05f, 12f);
+        _zoom = Mathf.Clamp(_zoom * k, World != null ? 0.04f : 0.05f, 12f);
         _center += before - ToWorld2(screen);
     }
 
@@ -892,6 +1034,7 @@ public partial class TacticalMap : Control
 
         // Deploy, on the right.
         var right = new PanelContainer { MouseFilter = MouseFilterEnum.Stop };
+        _deployPanel = right;
         AddChild(right);
         right.SetAnchorsAndOffsetsPreset(LayoutPreset.TopRight);
         right.GrowHorizontal = GrowDirection.Begin;

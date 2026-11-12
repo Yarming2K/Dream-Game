@@ -14,7 +14,7 @@ namespace DreamGame.Game;
 public partial class TestRange
 {
     /// <summary>Where a building being tried out from the builder goes: off to one side of the firing line.</summary>
-    private static readonly Vector3 BuildSite = new(-42, Ground, 108);
+    private Vector3 BuildSite = new(-42, Ground, 108);
 
     private static readonly Vector3 OutpostAt = new(46, Ground, 116);
 

@@ -79,7 +79,11 @@ void fragment() {
 }
 ";
 
-    public static MeshInstance3D Build()
+    /// <summary>
+    /// The sea: <paramref name="outer"/> is how far it reaches (the island's sea, or the world's, much further). In the
+    /// world its detailed middle follows you (see <see cref="Follow"/>).
+    /// </summary>
+    public static MeshInstance3D Build(float outer = 12000f)
     {
         var mat = new ShaderMaterial { Shader = new Shader { Code = WaterCode } };
         mat.SetShaderParameter("ripples", new NoiseTexture2D
@@ -102,7 +106,7 @@ void fragment() {
             Position = new Vector3(0, Level, 0),
         };
         // The open sea beyond: four strips around the detailed square, so no water is drawn twice.
-        const float inner = 700f, outer = 12000f;
+        const float inner = 700f;
         (Vector2 size, Vector3 pos)[] strips =
         {
             (new Vector2(outer * 2, outer - inner), new Vector3(0, 0, -(inner + outer) / 2)),
@@ -117,5 +121,12 @@ void fragment() {
                 MaterialOverride = mat, CastShadow = GeometryInstance3D.ShadowCastingSetting.Off, Position = pos,
             });
         return root;
+    }
+
+    /// <summary>Keeps the sea's detailed middle under you (in steps, so its waves don't slide; they're drawn from where they are in the world).</summary>
+    public static void Follow(Node3D sea, Vector3 at)
+    {
+        if (sea == null) return;
+        sea.Position = new Vector3(Mathf.Round(at.X / 50f) * 50f, Level, Mathf.Round(at.Z / 50f) * 50f);
     }
 }

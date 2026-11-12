@@ -90,6 +90,41 @@ public static class Vegetation
     }
 
     /// <summary>
+    /// The world's trees, bushes and rocks in one square patch, from what covers the ground (<paramref name="at"/> gives
+    /// height, steepness and cover at a point): woods where the cover says trees grow (pines up toward the tree line,
+    /// broadleaf lower down), bushes round them and scattered on dry ground, rocks and boulders on rocky slopes and screes.
+    /// Nothing on snow, beaches or anything too steep to hold a tree. The same place always grows the same plants.
+    /// </summary>
+    public static List<Plant> ScatterWorld(float x0, float z0, float size, int seed, Func<float, float, (float h, float slope, GroundCover c)> at)
+    {
+        var plants = new List<Plant>();
+        int n = (int)(size / Spacing);
+        int gx0 = (int)MathF.Floor(x0 / Spacing), gz0 = (int)MathF.Floor(z0 / Spacing);
+        for (int iz = 0; iz < n; iz++)
+        for (int ix = 0; ix < n; ix++)
+        {
+            uint h = Hash(gx0 + ix, gz0 + iz, seed);
+            float x = (gx0 + ix + U(h, 0)) * Spacing, z = (gz0 + iz + U(h, 1)) * Spacing;
+            (float y, float slope, GroundCover c) = at(x, z);
+            if (y < 1.6f || c.Snow > 0.4f || c.Sand > 0.5f) continue;
+            float wood = Fbm(x * 0.012f, z * 0.012f, seed);
+            float roll = U(h, 2);
+            float rocky = MathF.Max(c.Rock, c.Gravel * 0.5f);
+            PlantKind? kind = null;
+            if (rocky > 0.25f && roll < 0.02f + rocky * 0.1f) kind = slope > 0.3f || U(h, 5) < 0.45f ? PlantKind.Boulder : PlantKind.Rock;
+            else if (slope > 0.42f) continue;
+            else if (c.Forest > 0.02f && wood > 0.62f - c.Forest * 0.3f && roll < MathF.Min(0.8f, c.Forest * 1.5f))
+                kind = U(h, 3) < 0.2f + 0.75f * c.Upland ? PlantKind.Pine : PlantKind.Broadleaf;
+            else if (wood > 0.5f - c.Forest * 0.2f && roll < 0.3f * (c.Forest + 0.15f)) kind = PlantKind.Bush;
+            else if (roll < 0.012f + 0.02f * c.Dry) kind = U(h, 3) < 0.65f ? PlantKind.Bush : PlantKind.Rock;
+            if (kind == null) continue;
+            plants.Add(new Plant { Kind = kind.Value, X = x, Z = z, Yaw = U(h, 6) * MathF.Tau, Scale = 0.75f + U(h, 7) * 0.55f });
+        }
+
+        return plants;
+    }
+
+    /// <summary>
     /// A vehicle of <paramref name="massKg"/> moving at <paramref name="speed"/> into a tree: whether it goes over.
     /// A bush always goes flat.
     /// </summary>

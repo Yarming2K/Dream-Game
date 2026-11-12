@@ -18,27 +18,27 @@ public partial class TestRange : Node3D
     public event Action ExitRequested;
 
     private const float Ground = Terrain.LandHeight;
-    private static readonly Vector3 SpawnPoint = new(0, Ground, 120);
-    private static readonly Vector3 DepotCenter = new(16, Ground, 124);
+    private Vector3 SpawnPoint = new(0, Ground, 120);
+    private Vector3 DepotCenter = new(16, Ground, 124);
     private const float DepotRadius = 9f;
 
     // The sea off the east coast: ships start here, and a supply ring floats behind them.
-    private static readonly Vector3 SeaSpawn = new(240, Ocean.Level, 60);
-    private static readonly Vector3 SeaDepotCenter = new(240, Ocean.Level, 100);
+    private Vector3 SeaSpawn = new(240, Ocean.Level, 60);
+    private Vector3 SeaDepotCenter = new(240, Ocean.Level, 100);
     private const float SeaDepotRadius = 18f;
 
     // Big ships (anything over 80 m) start further out, at the fleet anchorage, which also resupplies them.
-    private static readonly Vector3 Anchorage = new(470, Ocean.Level, 0);
+    private Vector3 Anchorage = new(470, Ocean.Level, 0);
     private const float AnchorageRadius = 90f;
     private const float BigShipLength = 80f;
     private float _missingTimer;
     private int _missing;
 
     // The airfield in the western hills.
-    private static readonly Vector3 StripStart = new(Terrain.StripX, Ground, Terrain.StripHalfLength - 18f);
-    private static readonly Vector3 Apron = new(Terrain.StripX, Ground, Terrain.StripHalfLength - 2f);
+    private Vector3 StripStart = new(Terrain.StripX, Ground, Terrain.StripHalfLength - 18f);
+    private Vector3 Apron = new(Terrain.StripX, Ground, Terrain.StripHalfLength - 2f);
     private const float ApronRadius = 16f;
-    private static readonly Vector3 HelipadCenter = new(Terrain.Helipad.X, Ground, Terrain.Helipad.Y);
+    private Vector3 HelipadCenter = new(Terrain.Helipad.X, Ground, Terrain.Helipad.Y);
 
     private bool _remote;
     private bool _bombQueued, _vtolQueued, _emergencyQueued;
@@ -116,7 +116,45 @@ public partial class TestRange : Node3D
     private StatBar _healthBar, _weaponReload, _weldBar;
     private PanelContainer _weldPanel;
 
-    public void Setup(Blueprint bp) => _bp = bp;
+    /// <summary>
+    /// What to drive, and where: the test range's island, or (with <paramref name="world"/>) the campaign world, starting
+    /// at its start site with the same supply pad, airstrip, helipad and sea depot, and no targets.
+    /// </summary>
+    public void Setup(Blueprint bp, WorldMap world = null)
+    {
+        _bp = bp;
+        _world = world;
+    }
+
+    private WorldMap _world;
+    private bool InWorld => _world != null;
+    private Node3D _sea;
+
+    // The airstrip: its middle, which way it runs (0 is north-south) and its size.
+    private Vector3 _stripCenter = new(Terrain.StripX, Ground, 0f);
+    private float _stripYaw, _stripHalfLength = Terrain.StripHalfLength, _stripHalfWidth = Terrain.StripHalfWidth;
+
+    /// <summary>Puts the depot, airstrip, helipad, sea depot and anchorage at the world's start site.</summary>
+    private void PlaceForWorld()
+    {
+        StartSite st = _world.Start;
+        Vector3 At(System.Numerics.Vector2 p, float y) => new(p.X, y, p.Y);
+        SpawnPoint = At(st.Spawn, Ground);
+        DepotCenter = At(st.Depot, Ground);
+        SeaSpawn = At(st.SeaSpawn, Ocean.Level);
+        SeaDepotCenter = At(st.SeaDepot, Ocean.Level);
+        Anchorage = At(st.Anchorage, Ocean.Level);
+        HelipadCenter = At(st.Helipad, Ground);
+        _stripCenter = At(st.StripCenter, Ground);
+        _stripHalfLength = st.StripHalfLength;
+        _stripHalfWidth = st.StripHalfWidth;
+        // Planes start at one end facing down the strip.
+        _stripYaw = Mathf.Atan2(st.Along.X, st.Along.Y);
+        StripStart = At(st.StripCenter + st.Along * (st.StripHalfLength - 18f), Ground);
+        Apron = At(st.StripCenter + st.Along * (st.StripHalfLength - 2f), Ground);
+        BuildSite = At(st.ToWorld(-330f, 60f), Ground);
+        CommandPostAt = At(st.ToWorld(-115f, 175f), Ground);
+    }
 
     public override void _Ready()
     {
@@ -134,17 +172,29 @@ public partial class TestRange : Node3D
                 _atmosphere.Setup(_env, sunLight);
                 break;
             }
-        AddChild(Terrain.Build());
-        AddChild(Ocean.Build());
-        AddRamps();
-        AddMarkers();
+        if (InWorld)
+        {
+            PlaceForWorld();
+            AddChild(WorldGround.Build(_world, SpawnPoint));
+            _sea = Ocean.Build(42000f);
+            AddChild(_sea);
+            Ocean.Follow(_sea, SpawnPoint);
+        }
+        else
+        {
+            AddChild(Terrain.Build());
+            AddChild(Ocean.Build());
+            AddRamps();
+            AddMarkers();
+        }
+
         AddDepot();
         AddSeaDepot();
         AddAirfield();
-        AddPopupTargets();
+        if (!InWorld) AddPopupTargets();
         RegisterProps(this);
         // Trees, bushes and rocks (added after the props, so wheels don't try to drive up the trunks).
-        AddChild(new Scatter { Name = "Scatter" });
+        AddChild(InWorld ? WorldScatter.Create(_world) : new Scatter { Name = "Scatter" });
         _combat = new Combat { Name = "Combat" };
         AddChild(_combat);
         _combat.Event += OnCombatEvent;
@@ -162,7 +212,7 @@ public partial class TestRange : Node3D
             SpringLength = _dist, Margin = 0.3f, CollisionMask = GridRegistry.Layers.World | GridRegistry.Layers.Structures,
         };
         _pivot.AddChild(_arm);
-        _cam = new Camera3D { Fov = 70f, Far = 8000f };
+        _cam = new Camera3D { Fov = 70f, Far = InWorld ? 32000f : 8000f };
         _arm.AddChild(_cam);
 
         BuildHud();
@@ -328,24 +378,26 @@ public partial class TestRange : Node3D
     {
         var concrete = new StandardMaterial3D { AlbedoColor = new Color(0.5f, 0.5f, 0.48f), Roughness = 0.95f };
         var paint = new StandardMaterial3D { AlbedoColor = new Color(0.92f, 0.92f, 0.88f), Roughness = 0.8f };
-        float len = Terrain.StripHalfLength * 2f, w = Terrain.StripHalfWidth * 1.6f;
-        AddChild(new MeshInstance3D
+        float len = _stripHalfLength * 2f, w = _stripHalfWidth * 1.6f;
+        var strip = new Node3D { Name = "Airstrip", Position = new Vector3(_stripCenter.X, Ground, _stripCenter.Z), Rotation = new Vector3(0, _stripYaw, 0) };
+        AddChild(strip);
+        strip.AddChild(new MeshInstance3D
         {
             Mesh = new BoxMesh { Size = new Vector3(w, 0.1f, len) }, MaterialOverride = concrete,
-            Position = new Vector3(Terrain.StripX, Ground - 0.02f, 0), CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
+            Position = new Vector3(0, -0.02f, 0), CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
         });
-        for (float z = -Terrain.StripHalfLength + 30f; z < Terrain.StripHalfLength - 30f; z += 24f)
-            AddChild(new MeshInstance3D
+        for (float z = -_stripHalfLength + 30f; z < _stripHalfLength - 30f; z += 24f)
+            strip.AddChild(new MeshInstance3D
             {
                 Mesh = new BoxMesh { Size = new Vector3(0.6f, 0.02f, 10f) }, MaterialOverride = paint,
-                Position = new Vector3(Terrain.StripX, Ground + 0.04f, z), CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
+                Position = new Vector3(0, 0.04f, z), CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
             });
         foreach (float end in new[] { -1f, 1f })
             for (int i = -3; i <= 3; i++)
-                AddChild(new MeshInstance3D
+                strip.AddChild(new MeshInstance3D
                 {
                     Mesh = new BoxMesh { Size = new Vector3(1.4f, 0.02f, 12f) }, MaterialOverride = paint,
-                    Position = new Vector3(Terrain.StripX + i * 2.6f, Ground + 0.04f, end * (Terrain.StripHalfLength - 12f)),
+                    Position = new Vector3(i * 2.6f, 0.04f, end * (_stripHalfLength - 12f)),
                     CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
                 });
 
@@ -374,7 +426,7 @@ public partial class TestRange : Node3D
         AddChild(Sign("HELIPAD\nland here to rearm", HelipadCenter + new Vector3(0, 5f, -Terrain.HelipadRadius - 2f), 64));
     }
 
-    private static bool AtDepot(Vector3 p)
+    private bool AtDepot(Vector3 p)
     {
         float land = new Vector2(p.X - DepotCenter.X, p.Z - DepotCenter.Z).Length();
         float sea = new Vector2(p.X - SeaDepotCenter.X, p.Z - SeaDepotCenter.Z).Length();
@@ -412,6 +464,7 @@ public partial class TestRange : Node3D
 
         _targets.Clear();
         _combat?.Clear();
+        if (InWorld) return;
 
         float wallZ = SpawnPoint.Z - 60f;
         AddStructure(ExampleDesigns.Wall("armor_light", 7, 5), new Vector3(-24, Ground, wallZ), 0, "Light armor\n25 mm");
@@ -490,7 +543,7 @@ public partial class TestRange : Node3D
             MobilityMode.Building => BuildSite + Vector3.Up * VehicleBody.SpawnHeight(a),
             _ => SpawnPoint + Vector3.Up * VehicleBody.SpawnHeight(a),
         };
-        var where = new Transform3D(Basis.Identity, at);
+        var where = new Transform3D(a.Mode == MobilityMode.Plane ? new Basis(Vector3.Up, _stripYaw) : Basis.Identity, at);
         _vehicle = VehicleBody.Create(_bp, where, true, a);
         _vehicle.AiCrewActive = _liveFire;
         HookVehicle(_vehicle);
@@ -716,6 +769,7 @@ public partial class TestRange : Node3D
     public override void _PhysicsProcess(double delta)
     {
         float dt = (float)delta;
+        HoldArrival(dt);
         bool captured = Input.MouseMode == Input.MouseModeEnum.Captured;
         if (!Input.IsActionPressed("fire")) _holdFire = false;
 
@@ -923,6 +977,11 @@ public partial class TestRange : Node3D
         float n3 = _shakeNoise.GetNoise2D(_shakeTime * 60f, 100f);
         Camera3D active = Mounted ? _cam : _me.Camera;
         WorldQuery.Viewer = active.GlobalPosition;
+        if (InWorld)
+        {
+            Ocean.Follow(_sea, active.GlobalPosition);
+            WorldGround.PlayerAt = _me != null && _me.Alive && !Mounted ? _me.GlobalPosition : null;
+        }
         DrillTick();
         UpdateUnderwater(active);
         active.HOffset = n1 * 0.35f * shake;
@@ -1000,7 +1059,7 @@ public partial class TestRange : Node3D
             _airFogColor = _atmosphere.FogColor;
         }
 
-        _env.FogDensity = under ? 0.075f : _airFogDensity / (1f + height / 150f);
+        _env.FogDensity = under ? 0.075f : _airFogDensity / (1f + height / 150f) * (InWorld ? 0.16f : 1f);
         _env.FogLightColor = under ? new Color(0.05f, 0.22f, 0.26f) : _airFogColor;
         _env.FogSkyAffect = under ? 1f : 0.3f;
     }
@@ -1454,7 +1513,9 @@ public partial class TestRange : Node3D
         _liveChip.OffsetTop = 14;
         _liveChip.AddThemeConstantOverride("outline_size", 6);
 
-        Label hint = Ui.Small("F1 help   ·   E get in / out   ·   M tactical map   ·   F torpedo / missile   ·   B bomb   ·   L live fire   ·   F8 battle drill   ·   F3 performance   ·   Tab builder");
+        Label hint = Ui.Small(InWorld
+            ? "F1 help   ·   E get in / out   ·   M map: go anywhere   ·   O vehicle options   ·   F torpedo / missile   ·   B bomb   ·   F6 time of day   ·   F7 weather   ·   F3 performance   ·   Tab builder"
+            : "F1 help   ·   E get in / out   ·   M tactical map   ·   F torpedo / missile   ·   B bomb   ·   L live fire   ·   F8 battle drill   ·   F3 performance   ·   Tab builder");
         root.AddChild(hint);
         hint.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.BottomLeft);
         hint.GrowVertical = Control.GrowDirection.Begin;

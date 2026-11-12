@@ -443,7 +443,7 @@ The goal is hundreds of vehicles and thousands of shells in the air at once, on 
 | Length | **About 10 to 20 hours**, from WW2 kit to modern jets and missiles, with a speed setting to make it shorter or longer. |
 
 **Build order** (each step playable on its own):
-1. **The world:** a seeded 20 × 20 km archipelago (6 to 10 islands, sea between them, roads), with sites on it (ports, airfields, mines, oil wells, towns), streamed in tiles around the player; units far away moving and fighting on the simplified rules.
+1. **The world:** a seeded 20 × 20 km archipelago (6 to 10 islands, sea between them, roads), with sites on it (ports, airfields, mines, oil wells, towns), streamed in tiles around the player; units far away moving and fighting on the simplified rules. *First pass built: the geology (see "The world: geology"). Next: roads, then sites, then units far away.*
 2. **Economy rules in Core:** the 8 resources, what each block costs, what sites produce, stockpiles, supply routes (convoys near you, worked out along routes far away). Tested.
 3. **Production:** the workshop for prototypes, vehicle bays, hangars and shipyards with queues, refits, and the price and build time in the builder.
 4. **The rival:** one AI faction with designs for each era and a strategy (expand, defend, attack, raid supply lines).
@@ -451,6 +451,25 @@ The goal is hundreds of vehicles and thousands of shells in the air at once, on 
 6. **Field equipment and call-ins:** the forward depot, field airstrip, radar post, and binoculars.
 7. **The campaign itself:** start, capturing sites, victory, saving and loading, the speed setting, and opening missions that teach by doing.
 
+
+### The world: geology (step 1, first pass)
+Asked for by the owner: "for a first round we create geologic things like mountains, valleys and canyons". Reached from the builder's **WORLD** button: you drive your design there instead of on the range, starting at the start site.
+- **The archipelago** (`src/Core/World.cs`, `WorldGen.cs`, tested): ten islands on a 20 × 20 km sea, made from a seed (seed 1 for now; the same seed always makes the same world), each a bent ellipse with a peninsula, roughened coasts and a shelf falling away to deep water 190 m down. Coasts are beaches or cliffs by stretches. Placed by role: yours in the south-west, the rival's in the north-east, the mountains between.
+  - **Alpine** (the big one in the middle): a range of granite peaks to about 1,050 m with snow above about 840 m. **Glacial valleys** with U-shaped walls run down from the ridge; some are **fjords**, the sea reaching a kilometer or more inland between walls hundreds of meters high. Two valleys meet at a **pass** (about 340 m) low and gentle enough to drive over.
+  - **Canyonlands**: a sandstone plateau about 300 m high. A **main canyon** about 200 m deep winds across it in meanders to the sea, with three **side canyons** and three **slot canyons** (2 to 5 m wide, up to 35 m deep, twisting, dropping into a bigger canyon by a steep pour-off). The rock lies in **layers** 32 m thick, each a cliff over a ledge, at the same heights everywhere, so canyon walls, the plateau's stepped edge, **mesas** and **buttes** all show the same bands. Walls wander, with alcoves and side ravines.
+  - **Volcanic**: a basalt cone about 900 m high with a **crater** 250 m deep, a smaller cone on its flank, old lava flows, and a **breach**: a gorge from the crater floor out through the rim and round the flank to the sea, the way to drive in.
+  - **Highlands**: moorland hills to about 300 m worn into branching river valleys.
+  - **Foothold** (yours) and **Stronghold** (the rival's): rolling downs to 150-200 m with long beaches and a few river valleys; the rival's has a central massif.
+  - **Islets**: three cliff-girt rocks with **sea stacks** round them, and a low sandy cay.
+- **How it's made**: the islands' shapes and the valleys are worked out at any point; then rain wears the land (`Erosion.cs`: a few hundred thousand drops run downhill over a 20 m grid, cutting gullies and leaving fans; the wear fades out toward the sea so coasts keep their cliffs and beaches); then the canyons are cut sharp; then fine roughness. So the ground can be sampled at 1 m near you and coarsely far off and the two agree. Generating takes 2-3 s, in the background while you're in the builder.
+- **Names**: every island, range, peak, pass, valley, fjord, canyon, slot, mesa, butte, volcano, crater and stack has a made-up name (syllables, `PlaceNames.cs`), shown on the map.
+- **The start site**: a stretch of your island's coast levelled for the supply pad, a 600 m airstrip, the helipad and the command post, behind a curved beach, with a round dredged harbour off it (24 m deep at the ship spawn and sea depot, 40 m at the anchorage).
+- **What covers the ground** (`WorldMap.Cover`): rock on anything steeper than about 30°, bare rock high in the mountains and on the plateau's slickrock, snow above the snow line where it isn't too steep, sand on beaches, gravel on canyon and valley floors; grey granite, layered red sandstone or black basalt by island; grass dry and gold on the plateau, browner on the moors. The ground shader draws all of it, the sandstone in bands by height.
+- **Trees** (`Vegetation.ScatterWorld`): woods where the cover allows them (thick on the alpine slopes up to the tree line at about 640 m, pines higher and broadleaf lower; lighter on the home islands; sparse on the moors and volcano; scrub in canyon country), bushes round them, rocks and boulders on rocky slopes. Grown in 128 m patches round you out to 1.1 km.
+- **In the game** (`src/Game/WorldGround.cs`): near you, a 2 km square of ground at 1 m, the same grid the island uses, so shells, wheels, sight lines, craters, the shovel and the dozer all work as on the island. When you've gone 320 m from its middle a new square is put together in the background and swapped in; ground you dug or blasted is kept and put back when you return. Beyond the square, the ground is asked of the whole world's 20 m grid. Drawn in four levels of detail out to the horizon (1 m within about 440 m, then 4 m, 16 m and 64 m), each chunk built on another thread, with skirts hiding the joins. Collision only near vehicles, structures and you. The haze is thinner than on the range so mountains show 10 km off.
+- **Ground that was never dug holds its shape**: earth only slumps where it's been turned over or piled, so a crater beside a cliff no longer brings the cliff down.
+- **The map** (M, anywhere in the world): the whole archipelago in shaded relief with every place name, and a **Go to** list: pick a place and you, and whatever you're driving, go straight there (ground vehicles to the nearest gentle dry ground, ships to deep water, aircraft arriving 260 m up and flying).
+- **Not yet**: rivers and lakes (valleys and canyons are dry for now; their floors are gravel), roads, sites, the rival, and units far away. Craters out beyond the 2 km square aren't dug (shells still hit the ground there).
 
 ## Technical approach
 
@@ -518,6 +537,7 @@ What still separates them from the real ones (for later passes): our fuselages a
 2. **Game mechanics**: jets built from parts, streamlining, engine tuning and heat (see Jets).
 3. **Campaign planning** *(done: see "Campaign plan")*.
 3a. **Sandbox: era looks, first pass** *(done: see "Era looks")*. Parts and paint so modern machines look modern, real-scale examples, and a comparison with photos of the real ones. Then the same for buildings *(done: see "Buildings")*: the fortification kit, all seven example buildings rebuilt from real fortifications, and village gables that follow the roof line. Then ships *(done)*, then aircraft from the Second World War to the near future *(done: see "Era looks")*.
+3c. **Campaign step 1, the world: geology** *(first pass built: see "The world: geology")*.
 3b. **Detour: in-vehicle instruments and options** *(Glass and the options panel built; Fighter HUD, Gauges and Tactical next; see "In-vehicle instruments")*.
 4. **Campaign building**: industry and the planet war (milestones 4 and 5 below).
 5. **If we're in a good spot**: multiplayer (co-op first) and easier creation, somewhere between campaign planning and graphics pass 2.

@@ -67,6 +67,12 @@ public partial class TestRange
 
     private void ToggleDrill()
     {
+        if (InWorld)
+        {
+            Big("Battle drills are on the test range");
+            return;
+        }
+
         _drillLevel = (_drillLevel + 1) % 3;
         ClearDrill();
         if (_drillLevel == 0)

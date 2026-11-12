@@ -112,7 +112,7 @@ public sealed partial class WorldMap
             Along = new Vector2(-seaward.Y, seaward.X),
             Center = coast - seaward * c,
             CoastOffset = c,
-            Ground = 4.5f,
+            Ground = 3f,
             HalfAlong = 600f,
             HalfInland = 430f,
             StripHalfLength = 300f,

@@ -100,6 +100,13 @@ public static class Terrain
     /// <summary>The island's ground as it changes (craters, digging), or null before the range is built.</summary>
     public static DreamGame.Core.Earthworks Earth { get; private set; }
 
+    /// <summary>The world's ground near you takes over from the island's (see <see cref="WorldGround"/>).</summary>
+    internal static void UseWorld(DreamGame.Core.Earthworks earth)
+    {
+        Earth = earth;
+        _locked = null;
+    }
+
     /// <summary>The ground changed here (in world meters, x0, z0, x1, z1): vehicles there wake up, the map redraws.</summary>
     public static event Action<Rect2> Changed;
 
@@ -241,7 +248,12 @@ public static class Terrain
         foreach (int t in _collideDirty) _shapes[t].MapData = TileHeights(t % Tiles, t / Tiles);
         _collideDirty.Clear();
         DrawSome();
-        var rect = new Rect2(d.X0 - half, d.Z0 - half, d.X1 - d.X0 + 1, d.Z1 - d.Z0 + 1);
+        Notify(new Rect2(d.X0 - half, d.Z0 - half, d.X1 - d.X0 + 1, d.Z1 - d.Z0 + 1));
+    }
+
+    /// <summary>The ground changed in <paramref name="rect"/> (world meters): whatever stands there wakes, and listeners hear.</summary>
+    internal static void Notify(Rect2 rect)
+    {
         // Whatever stands there feels the ground go: parked vehicles wake and settle into the new shape.
         foreach (IGridHost host in GridRegistry.Hosts)
         {
@@ -267,7 +279,9 @@ public static class Terrain
     }
 
     // The ground's look. Each point of the mesh says how much of it is dirt (r), rock (g), sand (b) and earth
-    // churned up by shells or dug (a); grass is what's left. The shader paints each layer from noise in world
+    // churned up by shells or dug (a); grass is what's left. The world's ground also says how much snow (UV.x) and
+    // gravel (UV.y) there is, which rock it is (UV2.x: 0 grey granite, 0.5 layered red sandstone, 1 black basalt) and how
+    // dry the grass is (UV2.y); the island leaves those at zero. The shader paints each layer from noise in world
     // space: dry and green patches of grass with bare spots, pebbly dirt, rock with strata and cracks, sand with a
     // wet band at the waterline, dark clods of turned earth.
     private const string GroundCode = @"
@@ -281,10 +295,31 @@ global uniform float wetness;
 
 varying vec3 wpos;
 varying vec3 wnrm;
+varying vec2 extra;
+varying vec2 kind;
 
 void vertex() {
 	wpos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 	wnrm = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz);
+	extra = UV;
+	kind = UV2;
+}
+
+float hash1(float k) {
+	return fract(sin(k * 127.1 + 311.7) * 43758.5453);
+}
+
+// Layered sandstone: each 32 m layer its own shade of red, orange, cream or brown, with thin bands inside it.
+vec3 strata(float y, float g) {
+	float k = floor(y / 32.0);
+	float f = y / 32.0 - k;
+	vec3 pal0 = vec3(0.58, 0.27, 0.16), pal1 = vec3(0.72, 0.42, 0.25), pal2 = vec3(0.84, 0.72, 0.55);
+	vec3 pal3 = vec3(0.74, 0.49, 0.38), pal4 = vec3(0.52, 0.33, 0.22);
+	float a = hash1(k), b = hash1(k + 1.0);
+	vec3 ca = a < 0.2 ? pal0 : a < 0.4 ? pal1 : a < 0.6 ? pal2 : a < 0.8 ? pal3 : pal4;
+	vec3 cb = b < 0.2 ? pal0 : b < 0.4 ? pal1 : b < 0.6 ? pal2 : b < 0.8 ? pal3 : pal4;
+	vec3 c = mix(ca, cb, smoothstep(0.94, 1.0, f));
+	return c * (0.88 + 0.1 * sin(y * 1.7 + g * 2.0) + 0.12 * g);
 }
 
 float tri(vec3 p, vec3 n) {
@@ -303,9 +338,14 @@ void fragment() {
 
 	// Grass: green and dry patches, a speckle of blades, the odd bare spot.
 	vec3 grass = mix(vec3(0.21, 0.27, 0.11), vec3(0.37, 0.36, 0.17), smoothstep(0.3, 0.75, big));
+	// Dry grass: gold on the canyon plateau, browner on the moors.
+	grass = mix(grass, vec3(0.5, 0.43, 0.24) * (0.85 + 0.3 * big), kind.y * (0.55 + 0.45 * smoothstep(0.25, 0.7, big)));
 	grass = mix(grass, grass * vec3(1.15, 1.08, 0.85), smoothstep(0.45, 0.8, mid) * 0.6);
 	grass *= 0.82 + 0.3 * speck;
-	vec3 dirt = vec3(0.37, 0.31, 0.22) * (0.78 + 0.35 * fine);
+	vec3 dirt = vec3(0.37, 0.31, 0.22);
+	dirt = mix(dirt, vec3(0.58, 0.35, 0.21), smoothstep(0.25, 0.5, kind.x) * (1.0 - smoothstep(0.75, 0.9, kind.x)));
+	dirt = mix(dirt, vec3(0.17, 0.16, 0.15), smoothstep(0.75, 0.9, kind.x));
+	dirt *= 0.78 + 0.35 * fine;
 	dirt = mix(dirt, vec3(0.55, 0.52, 0.47), smoothstep(0.78, 0.86, speck) * 0.6);
 	float bare = smoothstep(0.7, 0.8, mid * 0.65 + fine * 0.35);
 	vec3 col = mix(grass, dirt, bare * 0.7);
@@ -318,9 +358,18 @@ void fragment() {
 	float rk = tri(wpos * vec3(0.18, 0.7, 0.18), wnrm);
 	vec3 rock = vec3(0.43, 0.41, 0.37) * (0.62 + 0.55 * rk);
 	rock *= 1.0 - smoothstep(0.82, 0.92, 1.0 - tri(wpos * 0.9, wnrm)) * 0.45;
+	vec3 sandstone = strata(wpos.y + (rk - 0.5) * 2.5, rk);
+	vec3 basalt = vec3(0.12, 0.115, 0.11) * (0.75 + 0.5 * rk);
+	rock = mix(rock, sandstone, smoothstep(0.25, 0.5, kind.x) * (1.0 - smoothstep(0.75, 0.9, kind.x)));
+	rock = mix(rock, basalt, smoothstep(0.75, 0.9, kind.x));
 	float wr = smoothstep(0.3, 0.6, COLOR.g + edge * 0.6);
 	col = mix(col, rock, wr);
 	rough = mix(rough, 0.82, wr);
+
+	// Gravel and sand on canyon and valley floors.
+	vec3 gravel = mix(vec3(0.5, 0.48, 0.44), vec3(0.64, 0.47, 0.34), smoothstep(0.25, 0.5, kind.x) * (1.0 - smoothstep(0.75, 0.9, kind.x)));
+	gravel *= 0.7 + 0.45 * speck;
+	col = mix(col, gravel, smoothstep(0.2, 0.6, extra.y + edge * 0.5));
 
 	// Sand at the shore, darker and shinier where the sea wets it, then the seabed.
 	vec3 sand = vec3(0.62, 0.56, 0.42) * (0.88 + 0.18 * fine);
@@ -336,6 +385,11 @@ void fragment() {
 	turned = mix(turned, vec3(0.33, 0.27, 0.19), smoothstep(0.72, 0.8, speck) * 0.7);
 	col = mix(col, turned, smoothstep(0.1, 0.5, COLOR.a + (fine - 0.5) * 0.3));
 
+	// Snow on the high ground, thinning to patches at its edge.
+	float sn = smoothstep(0.35, 0.65, extra.x + (mid - 0.5) * 0.5 + (fine - 0.5) * 0.15);
+	col = mix(col, vec3(0.9, 0.92, 0.96) * (0.92 + 0.08 * fine), sn);
+	rough = mix(rough, 0.55, sn);
+
 	// Rain darkens the ground and makes it shine, most where it's flat.
 	float wetnow = wetness * (0.6 + 0.4 * smoothstep(0.85, 0.98, wnrm.y));
 	col *= 1.0 - 0.35 * wetnow;
@@ -346,7 +400,7 @@ void fragment() {
 }
 ";
 
-    private static ShaderMaterial GroundMaterial()
+    internal static ShaderMaterial GroundMaterial()
     {
         var m = new ShaderMaterial { Shader = new Shader { Code = GroundCode } };
         m.SetShaderParameter("blotch", new NoiseTexture2D

@@ -46,7 +46,8 @@ public sealed class BlockInstance
         Orientation = orientation;
         Hp = def.Hp;
         Section = section;
-        if (def.Kind is BlockKind.AmmoRack or BlockKind.BombRack) AmmoUnits = def.AmmoUnits;
+        // Ammunition racks, bomb racks and missile launch cells come loaded.
+        if (def.Kind is BlockKind.AmmoRack or BlockKind.BombRack or BlockKind.VlsCell) AmmoUnits = def.AmmoUnits;
         Cells = Footprint.CellArray(def, cell, orientation);
         Center = def.IsMultiCell ? Footprint.Center(def, cell, orientation) : cell.ToVector3();
     }
