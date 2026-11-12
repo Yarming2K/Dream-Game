@@ -189,7 +189,7 @@ public partial class VehicleBody : RigidBody3D, IGridHost
 
         Livery livery = Liveries.For(bp, a.IsNaval);
         v.View = new GridView(v, v.Model, c => calibers.TryGetValue(c, out float cal) ? cal : 76f, shareKey: bp, lod: true,
-            livery: livery, waterline: a.IsNaval ? a.Water.WaterlineY : null,
+            livery: livery, waterline: a.Mode == MobilityMode.Ship ? a.Water.WaterlineY : null, // (submarines are one color all over)
             // Tanks get the most mud; aircraft barely any, ships none (the anti-fouling's below the waterline).
             wear: a.IsBuilding ? 0.55f : 0.7f, mud: a.IsNaval ? 0f : a.IsAir ? 0.12f : a.IsBuilding ? 0.3f : 0.8f,
             boxSlopes: !a.IsBuilding);

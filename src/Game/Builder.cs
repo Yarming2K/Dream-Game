@@ -436,7 +436,8 @@ public partial class Builder : Node3D
     {
         bool naval = _analysis?.IsNaval ?? false;
         Livery l = Liveries.For(new Blueprint { Paint = _paint }, naval);
-        _batch?.SetPaint(l, naval ? _analysis.Water.WaterlineY : null);
+        // (Ships get grey decks and waterline bands; submarines are one color all over.)
+        _batch?.SetPaint(l, _analysis?.Mode == MobilityMode.Ship ? _analysis.Water.WaterlineY : null);
     }
 
     /// <summary>The box around every filled cell (kept up to date as blocks are added; recounted after removals).</summary>
