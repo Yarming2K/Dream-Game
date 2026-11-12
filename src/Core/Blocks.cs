@@ -112,6 +112,9 @@ public enum BlockKind
 
     /// <summary>Field fortification and fittings: sandbags, barrier baskets, wire, nets, posts, fences and armored cupolas.</summary>
     Fieldwork,
+
+    /// <summary>A ship's fittings: funnels, masts, boats, life rafts, anchors, bollards and windlasses.</summary>
+    ShipFitting,
 }
 
 /// <summary>What a vertical launch cell holds.</summary>
@@ -637,6 +640,13 @@ public static class BlockCatalog
         },
         new BlockDef
         {
+            Id = "radar_face", Name = "Array Radar Face (5×5×1)", Category = "Control", Kind = BlockKind.Radar, Size = new Int3(5, 5, 1),
+            Description = "An eight-sided phased-array face 2.3 m across, set flush into the side of a ship's superstructure and tilted back a little; modern warships carry four, one on each face of the bridge block. Works like a Search Radar. Its face is the front.",
+            MassKg = 1500, Hp = 220, ArmorMm = 8, HasCollider = false, Watertight = false,
+            ColorR = 0.5f, ColorG = 0.53f, ColorB = 0.55f, Metallic = 0.5f, Roughness = 0.5f,
+        },
+        new BlockDef
+        {
             Id = "gunner_seat", Name = "Gunner Seat", Category = "Control", Kind = BlockKind.GunnerSeat,
             Description = "Whoever sits here aims and fires the guns in the same turret (or the hull guns, if it's in the hull). Empty seats get an AI crew member, so you can drive while your gunner shoots.",
             MassKg = 90, Hp = 80, ArmorMm = 5, ColorR = 0.42f, ColorG = 0.26f, ColorB = 0.2f,
@@ -848,6 +858,62 @@ public static class BlockCatalog
             Description = "A Heavy Wheel that turns for steering. Big trucks steer with their front two axles.",
             MassKg = 460, Hp = 300, ArmorMm = 12, WheelRadiusM = 0.7f, HasCollider = false, Watertight = false, Displacement = 0.5f,
             ColorR = 0.12f, ColorG = 0.12f, ColorB = 0.14f, Metallic = 0.1f, Roughness = 0.9f,
+        },
+        new BlockDef
+        {
+            Id = "funnel", Name = "Funnel (3×6×5)", Category = "Sea", Kind = BlockKind.ShipFitting, Size = new Int3(3, 6, 5),
+            Description = "A ship's raked funnel, 3 m tall, carrying the engines' exhausts up clear of the decks: a rounded casing, louvres, and a dark cap with the uptakes showing. Stand it on the deck over the engine rooms.",
+            MassKg = 1400, Hp = 300, ArmorMm = 8, Watertight = false,
+            ColorR = 0.5f, ColorG = 0.53f, ColorB = 0.55f, Metallic = 0.6f, Roughness = 0.5f,
+        },
+        new BlockDef
+        {
+            Id = "mast_lattice", Name = "Lattice Mast (3×12×3)", Category = "Sea", Kind = BlockKind.ShipFitting, Size = new Int3(3, 12, 3),
+            Description = "A tapering steel lattice mast 6 m tall with two platforms, a yardarm, whip antennas and navigation lights: the tall mast over a warship's bridge. Put the radars round it.",
+            MassKg = 1800, Hp = 260, ArmorMm = 6, HasCollider = false, Watertight = false,
+            ColorR = 0.5f, ColorG = 0.53f, ColorB = 0.55f, Metallic = 0.6f, Roughness = 0.5f,
+        },
+        new BlockDef
+        {
+            Id = "mast_pole", Name = "Pole Mast (1×10×1)", Category = "Sea", Kind = BlockKind.ShipFitting, Size = new Int3(1, 10, 1),
+            Description = "A single steel pole mast 5 m tall with a yardarm and a masthead light: small ships, and the after mast of big ones.",
+            MassKg = 160, Hp = 80, ArmorMm = 4, HasCollider = false, Watertight = false,
+            ColorR = 0.5f, ColorG = 0.53f, ColorB = 0.55f, Metallic = 0.6f, Roughness = 0.5f,
+        },
+        new BlockDef
+        {
+            Id = "ships_boat", Name = "Ship's Boat (3×3×9)", Category = "Sea", Kind = BlockKind.ShipFitting, Size = new Int3(3, 3, 9),
+            Description = "A 4.5 m rigid inflatable boat in its cradle under a davit: the boarding boat every warship carries amidships.",
+            MassKg = 1600, Hp = 120, ArmorMm = 3, HasCollider = false, Watertight = false,
+            ColorR = 0.5f, ColorG = 0.53f, ColorB = 0.55f, Metallic = 0.5f, Roughness = 0.55f,
+        },
+        new BlockDef
+        {
+            Id = "liferaft", Name = "Life Raft Canisters", Category = "Sea", Kind = BlockKind.ShipFitting, Unpainted = true,
+            Description = "Two white canisters, each holding a life raft that inflates when thrown over the side, in a cradle at the deck edge.",
+            MassKg = 80, Hp = 30, ArmorMm = 1, HasCollider = false, Watertight = false,
+            ColorR = 0.86f, ColorG = 0.86f, ColorB = 0.83f, Metallic = 0f, Roughness = 0.5f,
+        },
+        new BlockDef
+        {
+            Id = "anchor", Name = "Anchor", Category = "Sea", Kind = BlockKind.ShipFitting, Unpainted = true,
+            Description = "A stockless anchor stowed in its hawse pipe on the side of the bow, its chain running up to the windlass.",
+            MassKg = 400, Hp = 120, ArmorMm = 20, HasCollider = false, Watertight = false,
+            ColorR = 0.12f, ColorG = 0.12f, ColorB = 0.12f, Metallic = 0.7f, Roughness = 0.6f,
+        },
+        new BlockDef
+        {
+            Id = "bollard", Name = "Bollards", Category = "Sea", Kind = BlockKind.ShipFitting, Unpainted = true,
+            Description = "A pair of mooring bollards on a deck plate, for the lines when she ties up. Deck-edge detail.",
+            MassKg = 60, Hp = 60, ArmorMm = 10, HasCollider = false, Watertight = false,
+            ColorR = 0.12f, ColorG = 0.12f, ColorB = 0.12f, Metallic = 0.7f, Roughness = 0.6f,
+        },
+        new BlockDef
+        {
+            Id = "windlass", Name = "Anchor Windlass (3×1×3)", Category = "Sea", Kind = BlockKind.ShipFitting, Size = new Int3(3, 1, 3), Unpainted = true,
+            Description = "The anchor winch on the foredeck: two chain drums on a bedplate, the cables running forward to the hawse pipes.",
+            MassKg = 900, Hp = 200, ArmorMm = 15, HasCollider = false, Watertight = false,
+            ColorR = 0.14f, ColorG = 0.14f, ColorB = 0.14f, Metallic = 0.7f, Roughness = 0.6f,
         },
         new BlockDef
         {

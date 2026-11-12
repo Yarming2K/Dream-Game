@@ -137,10 +137,11 @@ public static class BlockModels
 
     /// <summary>
     /// Blocks whose faces merge with their neighbors into one continuous hull surface: armor, glazing, frames
-    /// and gas cells, in any of their one-cell shapes.
+    /// and gas cells, in any of their one-cell shapes, and big armor blocks (hull plates, belt armor), every cell
+    /// of them, so a battleship's hull is one painted surface with grey decks rather than a patchwork of plates.
     /// </summary>
     public static bool IsSurface(BlockDef def) =>
-        !def.IsMultiCell && def.Kind is BlockKind.Armor or BlockKind.Frame or BlockKind.GasCell;
+        def.Kind == BlockKind.Armor || (!def.IsMultiCell && def.Kind is BlockKind.Frame or BlockKind.GasCell);
 
     /// <summary>The block whose surface material a shaped block uses (its plain version), so a slope and the plates beside it are one surface.</summary>
     public static BlockDef SurfaceDefOf(BlockDef def) => def.BaseId != null && def.BaseId != def.Id && BlockCatalog.TryGet(def.BaseId, out BlockDef b) ? b : def;
@@ -702,6 +703,10 @@ public static class BlockModels
 
             case BlockKind.Fieldwork:
                 Fieldwork(k, def);
+                break;
+
+            case BlockKind.ShipFitting:
+                ShipFitting(k, def);
                 break;
 
             case BlockKind.Fairing:
@@ -1317,6 +1322,154 @@ public static class BlockModels
         return (h & 1023u) / 1023f;
     }
 
+    /// <summary>Single-cell ship fittings: life raft canisters, an anchor, bollards.</summary>
+    private static void ShipFitting(Maker k, BlockDef def)
+    {
+        switch (def.Id)
+        {
+            case "liferaft":
+                // Two white canisters lying in a cradle, each with its strapping bands.
+                foreach (float z in new[] { -0.12f, 0.12f })
+                {
+                    k.Cyl(0.11f, 0.44f, Paint.Self, new Vector3(0, -0.1f, z), AlongX, sides: 16);
+                    foreach (float x in new[] { -0.12f, 0.12f }) k.Cyl(0.113f, 0.02f, Paint.Dark, new Vector3(x, -0.1f, z), AlongX, sides: 16);
+                }
+
+                foreach (float x in new[] { -0.17f, 0.17f }) k.Box(new Vector3(0.03f, 0.08f, 0.46f), Paint.Steel, new Vector3(x, -0.2f, 0));
+                break;
+
+            case "anchor":
+                // Seen against the hull side: the hawse pipe's lip, the shank hanging from it, and the two flukes.
+                k.Torus(0.13f, 0.035f, Paint.Self, new Vector3(0, -0.2f, -0.08f));
+                k.Box(new Vector3(0.07f, 0.06f, 0.34f), Paint.Self, new Vector3(0, -0.18f, 0.06f));
+                foreach (int s in new[] { -1, 1 })
+                    k.Box(new Vector3(0.18f, 0.07f, 0.06f), Paint.Self, new Vector3(s * 0.08f, -0.18f, 0.2f), Rot(Vector3.UnitY, s * 0.5f));
+                k.Box(new Vector3(0.26f, 0.05f, 0.05f), Paint.Self, new Vector3(0, -0.19f, 0.23f));
+                break;
+
+            case "bollard":
+                k.Box(new Vector3(0.42f, 0.03f, 0.2f), Paint.Self, new Vector3(0, -H + 0.015f, 0));
+                foreach (float x in new[] { -0.11f, 0.11f })
+                {
+                    k.Cyl(0.06f, 0.17f, Paint.Self, new Vector3(x, -H + 0.115f, 0), sides: 14);
+                    k.Cyl(0.075f, 0.025f, Paint.Self, new Vector3(x, -H + 0.21f, 0), sides: 14);
+                }
+
+                break;
+
+            default:
+                k.Bevel(new Vector3(Full), Paint.Self, Vector3.Zero);
+                break;
+        }
+    }
+
+    /// <summary>Big ship fittings: a funnel, masts, a ship's boat on its davit, the anchor windlass.</summary>
+    private static void ShipFittingBig(Maker k, BlockDef def, Vector3 ext)
+    {
+        switch (def.Id)
+        {
+            case "funnel":
+            {
+                // A rounded casing raked back, louvres down its sides, a dark cap and the uptakes poking out.
+                Quaternion rake = Rot(Vector3.UnitX, 0.12f);
+                var mid = new Vector3(0, -0.05f, 0.05f);
+                Vector3 At(Vector3 local) => mid + Vector3.Transform(local, rake);
+                k.Bevel(new Vector3(ext.X * 0.82f, ext.Y * 0.92f, ext.Z * 0.82f), Paint.Self, mid, 0.42f, rake);
+                foreach (int s in new[] { -1, 1 })
+                    for (int i = 0; i < 5; i++)
+                        k.Box(new Vector3(0.025f, 0.045f, ext.Z * 0.45f), Paint.Dark, At(new Vector3(s * ext.X * 0.41f, -0.6f + i * 0.14f, 0)), rake);
+                k.Bevel(new Vector3(ext.X * 0.86f, 0.24f, ext.Z * 0.86f), Paint.Dark, At(new Vector3(0, ext.Y * 0.43f, 0)), 0.4f, rake);
+                foreach ((float z, float r) in new[] { (-0.45f, 0.17f), (0.05f, 0.2f), (0.5f, 0.13f) })
+                    k.Cyl(r, 0.4f, Paint.Steel, At(new Vector3(0, ext.Y * 0.47f + 0.08f, z)), rake, sides: 14);
+                k.Bevel(new Vector3(ext.X * 0.95f, 0.1f, ext.Z * 0.95f), Paint.SelfDark, new Vector3(0, -ext.Y * 0.5f + 0.05f, 0), 0.04f);
+                break;
+            }
+
+            case "mast_lattice":
+            {
+                // Four legs tapering in, braced in a zigzag on every face, two platforms, a yardarm with whip
+                // antennas, a pole on top, and navigation lights: white at the top, red to port and green to starboard.
+                float bottom = -ext.Y * 0.5f, top = ext.Y * 0.36f;
+                Vector3 Leg(int sx, int sz, float t) => new(sx * MathF.Max(0.15f, 0.65f - 0.5f * t), bottom + t * (top - bottom), sz * MathF.Max(0.15f, 0.65f - 0.5f * t));
+                foreach (int sx in new[] { -1, 1 })
+                foreach (int sz in new[] { -1, 1 })
+                    k.Rod(Leg(sx, sz, 0), Leg(sx, sz, 1), 0.045f, Paint.Self, 8);
+                for (int i = 0; i < 6; i++)
+                {
+                    float t0 = i / 6f, t1 = (i + 1) / 6f;
+                    foreach ((int ax, int az, int bx, int bz) in new[] { (-1, -1, 1, -1), (1, -1, 1, 1), (1, 1, -1, 1), (-1, 1, -1, -1) })
+                        k.Rod(Leg(ax, az, i % 2 == 0 ? t0 : t1), Leg(bx, bz, i % 2 == 0 ? t1 : t0), 0.018f, Paint.Self, 6);
+                }
+
+                k.Box(new Vector3(1.05f, 0.05f, 1.05f), Paint.SelfDark, new Vector3(0, bottom + 0.42f * (top - bottom), 0));
+                k.Box(new Vector3(0.75f, 0.05f, 0.75f), Paint.SelfDark, new Vector3(0, bottom + 0.85f * (top - bottom), 0));
+                k.Cyl(0.03f, ext.X * 1.1f, Paint.Steel, new Vector3(0, top - 0.3f, 0), AlongX, sides: 8);
+                foreach (int s in new[] { -1, 1 })
+                {
+                    k.Cyl(0.008f, 0.7f, Paint.Steel, new Vector3(s * ext.X * 0.5f, top + 0.05f, 0), sides: 6);
+                    k.GlowCyl(0.035f, 0.06f, s < 0 ? new Vector3(1f, 0.12f, 0.08f) : new Vector3(0.15f, 1f, 0.3f), 2f, new Vector3(s * 0.3f, top - 0.24f, 0));
+                }
+
+                k.Cyl(0.035f, ext.Y * 0.5f - top, Paint.Steel, new Vector3(0, (top + ext.Y * 0.5f) * 0.5f, 0), sides: 8);
+                k.GlowCyl(0.04f, 0.07f, new Vector3(1f, 0.97f, 0.85f), 2.2f, new Vector3(0, ext.Y * 0.5f - 0.05f, 0));
+                break;
+            }
+
+            case "mast_pole":
+            {
+                float bottom = -ext.Y * 0.5f;
+                k.Cyl(0.08f, 0.06f, Paint.SelfDark, new Vector3(0, bottom + 0.03f, 0), sides: 12);
+                k.Cyl(0.055f, ext.Y * 0.95f, Paint.Self, new Vector3(0, -ext.Y * 0.025f, 0), top: 0.035f, sides: 10);
+                k.Cyl(0.025f, 1.2f, Paint.Steel, new Vector3(0, ext.Y * 0.3f, 0), AlongX, sides: 8);
+                k.GlowCyl(0.035f, 0.06f, new Vector3(1f, 0.97f, 0.85f), 2.2f, new Vector3(0, ext.Y * 0.5f - 0.04f, 0));
+                break;
+            }
+
+            case "ships_boat":
+            {
+                // A rigid inflatable boat in its chocks: grey hull with a pointed bow, dark inflated tubes, a
+                // console with a windscreen, an outboard motor; the davit arm over it.
+                float floor = -ext.Y * 0.5f;
+                foreach (float z in new[] { -1.2f, 0f, 1.2f }) k.Box(new Vector3(0.9f, 0.18f, 0.12f), Paint.Steel, new Vector3(0, floor + 0.09f, z));
+                k.Bevel(new Vector3(0.9f, 0.32f, 2.9f), Paint.SelfDark, new Vector3(0, floor + 0.36f, 0.3f), 0.08f);
+                k.Slab(new Vector3(0.9f, 0.9f, 0.32f), 0.15f, 0.55f, Paint.SelfDark, new Vector3(0, floor + 0.36f, -1.6f), NoseZ);
+                foreach (int s in new[] { -1, 1 })
+                {
+                    k.Cyl(0.16f, 2.9f, Paint.Rubber, new Vector3(s * 0.46f, floor + 0.52f, 0.3f), AlongZ, sides: 14);
+                    k.Rod(new Vector3(s * 0.46f, floor + 0.52f, -1.15f), new Vector3(s * 0.08f, floor + 0.52f, -2.0f), 0.15f, Paint.Rubber, 14);
+                    k.Sphere(0.16f, Paint.Rubber, new Vector3(s * 0.46f, floor + 0.52f, 1.75f));
+                }
+
+                k.Bevel(new Vector3(0.38f, 0.42f, 0.32f), Paint.Self, new Vector3(0, floor + 0.72f, 0.25f), 0.04f);
+                k.Box(new Vector3(0.4f, 0.22f, 0.02f), Paint.Glass, new Vector3(0, floor + 1.0f, 0.08f), Rot(Vector3.UnitX, -0.4f));
+                k.Bevel(new Vector3(0.24f, 0.55f, 0.26f), Paint.Dark, new Vector3(0, floor + 0.5f, 1.85f), 0.04f);
+                k.Rod(new Vector3(ext.X * 0.45f, floor, 0), new Vector3(ext.X * 0.45f, ext.Y * 0.45f, 0), 0.06f, Paint.Self);
+                k.Rod(new Vector3(ext.X * 0.45f, ext.Y * 0.45f, 0), new Vector3(0, ext.Y * 0.45f, 0), 0.05f, Paint.Self);
+                k.Rod(new Vector3(0, ext.Y * 0.45f, 0), new Vector3(0, floor + 0.95f, 0), 0.01f, Paint.Steel, 6);
+                break;
+            }
+
+            case "windlass":
+            {
+                float floor = -ext.Y * 0.5f;
+                k.Box(new Vector3(1.3f, 0.06f, 1.0f), Paint.Self, new Vector3(0, floor + 0.03f, 0));
+                k.Bevel(new Vector3(0.36f, 0.3f, 0.4f), Paint.Self, new Vector3(0, floor + 0.21f, 0.1f), 0.03f);
+                foreach (int s in new[] { -1, 1 })
+                {
+                    k.Cyl(0.17f, 0.3f, Paint.Self, new Vector3(s * 0.38f, floor + 0.23f, 0.1f), AlongX, sides: 18);
+                    k.Torus(0.16f, 0.02f, Paint.Steel, new Vector3(s * 0.56f, floor + 0.23f, 0.1f), Rot(Vector3.UnitZ, MathF.PI / 2));
+                    k.Box(new Vector3(0.07f, 0.035f, 0.75f), Paint.Steel, new Vector3(s * 0.38f, floor + 0.08f, -0.42f));
+                }
+
+                break;
+            }
+
+            default:
+                k.Bevel(ext, Paint.Self, Vector3.Zero, 0.05f);
+                break;
+        }
+    }
+
     /// <summary>Single-cell field fortification: sandbags, a wire coil, a post, a fence panel.</summary>
     private static void Fieldwork(Maker k, BlockDef def)
     {
@@ -1834,6 +1987,18 @@ public static class BlockModels
                 break;
             }
 
+            case BlockKind.Radar when def.Id == "radar_face":
+            {
+                // An eight-sided array set flush into a wall, tilted back a little: a raised rim, the dark face of
+                // transmitters, and a seam round its middle.
+                Quaternion q = Rot(Vector3.UnitX, 0.18f) * AlongZ * Rot(Vector3.UnitY, MathF.PI / 8);
+                float r = MathF.Min(ext.X, ext.Y) * 0.49f;
+                k.Cyl(r, 0.2f, Paint.Self, new Vector3(0, 0, 0.1f), q, sides: 8);
+                k.Cyl(r * 0.9f, 0.02f, Paint.Dark, new Vector3(0, 0, -0.01f), q, sides: 8);
+                k.Cyl(r * 0.45f, 0.025f, Paint.SelfDark, new Vector3(0, 0, -0.015f), q, sides: 8);
+                break;
+            }
+
             case BlockKind.Radar when def.Id == "radome":
             {
                 // A long fibreglass nose on a seam ring, and a probe from its point.
@@ -1883,6 +2048,11 @@ public static class BlockModels
             case BlockKind.Fieldwork:
                 FieldworkBig(k, def, ext);
                 break;
+
+            case BlockKind.ShipFitting:
+                ShipFittingBig(k, def, ext);
+                break;
+
 
             case BlockKind.Fairing:
             {

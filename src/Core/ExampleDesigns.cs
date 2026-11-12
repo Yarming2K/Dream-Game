@@ -41,6 +41,19 @@ public static class ExampleDesigns
             return true;
         }
 
+        /// <summary>The id of the block filling a cell, or null if it's empty.</summary>
+        public string IdAt(int x, int y, int z) => _filled.TryGetValue(new Int3(x, y, z), out BlueprintBlock b) ? b.Id : null;
+
+        /// <summary>Places a block only if every cell it needs is empty; says whether it did.</summary>
+        public bool SetIfFree(int x, int y, int z, string id, int o = 0)
+        {
+            var anchor = new Int3(x, y, z);
+            BlockDef def = BlockCatalog.Get(id);
+            if (!Free(def, anchor, o)) return false;
+            Put(new BlueprintBlock(id, anchor, o), def);
+            return true;
+        }
+
         /// <summary>Fills a box, skipping cells that already have something.</summary>
         public void Fill(int x0, int x1, int y0, int y1, int z0, int z1, string id, int o = 0)
         {
@@ -780,8 +793,10 @@ public static class ExampleDesigns
     }
 
     /// <summary>
-    /// Patrol boat: a sealed hull split into four watertight compartments, a 76 mm turret forward, a 37 mm
-    /// turret aft, deck torpedo tubes, and twin propellers and rudders at the stern.
+    /// Patrol boat: a 20 m hull with a sharp V bow and a transom stern, split into four watertight compartments;
+    /// a 76 mm turret forward and a 37 mm turret aft, deck torpedo tubes, and twin propellers and rudders under the
+    /// stern. A wheelhouse amidships with a raked windscreen and a mast carrying her radar, life rafts, bollards
+    /// and anchors, and guard rails down both sides.
     /// </summary>
     public static Blueprint Corsair()
     {
@@ -801,23 +816,6 @@ public static class ExampleDesigns
             d.Set(1, 1, z, "lead_ballast");
         }
 
-        // Hull: flat bottom, chamfered bilges, straight sides, transom stern and a raked bow.
-        d.Fill(-3, 3, 0, 0, bow + 3, stern, "armor_light");
-        d.FillSlope(-4, -4, 0, 0, bow + 3, stern, "armor_light_slope", new Int3(-1, -1, 0));
-        d.FillSlope(4, 4, 0, 0, bow + 3, stern, "armor_light_slope", new Int3(1, -1, 0));
-        d.Fill(-4, -4, 1, deck, bow + 1, stern, "armor_light");
-        d.Fill(4, 4, 1, deck, bow + 1, stern, "armor_light");
-        d.Fill(-3, 3, 1, deck, stern, stern, "armor_light");
-        for (int y = 0; y <= 2; y++) d.FillSlope(-3, 3, y, y, bow + 2 - y, bow + 2 - y, "armor_light_slope", new Int3(0, -1, -1));
-        d.FillSlope(-4, -4, 1, 1, bow + 2, bow + 2, "armor_light_slope", new Int3(0, -1, -1));
-        d.FillSlope(4, 4, 1, 1, bow + 2, bow + 2, "armor_light_slope", new Int3(0, -1, -1));
-        d.Fill(-3, 3, 3, deck, bow, bow, "armor_light");
-        d.Fill(-4, 4, 2, deck, bow + 1, bow + 1, "armor_light");
-        d.Fill(-3, 3, 1, deck - 1, bow + 1, bow + 1, "armor_light");
-
-        // Watertight bulkheads: four compartments, so one hole doesn't sink her.
-        foreach (int z in new[] { -10, 0, 10 }) d.Fill(-3, 3, 1, deck - 1, z, z, "armor_light");
-
         // Forward 76 mm turret, fed from racks below deck.
         d.Set(0, deck, -12, "turret_ring");
         d.Set(0, deck - 1, -12, "ammo_feed");
@@ -834,6 +832,7 @@ public static class ExampleDesigns
         d.Fill(-1, 1, deck + 1, deck + 1, -13, -13, "armor_light");
         d.Fill(-1, 1, deck + 1, deck + 1, -11, -11, "armor_light");
         d.Fill(-1, 1, deck + 2, deck + 2, -13, -11, "armor_light");
+        d.Slope(0, deck + 2, -14, "armor_light_slope", new Int3(0, 1, -1));
 
         // Aft 37 mm turret, facing astern.
         d.Set(0, deck, 11, "turret_ring");
@@ -847,18 +846,23 @@ public static class ExampleDesigns
         d.Fill(-1, 1, deck + 2, deck + 2, 10, 12, "armor_light");
         d.Fill(-1, 1, deck + 1, deck + 1, 10, 10, "armor_light");
 
-        // Bridge amidships, with windows all round.
+        // The wheelhouse amidships: windows all round under a raked windscreen, the helm and the commander, and a
+        // command console (she can lead a flotilla: M for the tactical map).
         d.Set(0, deck + 1, -1, "driver_seat");
         d.Set(0, deck + 2, -1, "commander_seat");
-        // A command console: she can lead a flotilla (M for the tactical map).
         d.Set(1, deck + 1, 0, "command_console");
-        d.Set(0, deck + 4, 2, "radar");
-        d.Fill(-1, 1, deck + 2, deck + 2, -2, -2, "glazing");
+        d.Fill(-2, 2, deck + 1, deck + 1, -2, 3, "armor_light");
         d.Fill(-2, -2, deck + 2, deck + 2, -1, 2, "glazing");
         d.Fill(2, 2, deck + 2, deck + 2, -1, 2, "glazing");
-        d.Fill(-2, 2, deck + 1, deck + 2, -2, 3, "armor_light");
+        d.Fill(-2, 2, deck + 2, deck + 2, -2, 3, "armor_light");
+        d.FillSlope(-2, 2, deck + 2, deck + 2, -3, -3, "glazing_slope", new Int3(0, 1, -1));
         d.Fill(-2, 2, deck + 3, deck + 3, -2, 3, "armor_light");
-        d.FillSlope(-2, 2, deck + 3, deck + 3, -3, -3, "armor_light_slope", new Int3(0, 1, -1));
+        ChamferEdge(d, -2, 2, deck + 3, -2, 3, "armor_light");
+        // The mast behind it with the radar, a searchlight and an antenna on the wheelhouse roof.
+        d.Set(0, deck + 8, 3, "mast_pole");
+        d.Set(0, deck + 4, 1, "radar");
+        d.Set(-1, deck + 4, -1, "searchlight");
+        d.Set(1, deck + 4, 2, "antenna");
 
         // Deck torpedo tubes, each with a rack behind it.
         foreach (int x in new[] { -3, 3 })
@@ -867,9 +871,11 @@ public static class ExampleDesigns
             d.Set(x, deck + 1, -4, "ammo_torpedo");
         }
 
-        // Main deck (around the rings) and the inner frames.
-        d.Fill(-4, 4, deck, deck, bow + 1, stern, "armor_light");
-        d.Fill(-3, 3, deck, deck, bow, bow, "armor_light");
+        // Watertight bulkheads: four compartments, so one hole doesn't sink her.
+        foreach (int z in new[] { -10, 0, 10 }) d.Fill(-3, 3, 1, deck - 1, z, z, "armor_light");
+
+        // The hull itself, a V bow and a transom.
+        Func<int, int> hw = ShipHull(d, bow, stern, 4, deck, "armor_light");
 
         // Propellers and rudders under the stern.
         foreach (int x in new[] { -2, 2 })
@@ -878,154 +884,177 @@ public static class ExampleDesigns
             d.Set(x, 0, stern + 2, "rudder");
         }
 
-        // Guard rails down both sides of the deck, a searchlight and an antenna on the bridge, and a ladder up its back.
+        // Life rafts and bollards along the deck edges, anchors either side of the bow, guard rails.
         foreach (int s in new[] { -1, 1 })
-            for (int z = bow + 3; z <= stern - 1; z++)
-                d.Set(4 * s, deck + 1, z, "railing", Orient(new Int3(0, -1, 0), new Int3(-s, 0, 0)));
-        d.Set(0, deck + 4, 1, "searchlight");
-        d.Set(-2, deck + 4, 3, "antenna");
+        {
+            d.Set(3 * s, deck + 1, 4, "liferaft");
+            d.Set(3 * s, deck + 1, 6, "liferaft");
+            d.Set(2 * s, deck + 1, bow + 5, "bollard");
+            d.Set(3 * s, deck + 1, stern - 1, "bollard");
+            d.Set(s * (hw(bow + 4) + 1), deck - 1, bow + 4, "anchor", Orient(new Int3(-s, 0, 0), new Int3(0, -1, 0)));
+        }
+
+        DeckRails(d, hw, bow + 6, stern - 2, deck);
         d.Set(1, deck + 1, 4, "ladder", Orient(new Int3(0, -1, 0), new Int3(0, 0, 1)));
         d.Set(1, deck + 2, 4, "ladder", Orient(new Int3(0, -1, 0), new Int3(0, 0, 1)));
-        return d.Build("Corsair (patrol boat)");
+        return d.Build("Corsair (patrol boat)", "naval");
     }
 
     /// <summary>
-    /// Missile destroyer: a fusion reactor amidships powering a railgun forward and a laser aft, a block of
-    /// vertical launch cells (strike missiles for targets on land, air-defense missiles for aircraft), a
-    /// close-in gatling on the bridge and another aft for missiles coming the other way, a search radar and
-    /// a command console. Two marine turbines drive her.
+    /// Missile corvette: a 64 m warship drawn from the look of a modern destroyer. A raised forecastle with a
+    /// sharp flared V bow carries the railgun turret and the vertical launch cells (strike missiles for targets
+    /// on land, air-defense missiles for aircraft); behind them the bridge block with four flat phased-array
+    /// radar faces, its windscreen raked, a lattice mast with a turning search radar on top and a close-in
+    /// gatling on its roof; amidships a deckhouse with two funnels, boats in their davits and life rafts; aft
+    /// another gatling, the laser turret, and a clear deck over the stern. Below decks a fusion reactor powers
+    /// the guns and four marine turbines drive two great screws, behind eight watertight bulkheads.
     /// </summary>
     public static Blueprint Trident()
     {
         var d = new Draft();
-        const int bow = -30, stern = 27, deck = 7;
+        const int bow = -64, stern = 63, deck = 10, fc = deck + 2; // the main deck and the raised forecastle's deck
 
-        // Machinery: the reactor amidships with capacitor banks along the port side of its room (the
-        // starboard side is left clear to walk in through the door), turbines and their fuel aft.
-        d.Set(0, 2, 2, "reactor");
-        foreach (int x in new[] { -4, -3 })
-        {
-            d.Set(x, 1, 1, "capacitor");
-            d.Set(x, 1, 3, "capacitor");
-        }
-
-        // Inside: a door from the forward compartment through the bulkhead into the reactor room, and
-        // lamps along the deckhead below decks.
-        d.Set(2, 2, -2, "door");
-        foreach ((int x, int z) in new[] { (0, -9), (0, -5), (3, 1), (3, 4) }) d.Set(x, deck - 1, z, "lamp");
-
-        // (A big block's anchor is the middle of its box, rounding toward +x: a 2-wide one at x = -3 spans -3..-2.)
+        // Machinery below decks: the reactor and its capacitors amidships, four turbines and their fuel aft.
+        d.Set(0, 2, 0, "reactor");
+        for (int z = -3; z <= 2; z++)
+            foreach (int x in new[] { -5, -4 })
+                d.Set(x, 1, z, "capacitor");
         foreach (int x in new[] { -3, 2 })
         {
-            d.Set(x, 1, 18, "turbine");
-            d.Set(x, 1, 22, "fuel_bunker");
+            d.Set(x, 1, 24, "turbine");
+            d.Set(x, 1, 28, "turbine");
+            d.Set(x, 1, 32, "fuel_bunker");
+            d.Set(x, 1, 34, "fuel_bunker");
         }
 
-        foreach (int z in new[] { -24, -14, -4, 10, 24 }) d.Set(0, 1, z, "bilge_pump");
-        foreach (int z in new[] { -18, -8, 9, 12 })
+        foreach (int z in new[] { -52, -40, -28, -14, 10, 24, 40, 54 }) d.Set(0, 1, z, "bilge_pump");
+        foreach (int z in new[] { -44, -32, -16, 14, 44, 50 })
             foreach (int x in new[] { -2, -1, 1, 2 }) d.Set(x, 1, z, "lead_ballast");
+        foreach ((int x, int z) in new[] { (0, -40), (0, -25), (3, -5), (3, 14), (0, 30), (0, 48) }) d.Set(x, z < -20 ? fc - 1 : deck - 1, z, "lamp");
 
-        // Hull: flat bottom, chamfered bilges, straight sides, a transom stern and a raked bow.
-        d.Fill(-4, 4, 0, 0, bow + 3, stern, "armor_light");
-        d.FillSlope(-5, -5, 0, 0, bow + 3, stern, "armor_light_slope", new Int3(-1, -1, 0));
-        d.FillSlope(5, 5, 0, 0, bow + 3, stern, "armor_light_slope", new Int3(1, -1, 0));
-        d.Fill(-5, -5, 1, deck, bow + 1, stern, "armor_light");
-        d.Fill(5, 5, 1, deck, bow + 1, stern, "armor_light");
-        d.Fill(-4, 4, 1, deck, stern, stern, "armor_light");
-        for (int y = 0; y <= 2; y++) d.FillSlope(-4, 4, y, y, bow + 2 - y, bow + 2 - y, "armor_light_slope", new Int3(0, -1, -1));
-        d.FillSlope(-5, -5, 1, 1, bow + 2, bow + 2, "armor_light_slope", new Int3(0, -1, -1));
-        d.FillSlope(5, 5, 1, 1, bow + 2, bow + 2, "armor_light_slope", new Int3(0, -1, -1));
-        d.Fill(-4, 4, 3, deck, bow, bow, "armor_light");
-        d.Fill(-5, 5, 2, deck, bow + 1, bow + 1, "armor_light");
-        d.Fill(-4, 4, 1, deck - 1, bow + 1, bow + 1, "armor_light");
-
-        // Watertight bulkheads: six compartments.
-        foreach (int z in new[] { -21, -12, -2, 6, 15 }) d.Fill(-4, 4, 1, deck - 1, z, z, "armor_light");
-
-        // Forward railgun turret, slugs fed from below deck.
-        const int rz = -22;
-        d.Set(0, deck, rz, "turret_ring");
-        d.Set(0, deck - 1, rz, "ammo_feed");
+        // The railgun turret on the forecastle, slugs fed from below, under a faceted shield.
+        const int rz = -46;
+        d.Set(0, fc, rz, "turret_ring");
+        d.Set(0, fc - 1, rz, "ammo_feed");
         foreach (int x in new[] { -1, 1 })
         {
-            d.Set(x, deck - 1, rz, "ammo_ap");
-            d.Set(x, deck - 1, rz + 1, "ammo_ap");
+            d.Set(x, fc - 1, rz, "ammo_ap");
+            d.Set(x, fc - 1, rz + 1, "ammo_ap");
         }
 
-        d.Set(0, deck + 1, rz, "rail_breech");
-        for (int z = rz - 1; z >= rz - 8; z--) d.Set(0, deck + 1, z, "rail");
-        d.Set(-1, deck + 1, rz, "loader");
-        d.Set(1, deck + 1, rz, "gunner_seat");
-        d.Fill(-1, 1, deck + 1, deck + 1, rz + 1, rz + 1, "armor_light");
-        d.Fill(-1, 1, deck + 2, deck + 2, rz - 1, rz + 1, "armor_light");
-        d.Fill(-1, 1, deck + 1, deck + 1, rz - 1, rz - 1, "armor_light");
+        d.Set(0, fc + 1, rz, "rail_breech");
+        for (int z = rz - 1; z >= rz - 8; z--) d.Set(0, fc + 1, z, "rail");
+        d.Set(-1, fc + 1, rz, "loader");
+        d.Set(1, fc + 1, rz, "gunner_seat");
+        d.Fill(-1, 1, fc + 1, fc + 1, rz + 1, rz + 1, "armor_light");
+        d.Fill(-1, 1, fc + 2, fc + 2, rz - 1, rz + 1, "armor_light");
+        d.Fill(-1, 1, fc + 1, fc + 1, rz - 1, rz - 1, "armor_light");
+        foreach (int x in new[] { -1, 1 }) d.Slope(x, fc + 2, rz - 2, "armor_light_slope", new Int3(0, 1, -1));
+        d.Slope(-1, fc + 2, rz + 2, "armor_light_slope", new Int3(0, 1, 1));
+        d.Slope(1, fc + 2, rz + 2, "armor_light_slope", new Int3(0, 1, 1));
 
-        // The missile block: two rows of strike missiles and a row of air-defense missiles, flush with the deck.
-        for (int x = -2; x <= 2; x++)
+        // The launch cells, flush with the forecastle deck: two rows of strike missiles, two of air defense.
+        for (int x = -3; x <= 3; x++)
         {
-            d.Set(x, deck, -17, "vls_strike");
-            d.Set(x, deck, -16, "vls_strike");
-            d.Set(x, deck, -15, "vls_sam");
+            d.Set(x, fc, -38, "vls_strike");
+            d.Set(x, fc, -37, "vls_strike");
+            d.Set(x, fc, -36, "vls_sam");
+            d.Set(x, fc, -35, "vls_sam");
         }
 
-        // Bridge: a room you can walk into, 2 m high, windows all round, the wheel and the command console
-        // at the front window, the commander's seat beside them, lamps overhead, a door at the back, and a
-        // ladder down through the deck to the compartment below. The radar mast and a close-in gatling on
-        // the roof.
-        const int br = deck + 5; // the bridge roof
-        d.Set(0, deck + 1, -10, "driver_seat");
-        d.Set(-2, deck + 1, -10, "commander_seat");
-        d.Set(2, deck + 1, -10, "command_console");
-        d.Set(-1, deck + 2, -4, "door");
-        foreach ((int x, int z) in new[] { (0, -8), (-2, -6) }) d.Set(x, br - 1, z, "lamp");
-        d.Fill(-2, 2, deck + 3, deck + 4, -11, -11, "glazing");
-        d.Fill(-3, -3, deck + 3, deck + 4, -10, -6, "glazing");
-        d.Fill(3, 3, deck + 3, deck + 4, -10, -6, "glazing");
-        d.Fill(-3, 3, deck + 1, br - 1, -11, -11, "armor_light");
-        d.Fill(-3, -3, deck + 1, br - 1, -10, -4, "armor_light");
-        d.Fill(3, 3, deck + 1, br - 1, -10, -4, "armor_light");
-        d.Fill(-2, 2, deck + 1, br - 1, -4, -4, "armor_light");
-        d.Fill(-3, 3, br, br, -11, -4, "armor_light");
-        d.FillSlope(-3, 3, br, br, -12, -12, "armor_light_slope", new Int3(0, 1, -1));
-        d.Fill(-1, 1, br + 1, br + 2, -5, -4, "armor_light");
-        d.Set(0, br + 3, -5, "radar");
-        d.Set(0, br + 3, -4, "antenna");
-        d.Set(1, br + 3, -4, "antenna");
-        d.Set(-2, br + 1, -6, "searchlight");
-        Ciws(d, br + 1, -9, Int3.Forward);
+        // The anchor windlass on the foredeck.
+        d.Set(0, fc + 1, -59, "windlass");
 
-        // A funnel-less deckhouse aft (a reactor needs no smoke stack), with the aft gatling on it.
-        d.Fill(-2, 2, deck + 1, deck + 2, 6, 11, "armor_light");
-        Ciws(d, deck + 3, 9, Int3.Back);
+        // The bridge block: two levels, the bridge on top with a raked windscreen and windows down the sides, the
+        // wheel, the commander and the command console at the front window, lamps, a door at the back and a
+        // ladder between the levels. Four phased-array faces: two forward, one each side, one aft.
+        const int b0 = -32, b1 = -20, top = fc + 9; // the block's front and back, and its roof
+        d.Set(0, fc + 6, b0 + 2, "driver_seat");
+        d.Set(-2, fc + 6, b0 + 2, "commander_seat");
+        d.Set(2, fc + 6, b0 + 2, "command_console");
+        foreach ((int x, int z) in new[] { (0, b0 + 6), (-3, b1 - 4), (3, b1 - 4) }) d.Set(x, top - 1, z, "lamp");
+        d.Set(-1, fc + 2, b1, "door");
+        for (int y = fc + 1; y <= fc + 6; y++) d.Set(4, y, b1 - 1, "ladder", Orient(new Int3(0, -1, 0), new Int3(0, 0, 1)));
+        d.Fill(-5, 5, fc + 7, fc + 7, b0, b0, "glazing");
+        d.FillSlope(-5, 5, fc + 8, fc + 8, b0, b0, "glazing_slope", new Int3(0, 1, -1));
+        foreach (int s in new[] { -1, 1 }) d.Fill(6 * s, 6 * s, fc + 7, fc + 7, b0 + 1, b0 + 4, "glazing");
+        d.Fill(-6, 6, fc + 1, fc + 6, b0, b0, "armor_light");
+        d.Fill(-6, 6, fc + 1, top - 1, b1, b1, "armor_light");
+        d.Fill(-6, -6, fc + 1, top - 1, b0 + 1, b1 - 1, "armor_light");
+        d.Fill(6, 6, fc + 1, top - 1, b0 + 1, b1 - 1, "armor_light");
+        foreach (int s in new[] { -1, 1 }) d.Fill(6 * s, 6 * s, fc + 7, fc + 8, b0, b0, "armor_light");
+        d.Fill(-5, 5, fc + 5, fc + 5, b0 + 1, b1 - 1, "armor_light");
+        d.Remove(4, fc + 5, b1 - 1);
+        d.Fill(-6, 6, top, top, b0, b1, "armor_light");
+        ChamferEdge(d, -6, 6, top, b0, b1, "armor_light");
+        foreach (int x in new[] { -3, 3 }) d.Set(x, fc + 3, b0 - 1, "radar_face");
+        d.Set(-7, fc + 3, -26, "radar_face", Pointing(new Int3(-1, 0, 0)));
+        d.Set(7, fc + 3, -26, "radar_face", Pointing(new Int3(1, 0, 0)));
+        d.Set(3, fc + 3, b1 + 1, "radar_face", Pointing(Int3.Back));
+        // On the roof: the lattice mast with the search radar turning on top, a gatling forward, searchlights.
+        d.Set(0, top + 6, -24, "mast_lattice");
+        d.Set(0, top + 14, -24, "radar_rotating");
+        Ciws(d, top + 1, b0 + 2, Int3.Forward);
+        d.Set(-5, top + 1, b1 - 1, "searchlight");
+        d.Set(5, top + 1, b1 - 1, "searchlight");
+        d.Set(4, top + 1, b1 - 2, "antenna");
 
-        // Aft laser turret, facing astern.
-        d.Set(0, deck, 17, "turret_ring");
-        d.Set(0, deck + 1, 17, "laser_emitter", Pointing(Int3.Back));
-        foreach (int z in new[] { 18, 19 }) d.Set(0, deck + 1, z, "laser_lens", Pointing(Int3.Back));
-        d.Set(1, deck + 1, 17, "gunner_seat");
-        d.Fill(-1, 1, deck + 2, deck + 2, 16, 17, "armor_light");
-        d.Fill(-1, 1, deck + 1, deck + 1, 16, 16, "armor_light");
-        d.Set(-1, deck + 1, 17, "armor_light");
-
-        // Main deck, with a hatchway in the bridge floor and a ladder down it to the deck below.
-        d.Fill(-5, 5, deck, deck, bow + 1, stern, "armor_light");
-        d.Fill(-4, 4, deck, deck, bow, bow, "armor_light");
-        foreach (int x in new[] { 1, 2 })
-            foreach (int z in new[] { -6, -5 })
-                d.Remove(x, deck, z);
-        for (int y = 1; y <= deck + 1; y++) d.Set(2, y, -7, "ladder", Orient(new Int3(0, -1, 0), new Int3(0, 0, 1)));
-
-        // Two screws and two rudders under the stern.
-        foreach (int x in new[] { -2, 2 })
-        {
-            d.Set(x, 0, stern + 1, "ship_propeller");
-            d.Set(x, 0, stern + 2, "rudder");
-        }
-
+        // Amidships: a deckhouse with the two funnels, the boats in their davits either side, life rafts.
+        d.Fill(-4, 4, deck + 1, deck + 3, -18, 16, "armor_light");
+        d.Fill(-4, 4, deck + 4, deck + 4, -18, 16, "armor_light");
+        ChamferEdge(d, -4, 4, deck + 4, -18, 16, "armor_light");
+        d.Set(0, deck + 7, -10, "funnel");
+        d.Set(0, deck + 7, 6, "funnel");
         foreach (int s in new[] { -1, 1 })
-            for (int z = bow + 3; z <= stern - 1; z++)
-                if (z < -11 || z > -3) d.Set(5 * s, deck + 1, z, "railing", Orient(new Int3(0, -1, 0), new Int3(-s, 0, 0)));
-        return d.Build("Trident (missile destroyer)", "naval");
+        {
+            d.Set(6 * s, deck + 2, 0, "ships_boat");
+            foreach (int z in new[] { -16, -14, 10, 12 }) d.Set(7 * s, deck + 1, z, "liferaft");
+        }
+
+        Ciws(d, deck + 5, 14, Int3.Back);
+
+        // Aft: the laser turret facing astern, and the clear deck over the stern.
+        d.Set(0, deck, 30, "turret_ring");
+        d.Set(0, deck + 1, 30, "laser_emitter", Pointing(Int3.Back));
+        foreach (int z in new[] { 31, 32 }) d.Set(0, deck + 1, z, "laser_lens", Pointing(Int3.Back));
+        d.Set(1, deck + 1, 30, "gunner_seat");
+        d.Fill(-1, 1, deck + 2, deck + 2, 29, 30, "armor_light");
+        d.Fill(-1, 1, deck + 1, deck + 1, 29, 29, "armor_light");
+        d.Set(-1, deck + 1, 30, "armor_light");
+
+        // The hull: the flared V bow, the raised forecastle, the transom; then the watertight bulkheads.
+        Func<int, int> hw = ShipHull(d, bow, stern, 8, deck, "armor_light", -20, 2);
+        foreach (int z in new[] { -48, -34, -21, -8, 8, 21, 37, 50 })
+            d.Fill(-hw(z) + 1, hw(z) - 1, 1, deck - 1, z, z, "armor_light");
+
+        // Two great screws and their rudders under the stern.
+        foreach (int x in new[] { -3, 3 })
+        {
+            d.Set(x, 1, stern + 1, "great_screw");
+            d.Set(x, 1, stern + 3, "great_rudder");
+        }
+
+        // Anchors either side of the bow, bollards, and guard rails down both sides.
+        foreach (int s in new[] { -1, 1 })
+        {
+            d.Set(s * (hw(-57) + 1), deck, -57, "anchor", Orient(new Int3(-s, 0, 0), new Int3(0, -1, 0)));
+            d.Set(2 * s, fc + 1, -55, "bollard");
+            d.Set(s * (hw(-30) - 1), fc + 1, -42, "bollard");
+            d.Set(s * (hw(60) - 1), deck + 1, 60, "bollard");
+        }
+
+        for (int z = bow + 8; z <= stern - 1; z++)
+        {
+            int y = z < -20 ? fc : deck;
+            if (z >= b0 && z <= b1) continue;
+            foreach (int s in new[] { -1, 1 })
+            {
+                int x = s * hw(z);
+                d.Fill(x, x, y + 1, y + 1, z, z, "railing", Orient(new Int3(0, -1, 0), new Int3(-s, 0, 0)));
+            }
+        }
+
+        return d.Build("Trident (missile corvette)", "naval");
     }
 
     /// <summary>A close-in gatling on its own turntable, with a ready rack behind it (on top of a deckhouse at <paramref name="y"/>).</summary>
@@ -1039,9 +1068,10 @@ public static class ExampleDesigns
     }
 
     /// <summary>
-    /// Submarine: a long light pressure hull with ballast tanks along the keel under a watertight floor, the
-    /// crew space above it, a conning tower with the commander's periscope, two bow torpedo tubes and a
-    /// single screw with a rudder and dive planes.
+    /// Submarine: a 17.5 m coastal boat with a rounded pressure hull that tapers to a blunt bow and a cone of a tail
+    /// round the shaft, ballast tanks along the keel under a watertight floor, the crew space above, a tall
+    /// fin with diving planes, the commander's position and the periscope, two bow torpedo tubes, and a single
+    /// screw behind a cross of rudders and stern planes.
     /// </summary>
     public static Blueprint Barracuda()
     {
@@ -1057,9 +1087,9 @@ public static class ExampleDesigns
         }
 
         d.Set(0, floor + 1, -6, "driver_seat");
-        d.Set(0, floor + 1, 13, "engine_large");
-        d.Set(-1, floor + 1, 13, "fuel_tank");
-        d.Set(1, floor + 1, 13, "fuel_tank");
+        d.Set(0, floor + 1, 12, "engine_large");
+        d.Set(-1, floor + 1, 12, "fuel_tank");
+        d.Set(1, floor + 1, 12, "fuel_tank");
         d.Set(0, floor + 1, 0, "bilge_pump");
         d.Set(0, floor + 1, 8, "bilge_pump");
 
@@ -1067,33 +1097,61 @@ public static class ExampleDesigns
         foreach (int z in new[] { -11, 0, 11 }) d.Set(0, 0, z, "ballast_valve");
         foreach (int z in new[] { -6, 5 }) d.Fill(-2, 2, 1, floor - 1, z, z, "armor_light");
         // Trim weight along the keel keeps her upright and sets how heavy she is.
-        foreach (int z in new[] { -15, -9, -3, 3, 8, 14 }) d.Set(0, 1, z, "lead_ballast");
-        d.Fill(-2, 2, floor, floor, bow + 1, stern - 1, "armor_light");
+        foreach (int z in new[] { -15, -9, -3, 3, 8, 13 }) d.Set(0, 1, z, "lead_ballast");
 
-        // Pressure hull, chamfered along all four long edges.
-        d.Fill(-2, 2, 0, 0, bow, stern, "armor_light");
-        d.FillSlope(-3, -3, 0, 0, bow, stern, "armor_light_slope", new Int3(-1, -1, 0));
-        d.FillSlope(3, 3, 0, 0, bow, stern, "armor_light_slope", new Int3(1, -1, 0));
-        d.Fill(-3, -3, 1, top - 1, bow, stern, "armor_light");
-        d.Fill(3, 3, 1, top - 1, bow, stern, "armor_light");
-        d.FillSlope(-3, -3, top, top, bow, stern, "armor_light_slope", new Int3(-1, 1, 0));
-        d.FillSlope(3, 3, top, top, bow, stern, "armor_light_slope", new Int3(1, 1, 0));
-        d.Fill(-2, 2, top, top, bow, stern, "armor_light");
-        d.Fill(-2, 2, 1, top - 1, bow, bow, "armor_light");
-        d.Fill(-2, 2, 1, top - 1, stern, stern, "armor_light");
+        // The pressure hull, station by station: a rounded section, closing in to a blunt bow and tapering
+        // aft to the shaft. (Half-width, then bottom and top rows.)
+        (int w, int yb, int yt) Section(int z) => (z - bow) switch
+        {
+            0 => (1, 2, 5),
+            1 => (2, 1, 6),
+            _ => (stern - z) switch { 0 => (1, 1, 3), 1 => (1, 1, 4), 2 => (2, 1, 5), 3 => (2, 0, 6), _ => (3, 0, top) },
+        };
 
-        // Conning tower with the periscope.
-        d.Set(0, top + 1, -2, "commander_seat");
-        d.Fill(-1, 1, top + 1, top + 3, -4, -4, "armor_light");
-        d.Fill(-1, 1, top + 1, top + 3, 0, 0, "armor_light");
-        d.Fill(-1, -1, top + 1, top + 3, -3, -1, "armor_light");
-        d.Fill(1, 1, top + 1, top + 3, -3, -1, "armor_light");
-        d.Fill(0, 0, top + 3, top + 3, -3, -1, "armor_light");
+        for (int z = bow; z <= stern; z++)
+        {
+            (int w, int yb, int yt) = Section(z);
+            bool end = z == bow || z == stern;
+            d.Fill(-w + 1, w - 1, floor, floor, z, z, "armor_light");
+            for (int y = yb; y <= yt; y++)
+            for (int x = -w; x <= w; x++)
+            {
+                int ax = Math.Abs(x), sx = Math.Sign(x);
+                bool rim = ax == w || y == yb || y == yt;
+                // (The cells just inside each rounded corner, so the shell is joined face to face all round.)
+                if (w == 3 && ax == 2 && (y == yb + 1 || y == yt - 1)) d.Fill(x, x, y, y, z, z, "armor_light");
+                if (!rim && !end) continue;
+                if (w == 3 && ax == 3 && (y == yb || y == yt)) continue;
+                if (w == 3 && ax == 3 && (y == yb + 1 || y == yt - 1))
+                    d.Fill(x, x, y, y, z, z, "armor_light_round", Facing(new Int3(sx, y == yb + 1 ? -1 : 1, 0)));
+                else if (ax == w - (w == 3 ? 1 : 0) && sx != 0 && (y == yb || y == yt))
+                    d.Fill(x, x, y, y, z, z, "armor_light_round", Facing(new Int3(sx, y == yb ? -1 : 1, 0)));
+                else d.Fill(x, x, y, y, z, z, "armor_light");
+            }
+        }
 
-        // Screw, rudder and dive planes.
+        // The fin: narrow and tall, rounded at the front, the commander inside, diving planes on its sides,
+        // the periscope and a mast on top.
+        d.Set(0, top + 1, -5, "commander_seat");
+        for (int y = top + 1; y <= top + 4; y++)
+        {
+            foreach (int s in new[] { -1, 1 }) d.Fill(s, s, y, y, -7, -2, "armor_light");
+            d.Fill(0, 0, y, y, -2, -2, "armor_light");
+            d.Fill(0, 0, y, y, -8, -8, "armor_light");
+            foreach (int s in new[] { -1, 1 }) d.Fill(s, s, y, y, -8, -8, "armor_light_round", Facing(new Int3(s, 0, -1)));
+        }
+
+        d.Fill(-1, 1, top + 4, top + 4, -7, -3, "armor_light");
+        int plane = Orientations.RotateAroundZ(0, 1);
+        foreach (int s in new[] { -1, 1 }) d.Set(2 * s, top + 3, -6, "rudder", plane);
+        d.Set(0, top + 5, -6, "periscope");
+        d.Set(0, top + 5, -4, "antenna");
+
+        // Screw, a cross of rudders and stern planes ahead of it.
         d.Set(0, 2, stern + 1, "ship_propeller");
         d.Set(0, 2, stern + 2, "rudder");
-        int plane = Orientations.RotateAroundZ(0, 1);
+        d.Set(0, 3, stern + 2, "rudder");
+        d.Set(0, 1, stern + 2, "rudder");
         d.Set(-1, 2, stern + 2, "rudder", plane);
         d.Set(1, 2, stern + 2, "rudder", plane);
 
@@ -1669,7 +1727,11 @@ public static class ExampleDesigns
             d.Set(x, y, -100, "seeker_radar");
         }
 
-        // A funnel aft of the bridge.
+        // A funnel aft of the bridge, its corners rounded.
+        for (int y = deck + 1; y <= deck + 16; y++)
+            foreach (int sx in new[] { -1, 1 })
+            foreach ((int z, int sz) in new[] { (-80, -1), (-72, 1) })
+                d.Set(3 * sx, y, z, "armor_light_round", Facing(new Int3(sx, 0, sz)));
         d.Fill(-3, 3, deck + 1, deck + 16, -80, -80, "armor_light");
         d.Fill(-3, 3, deck + 1, deck + 16, -72, -72, "armor_light");
         d.Fill(-3, -3, deck + 1, deck + 16, -79, -73, "armor_light");
@@ -1694,8 +1756,28 @@ public static class ExampleDesigns
             d.Tile(-x + 1, x - 1, y1, y1, z0 + 1, z1 - 1, "hull_plate", 0, "armor_light");
         }
 
+        // A band of windows round the upper tier, then the tiers, a lattice mast on top and the mainmast aft.
+        d.Fill(-3, 3, deck + 18, deck + 19, -108, -108, "glazing");
+        d.Fill(-3, 3, deck + 18, deck + 19, -94, -94, "glazing");
+        foreach (int sx in new[] { -4, 4 }) d.Fill(sx, sx, deck + 18, deck + 19, -107, -95, "glazing");
         Box(6, deck + 1, deck + 10, -110, -90);
         Box(4, deck + 11, deck + 20, -108, -94);
+        d.SetIfFree(0, deck + 26, -95, "mast_lattice");
+        d.SetIfFree(0, deck + 6, -60, "mast_lattice");
+
+        // Boats amidships, life rafts and bollards along the deck edges.
+        foreach (int sx in new[] { -1, 1 })
+        {
+            foreach (int z in new[] { -56, -44, -32 }) d.SetIfFree(sx * 9, deck + 2, z, "ships_boat");
+            for (int z = -200; z <= 200; z += 25)
+            {
+                // (Only on bare deck plating.)
+                bool OnDeck(int x, int zz) => d.IdAt(x, deck, zz) is "armor_light" or "hull_plate" or "armor_heavy";
+                if (OnDeck(sx * 22, z)) d.SetIfFree(sx * 22, deck + 1, z, "bollard");
+                foreach (int dz in new[] { 6, 8 })
+                    if (OnDeck(sx * 21, z + dz)) d.SetIfFree(sx * 21, deck + 1, z + dz, "liferaft");
+            }
+        }
 
         // Machinery aft of amidships: twelve turbines and their fuel.
         foreach (int x in new[] { -14, -8, 7, 13 })
@@ -1787,6 +1869,82 @@ public static class ExampleDesigns
     /// <summary>Example buildings: stationary ground units with crews and guns.</summary>
     public static IReadOnlyList<Blueprint> Buildings => new[]
         { Pillbox(), FlakNest(), Outpost(), SiegeFortress(), CoastalCitadel(), FlakTower(), MortarBattery() };
+
+    // ------------------------------------------------------------------ ship helpers
+
+    /// <summary>
+    /// A ship's hull shell of <paramref name="mat"/>, shaped like a real one: a flat bottom with chamfered bilges,
+    /// straight sides <paramref name="halfBeam"/> cells out from the centerline that close in toward the bow at one
+    /// cell for every two, to a sharp stem (long half-slope pieces standing on edge, so seen from above the bow is a
+    /// clean V), a transom stern, and the deck on top at <paramref name="deck"/>. Forward of
+    /// <paramref name="focEnd"/> the sides and deck stand <paramref name="focRise"/> cells higher (a raised
+    /// forecastle, closed by a wall at its after end). Never replaces what's already placed, so put guns, rings and
+    /// machinery first. Bulkheads and the inside are the design's. Returns the hull's half-width at each station.
+    /// </summary>
+    private static Func<int, int> ShipHull(Draft d, int bow, int stern, int halfBeam, int deck, string mat,
+        int focEnd = int.MinValue, int focRise = 0)
+    {
+        int Hw(int z) => z < bow ? -1 : Math.Min(halfBeam, (z - bow + 1) / 2);
+        int Top(int z) => z < focEnd ? deck + focRise : deck;
+        for (int z = bow; z <= stern; z++)
+        {
+            int hw = Hw(z), prev = Hw(z - 1), top = Top(z);
+            bool widens = hw > prev, secondHalf = hw == prev && prev > Hw(z - 2) && z - 2 >= bow - 1;
+            if (hw >= 2)
+            {
+                d.Fill(-hw + 1, hw - 1, 0, 0, z, z, mat);
+                d.Fill(-hw, -hw, 0, 0, z, z, mat + "_slope", Facing(new Int3(-1, -1, 0)));
+                d.Fill(hw, hw, 0, 0, z, z, mat + "_slope", Facing(new Int3(1, -1, 0)));
+            }
+            else d.Fill(-hw, hw, 0, 0, z, z, mat);
+
+            for (int y = 1; y <= top; y++)
+            {
+                if (hw == 0)
+                {
+                    d.Fill(0, 0, y, y, z, z, mat);
+                    continue;
+                }
+
+                foreach (int s in new[] { -1, 1 })
+                {
+                    // Where the side is closing in toward the bow, a long half slope across two stations: its low
+                    // half on the station where the hull widens, its high half on the one behind.
+                    int x = s * hw;
+                    if (widens) d.Fill(x, x, y, y, z, z, mat + "_shallow", BowFacing(s));
+                    else if (secondHalf) d.Fill(x, x, y, y, z, z, mat + "_shallow_high", BowFacing(s));
+                    else d.Fill(x, x, y, y, z, z, mat);
+                }
+
+                // The deck (and the forecastle's after wall), and the transom.
+                if (y == top || z == stern || (focRise > 0 && z == focEnd - 1 && y > deck)) d.Fill(-hw + 1, hw - 1, y, y, z, z, mat);
+            }
+        }
+
+        return Hw;
+    }
+
+    /// <summary>
+    /// The orientation that stands a long half slope on edge along a bow's side: rising outward toward side
+    /// <paramref name="s"/> (+1 starboard, −1 port) as it runs aft.
+    /// </summary>
+    private static int BowFacing(int s)
+    {
+        for (int o = 0; o < Orientations.Count; o++)
+            if (Orientations.Apply(o, Int3.Up) == new Int3(s, 0, 0) && Orientations.Apply(o, new Int3(0, 0, 1)) == new Int3(0, 0, 1)) return o;
+        throw new System.InvalidOperationException("No bow orientation.");
+    }
+
+    /// <summary>Guard rails along both deck edges from <paramref name="z0"/> to <paramref name="z1"/>, one row above the deck at <paramref name="deck"/>, skipping cells already used.</summary>
+    private static void DeckRails(Draft d, Func<int, int> hw, int z0, int z1, int deck)
+    {
+        for (int z = z0; z <= z1; z++)
+            foreach (int s in new[] { -1, 1 })
+            {
+                int x = s * hw(z);
+                d.Fill(x, x, deck + 1, deck + 1, z, z, "railing", Orient(new Int3(0, -1, 0), new Int3(-s, 0, 0)));
+            }
+    }
 
     // ------------------------------------------------------------------ fortification helpers
 
