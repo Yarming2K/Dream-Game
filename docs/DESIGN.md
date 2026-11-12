@@ -415,6 +415,20 @@ The goal is hundreds of vehicles and thousands of shells in the air at once, on 
 | Supply | **Hybrid:** real convoys (trucks, cargo ships, transport planes) you can see, escort and ambush near you; far away the same flow is worked out along the routes on the map. Cut a route by taking or destroying its depots and bridges. |
 | Bases | **Capture sites, build around them:** each island has sites worth taking (ports, airfields, mines, towns); once you hold one you can build your own structures around it. Plus **field equipment** for the front: a **forward depot** (a supply truck unfolds into one: rearm, refuel and repair near the front, fed by convoys), a **field airstrip** (steel matting) and a **field radar / spotter post**, and **binoculars** for the soldier to call things in on what they mark (see below). |
 | Production | **Design, prototype, produce.** Design anything in the builder; its price and build time show live. The first of a new design is built at a **workshop** (by its crew, or faster if you weld it yourself) for extra cost, so you can test it and fix it; once it has a working prototype it can be **mass-produced**. **Specialised sites:** vehicle bays build land machines, hangars at airfields build aircraft, shipyards on the coast build ships (a giant dry dock for colossal ones), so ports and airfields are worth fighting for. Build time grows with weight and complexity. **Refits:** change a design and bring units in to upgrade, paying only the difference. Factories are **ready-made buildings** in set sizes to start with; factories built from blocks come later. The rival uses the same system. |
+| Call-ins | Through **binoculars** you mark a spot and call in: an **artillery strike** (your mortars, rocket artillery and ship guns in range), an **air strike** (ready aircraft at your airfields fly out to it), a **recon flight** (reveals the area for a while) or a **supply drop** (ammo, fuel or a field depot crate). |
+| Your role | **Soldier and commander:** you fight on foot or in any vehicle, and command too (orders on the tactical map, call-ins, what the factories build). AI commanders run the rest of your side's units while you're busy. |
+| Start | **A foothold island:** a port, a workshop, a few basic WW2-era designs and some resources. The rival holds the far side of the archipelago. |
+| Length | **About 10 to 20 hours**, from WW2 kit to modern jets and missiles, with a speed setting to make it shorter or longer. |
+
+**Build order** (each step playable on its own):
+1. **The world:** a seeded 20 × 20 km archipelago (6 to 10 islands, sea between them, roads), with sites on it (ports, airfields, mines, oil wells, towns), streamed in tiles around the player; units far away moving and fighting on the simplified rules.
+2. **Economy rules in Core:** the 8 resources, what each block costs, what sites produce, stockpiles, supply routes (convoys near you, worked out along routes far away). Tested.
+3. **Production:** the workshop for prototypes, vehicle bays, hangars and shipyards with queues, refits, and the price and build time in the builder.
+4. **The rival:** one AI faction with designs for each era and a strategy (expand, defend, attack, raid supply lines).
+5. **Tech:** eras with branches, research labs, salvage and captured sites.
+6. **Field equipment and call-ins:** the forward depot, field airstrip, radar post, and binoculars.
+7. **The campaign itself:** start, capturing sites, victory, saving and loading, the speed setting, and opening missions that teach by doing.
+
 
 ## Technical approach
 
@@ -438,7 +452,7 @@ The goal is hundreds of vehicles and thousands of shells in the air at once, on 
 ### What's next, in order
 1. **Graphics pass 1: models, effects and environment** *(in progress)*. Done: weathering on everything, the Blender part library, trees, bushes and rocks you can knock down, time of day and weather, ground and roads, the village, a livelier sea, tyre ruts, the new jet exhaust, and the frame-rate fixes from the first PC benchmarks. The PC check is done and its fixes are in, and so is the frame-rate work on big machines (fewer collision shapes, cheaper floating and wheel tests): the battleship close up went from 27-43 to 83 FPS and the deck battle from 38 to 57. Still open: the battle drills (100 and 200 machines) hold at 20 FPS; the next step there is to measure how much of each physics step is the physics engine itself.
 2. **Game mechanics**: jets built from parts, streamlining, engine tuning and heat (see Jets).
-3. **Campaign planning**: what the campaign is, built on the environment from pass 1.
+3. **Campaign planning** *(done: see "Campaign plan")*.
 4. **Campaign building**: industry and the planet war (milestones 4 and 5 below).
 5. **If we're in a good spot**: multiplayer (co-op first) and easier creation, somewhere between campaign planning and graphics pass 2.
 6. **Graphics pass 2: explosions, satisfying destruction and UI**, when the campaign starts to need more UI.
