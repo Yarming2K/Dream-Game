@@ -72,7 +72,9 @@ public partial class VehicleBody
     /// <summary>Airships and hovering aircraft hold this height (meters above the sea) when nobody is climbing.</summary>
     public float HoldAltitude { get; private set; } = float.NaN;
     public int BombsLeft => Model.Instances.Count(b => b.Alive && b.Def.Kind == BlockKind.BombRack && b.AmmoUnits >= 1f);
-    public int MissilesReady => Analysis.Missiles.Count(MissileReady);
+    /// <summary>Missiles ready to fire (a box launcher counts each loaded canister).</summary>
+    public int MissilesReady => Analysis.Missiles.Where(MissileReady)
+        .Sum(m => m.IsVls && Model.Blocks.TryGetValue(m.Rail, out BlockInstance b) ? Mathf.Max(1, (int)b.AmmoUnits) : 1);
     public bool CanSwitchVtol => Analysis.Mode == MobilityMode.Hover && Analysis.Air.WingAreaM2 > 4f &&
                                  AirThrusters.Any(t => t.Alive && t.Info.Direction.Y == 0 && t.Info.Kind is BlockKind.AirPropeller or BlockKind.JetEngine);
 
@@ -179,9 +181,9 @@ public partial class VehicleBody
             Vector3 r = s.Local - com;
             switch (s.Info.Role)
             {
-                case SurfaceRole.Elevator: _authPitch += perQ * Mathf.Abs(r.Z); break;
-                case SurfaceRole.Aileron: _authRoll += perQ * Mathf.Abs(r.X); break;
-                case SurfaceRole.Rudder: _authYaw += perQ * Mathf.Abs(r.Z); break;
+                case SurfaceRole.Elevator: _authPitch += perQ * s.Info.Area * Mathf.Abs(r.Z); break;
+                case SurfaceRole.Aileron: _authRoll += perQ * s.Info.Area * Mathf.Abs(r.X); break;
+                case SurfaceRole.Rudder: _authYaw += perQ * s.Info.Area * Mathf.Abs(r.Z); break;
             }
         }
 
@@ -359,7 +361,7 @@ public partial class VehicleBody
             }
 
             float cl = Aero.LiftCoefficient(alpha), cd = Aero.DragCoefficient(alpha, cl);
-            float q = 0.5f * Aero.AirDensity * sp2 * area;
+            float q = 0.5f * Aero.AirDensity * sp2 * area * s.Info.Area;
             Vector3 liftDir = n - vhat * vhat.Dot(n);
             Vector3 f = -vhat * (q * cd);
             if (liftDir.LengthSquared() > 1e-4f) f += liftDir.Normalized() * (q * cl);
@@ -819,13 +821,23 @@ public partial class VehicleBody
         return true;
     }
 
-    /// <summary>Fires the missile in a vertical launch cell straight up out of the deck.</summary>
+    /// <summary>
+    /// Fires the missile in a vertical launch cell straight up out of the deck, or the next one in a box
+    /// launcher out of its canister's mouth, along the raised box.
+    /// </summary>
     private bool FireFromCell(MissileInfo m, bool byPlayer, Vector3? aim)
     {
         BlockInstance cell = Model.Blocks[m.Rail];
         Transform3D sec = View.SectionGlobal(m.Section);
         Vector3 up = (sec.Basis * m.Forward.G()).Normalized();
         Vector3 at = sec * Conv.CellPos(m.Rail) + up * 1.6f;
+        bool box = cell.Def.LaunchTiltDeg > 0;
+        if (box)
+        {
+            int i = BoxLauncher.Next((int)cell.AmmoUnits);
+            up = (sec.Basis * BoxLauncher.AxisOnVehicle(cell.Def, cell.Orientation).G()).Normalized();
+            at = sec * BoxLauncher.MouthOnVehicle(cell.Def, m.Rail, cell.Orientation, i).G() + up * 0.8f;
+        }
         VehicleBody target = null;
         Vector3? goal = null;
         if (m.Vls == VlsLoad.Strike)
@@ -835,7 +847,7 @@ public partial class VehicleBody
         }
         else if (aim.HasValue) target = RadarLock(at, (aim.Value - at).Normalized(), Faction, 30f, 6000f);
 
-        cell.AmmoUnits = 0;
+        cell.AmmoUnits = box ? Mathf.Floor(cell.AmmoUnits) - 1f : 0f;
         ShowCellHatch(cell, false);
         Combat.Instance.LaunchMissile(this, at, up, LinearVelocity, m.Stats, byPlayer, Combat.VlsMissileVisual(m.Vls), target, goal, vertical: true);
         return true;
@@ -860,9 +872,20 @@ public partial class VehicleBody
         return best;
     }
 
-    /// <summary>A loaded launch cell shows its closed hatch; an empty one shows the open well.</summary>
+    /// <summary>
+    /// A loaded launch cell shows its closed hatch; an empty one shows the open well. A box launcher shows the
+    /// cover on each canister that still holds a missile.
+    /// </summary>
     private void ShowCellHatch(BlockInstance cell, bool loaded)
     {
+        if (cell.Def.LaunchTiltDeg > 0)
+        {
+            Node3D v = View.VisualOf(cell);
+            for (int i = 0; i < BoxLauncher.Canisters; i++)
+                if (v?.GetNodeOrNull<Node3D>($"Cap{i}") is Node3D cap) cap.Visible = i < (int)cell.AmmoUnits;
+            return;
+        }
+
         Node3D hatch = View.VisualOf(cell)?.GetNodeOrNull<Node3D>("Payload");
         if (hatch != null) hatch.Visible = loaded;
     }
@@ -929,9 +952,12 @@ public partial class VehicleBody
         bool changed = false;
         foreach (BlockInstance b in Model.Instances)
         {
-            if (!b.Alive || b.Def.Kind is not (BlockKind.BombRack or BlockKind.VlsCell) || b.AmmoUnits >= 1f) continue;
-            b.AmmoUnits = Mathf.Min(1f, b.AmmoUnits + dt / (b.Def.Kind == BlockKind.VlsCell ? 4f : 3f));
-            if (b.Def.Kind == BlockKind.VlsCell && b.AmmoUnits >= 1f) ShowCellHatch(b, true);
+            // (A box launcher holds several missiles, loaded one at a time.)
+            float full = b.Def.Kind == BlockKind.VlsCell ? Mathf.Max(1, b.Def.AmmoUnits) : 1f;
+            if (!b.Alive || b.Def.Kind is not (BlockKind.BombRack or BlockKind.VlsCell) || b.AmmoUnits >= full) continue;
+            float was = b.AmmoUnits;
+            b.AmmoUnits = Mathf.Min(full, b.AmmoUnits + dt / (b.Def.Kind == BlockKind.VlsCell ? 4f : 3f));
+            if (b.Def.Kind == BlockKind.VlsCell && (int)b.AmmoUnits > (int)was) ShowCellHatch(b, true);
             changed = true;
         }
 

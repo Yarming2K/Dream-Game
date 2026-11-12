@@ -40,6 +40,9 @@ public sealed class SurfaceInfo
     public int Orientation;
     public SurfaceRole Role;
     public bool Control;
+
+    /// <summary>Its lifting area as a share of a full square panel (a swept edge has half).</summary>
+    public float Area = 1f;
 }
 
 /// <summary>Something that pushes: an air propeller, a jet, a rotor or a lift fan.</summary>
@@ -217,6 +220,19 @@ public static class Aero
     /// rounded nose lets the air slide past; at the back, a tapering tail lets it close up behind instead of leaving
     /// a wake.
     /// </summary>
+    /// <summary>A takeoff run longer than this (meters) earns a design a warning.</summary>
+    public const float LongTakeoffRunM = 600f;
+
+    /// <summary>
+    /// Roughly how far a plane runs along the ground before it lifts off: speeding up from a standstill to its
+    /// stall speed on three quarters of its standing push, less rolling friction. Infinite if it can't speed up.
+    /// </summary>
+    public static float TakeoffRunM(float stallMs, float staticThrustN, float massKg)
+    {
+        float accel = staticThrustN * 0.75f / MathF.Max(massKg, 1f) - 0.05f * GunMath.Gravity;
+        return accel <= 0.1f ? float.PositiveInfinity : stallMs * stallMs / (2f * accel);
+    }
+
     public static float FaceDrag(BlockShape shape, bool flatFace) => flatFace ? 1f : shape switch
     {
         BlockShape.Wedge => 0.5f,

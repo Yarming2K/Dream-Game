@@ -881,12 +881,48 @@ public sealed class VehicleAnalysis
                 m.Valid = false;
                 m.Problem = $"The VLS cell at {cell} is on its side. It must stand upright, hatch on top (rotate it with T or G).";
             }
+            else if (d.LaunchTiltDeg > 0)
+            {
+                if (LauncherMasked(cell, d))
+                {
+                    m.Valid = false;
+                    m.Problem = $"The {d.Name} at {cell} has something in front of its canister mouths, so its missiles can't get out.";
+                }
+            }
             else if (Cells.ContainsKey(cell + up))
             {
                 m.Valid = false;
                 m.Problem = $"The VLS cell at {cell} has something on its hatch, so its missile can't get out.";
             }
         }
+    }
+
+    /// <summary>
+    /// Whether a box launcher's missiles are blocked: anything in the cells just in front of the top half of its
+    /// box, or on top of its front half, where the raised canisters point.
+    /// </summary>
+    private bool LauncherMasked(Int3 anchor, BlockDef d)
+    {
+        int o = Cells[anchor].O;
+        (Int3 lo, Int3 hi) = Footprint.LocalRange(d.Size);
+        int midY = (lo.Y + hi.Y + 1) / 2, midZ = (lo.Z + hi.Z) / 2;
+        bool Taken(Int3 local)
+        {
+            Int3 c = anchor + Orientations.Apply(o, local);
+            return Cells.TryGetValue(c, out BlueprintBlock r) && r.Cell != anchor;
+        }
+
+        for (int x = lo.X; x <= hi.X; x++)
+        {
+            for (int y = midY; y <= hi.Y; y++)
+                if (Taken(new Int3(x, y, lo.Z - 1)))
+                    return true;
+            for (int z = lo.Z; z <= midZ; z++)
+                if (Taken(new Int3(x, hi.Y + 1, z)))
+                    return true;
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -909,7 +945,7 @@ public sealed class VehicleAnalysis
                 case BlockKind.ControlSurface:
                 {
                     Int3 n = Orientations.Up(o);
-                    var info = new SurfaceInfo { Cell = c, Orientation = o, Control = d.Kind == BlockKind.ControlSurface, Role = SurfaceRole.Wing };
+                    var info = new SurfaceInfo { Cell = c, Orientation = o, Control = d.Kind == BlockKind.ControlSurface, Role = SurfaceRole.Wing, Area = d.LiftArea };
                     if (info.Control && Math.Abs(n.Y) == 1)
                     {
                         float dx = MathF.Abs(c.X * cs - CenterOfMass.X), dz = MathF.Abs(c.Z * cs - CenterOfMass.Z);
@@ -956,12 +992,13 @@ public sealed class VehicleAnalysis
 
         var air = new AirStats { GasLiftKg = gasLift, Bombs = BombRacks.Count };
         var flat = Surfaces.Where(s => Math.Abs(Orientations.Up(s.Orientation).Y) == 1).ToList();
-        air.WingAreaM2 = flat.Count * Aero.PanelArea;
-        air.LiftCenterZ = flat.Count > 0 ? flat.Average(s => s.Cell.Z * cs) : CenterOfMass.Z;
+        float flatShare = flat.Sum(s => s.Area);
+        air.WingAreaM2 = flatShare * Aero.PanelArea;
+        air.LiftCenterZ = flatShare > 0 ? flat.Sum(s => s.Cell.Z * cs * s.Area) / flatShare : CenterOfMass.Z;
         air.StaticMarginM = air.LiftCenterZ - CenterOfMass.Z;
         // Elevator authority against stability: how far it can hold the nose up.
         float elevator = Surfaces.Where(s => s.Role == SurfaceRole.Elevator)
-            .Sum(s => Aero.PanelArea * Aero.LiftSlope * Aero.ControlThrow * MathF.Abs(s.Cell.Z * cs - CenterOfMass.Z));
+            .Sum(s => Aero.PanelArea * s.Area * Aero.LiftSlope * Aero.ControlThrow * MathF.Abs(s.Cell.Z * cs - CenterOfMass.Z));
         float stiffness = air.WingAreaM2 * Aero.LiftSlope * MathF.Max(air.StaticMarginM, 0.02f);
         air.MaxPitchDeg = stiffness > 0 ? MathF.Min(elevator / stiffness, 1f) * 180f / MathF.PI : 0;
         air.HasRoll = Surfaces.Any(s => s.Role == SurfaceRole.Aileron);
@@ -993,12 +1030,15 @@ public sealed class VehicleAnalysis
         var columns = new Dictionary<(int, int), (Int3 front, Int3 back)>();
         foreach ((Int3 c, BlockDef d) in Defs)
         {
-            if (d.IsLiftingSurface || Disconnected.Contains(c)) continue;
+            // (Landing gear folds away in flight.)
+            if (d.IsLiftingSurface || d.Retracts || Disconnected.Contains(c)) continue;
             if (!columns.TryGetValue((c.X, c.Y), out var col)) columns[(c.X, c.Y)] = (c, c);
             else columns[(c.X, c.Y)] = (c.Z < col.front.Z ? c : col.front, c.Z > col.back.Z ? c : col.back);
         }
 
-        float FaceDrag(Int3 c, Int3 dir) => Aero.FaceDrag(Defs[c].Shape, Shapes.CoversFace(Defs[c].Shape, Cells[c].O, dir));
+        float FaceDrag(Int3 c, Int3 dir) => Defs[c].DragFace >= 0
+            ? Defs[c].DragFace
+            : Aero.FaceDrag(Defs[c].Shape, Shapes.CoversFace(Defs[c].Shape, Cells[c].O, dir));
         float shaped = 0;
         foreach ((Int3 front, Int3 back) in columns.Values)
             shaped += Aero.NoseShare * FaceDrag(front, new Int3(0, 0, -1)) + Aero.TailShare * FaceDrag(back, new Int3(0, 0, 1));
@@ -1074,9 +1114,11 @@ public sealed class VehicleAnalysis
                 if (!a.CanFly)
                     Warnings.Add(new DesignWarning(Severity.Error,
                         $"It can't stay up: it needs {a.StallSpeedMs * 3.6f:0} km/h to fly but only reaches {a.TopSpeedMs * 3.6f:0} km/h. Add wing panels, more engine or propellers, or lose weight."));
-                else if (a.StallSpeedMs > 50f)
+                else if (a.StallSpeedMs > 50f && Aero.TakeoffRunM(a.StallSpeedMs, a.StaticThrustN, MassKg) is float run && run > Aero.LongTakeoffRunM)
                     Warnings.Add(new DesignWarning(Severity.Warning,
-                        $"Heavy for its wings: it needs {a.StallSpeedMs * 3.6f:0} km/h before it can lift off, which is a long run. Add wing panels or lose weight."));
+                        $"Heavy for its wings: it needs {a.StallSpeedMs * 3.6f:0} km/h to lift off" +
+                        (float.IsInfinity(run) ? ", and it can't get up to that on the ground." : $", a run of about {run:0} m.") +
+                        " Add wing panels, more push, or lose weight."));
                 if (Wheels.Count == 0)
                     Warnings.Add(new DesignWarning(Severity.Warning,
                         "No landing gear. Put Wheels on the bottom row (a Steering Wheel at the nose or tail steers on the ground), or it can only start in the air."));

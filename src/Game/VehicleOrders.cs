@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using DreamGame.Core;
 using Godot;
 
@@ -40,7 +41,30 @@ public partial class VehicleBody
     {
         ConsoleAlive = Model.CountOf(BlockKind.CommandConsole) > 0;
         RadarAlive = Model.CountOf(BlockKind.Radar) > 0;
+        _radarsDirty = true;
         if (StartBlocks == 0) StartBlocks = Model.Blocks.Count;
+    }
+
+    /// <summary>Seconds for a turning radar antenna to sweep once round.</summary>
+    private const float RadarSweepS = 2.5f;
+
+    private readonly List<Node3D> _radarSpinners = new();
+    private bool _radarsDirty = true;
+
+    /// <summary>Turning radar antennas sweep round and round while they're in one piece.</summary>
+    private void AnimateRadars(float dt)
+    {
+        if (_radarsDirty)
+        {
+            _radarsDirty = false;
+            _radarSpinners.Clear();
+            foreach (BlockInstance b in Model.Instances)
+                if (b.Alive && BlockModels.Turns(b.Def) && View.VisualOf(b)?.GetNodeOrNull<Node3D>("Spinner") is Node3D n)
+                    _radarSpinners.Add(n);
+        }
+
+        foreach (Node3D n in _radarSpinners)
+            if (IsInstanceValid(n)) n.RotateY(dt * Mathf.Tau / RadarSweepS);
     }
 
     /// <summary>Health for the map: the share of its cells still filled.</summary>

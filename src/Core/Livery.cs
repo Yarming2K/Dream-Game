@@ -101,6 +101,31 @@ public static class Liveries
         {
             Id = "sky", Name = "Sky", Pattern = LiveryPattern.Plain, Base = C(0.5f, 0.56f, 0.62f), Description = "Pale blue-grey, for aircraft seen from below.",
         },
+        new()
+        {
+            Id = "lowvis", Name = "Low-vis grey", Pattern = LiveryPattern.Blotches, Base = C(0.6f, 0.62f, 0.64f), Second = C(0.46f, 0.48f, 0.51f),
+            Third = C(0.46f, 0.48f, 0.51f), Scale = 4.5f, Description = "Two soft greys in big patches, the scheme of modern fighters: hard to pick out against the sky at any height.",
+        },
+        new()
+        {
+            Id = "stealth", Name = "Stealth grey", Pattern = LiveryPattern.Plain, Base = C(0.33f, 0.34f, 0.36f),
+            Description = "One flat dark grey, like the coating on the newest aircraft.",
+        },
+        new()
+        {
+            Id = "tan", Name = "Desert tan", Pattern = LiveryPattern.Plain, Base = C(0.72f, 0.64f, 0.5f),
+            Description = "One flat sand color, the plain modern finish of trucks and launchers in dry country.",
+        },
+        new()
+        {
+            Id = "forest_digital", Name = "Forest digital", Pattern = LiveryPattern.Digital, Base = C(0.35f, 0.39f, 0.26f), Second = C(0.22f, 0.25f, 0.17f),
+            Third = C(0.4f, 0.34f, 0.24f), Scale = 2f, Description = "Greens and brown in small squares: modern army camouflage for woods and fields.",
+        },
+        new()
+        {
+            Id = "desert_digital", Name = "Desert digital", Pattern = LiveryPattern.Digital, Base = C(0.74f, 0.66f, 0.5f), Second = C(0.6f, 0.5f, 0.36f),
+            Third = C(0.5f, 0.43f, 0.32f), Scale = 2f, Description = "Sand and tans in small squares: modern army camouflage for deserts.",
+        },
     };
 
     public static Livery Get(string id)

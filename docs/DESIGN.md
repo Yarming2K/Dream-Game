@@ -136,8 +136,8 @@ Command the units you aren't driving yourself, from a command ship, a command ve
 
 ### Style rules
 What every part should follow, so a design reads as one machine however odd it is:
-1. **Flat faces, chamfered edges.** Curves only where something turns or holds pressure: wheels, barrels, tanks, rotors, round hulls.
-2. **Glass is flat panes in frames,** never a bubble.
+1. **Flat faces, chamfered edges.** Curves only where something turns, holds pressure or meets fast air: wheels, barrels, tanks, rotors, round hulls, nose cones and radomes.
+2. **Glass is flat panes in frames,** except a modern fighter's one-piece bubble canopy (see Era looks).
 3. **Detail everywhere, at about the same density.** Plating gets panel seams and grime; parts get bolts, rims, hinges and handles; nothing large is featureless.
 4. **Parts show how they attach:** axles, collars, mounts, shafts.
 5. **Muted, real-world colors** for structure; bright colors only for lamps, markings and paint jobs.
@@ -153,7 +153,7 @@ What every part should follow, so a design reads as one machine however odd it i
    - **Running gear:** tyres with chevron tread, pressed-steel rims, hubs with wheel nuts, road wheels with lightening holes, cast track shoes with grousers and pins (also used for spare tracks).
    - **Guns:** double-baffle muzzle brakes; breech blocks with a breech ring, recoil cylinders, trunnions and an operating lever.
    - **Fittings:** cast round hatches with a hinge, handle and bolted ring; periscope heads with a rain hood; headlight buckets; stowage bins with lids and bands; flared smoke-grenade cups; exhaust silencers.
-   - **Aircraft:** whole twisted propeller blades; helicopter rotor blades with a root cuff and tip cap; jet engine casings with bands and stringers, and petal nozzles.
+   - **Aircraft:** whole twisted propeller blades; helicopter rotor blades with a root cuff and tip cap; jet engine casings with bands and stringers, and petal nozzles; a smooth pointed ogive for nose cones and radomes.
 
    A library mesh can replace several simple pieces at once (a blade's two halves, a hatch and its hinge), fitted to a box of its own. Block models still describe every part as a simple shape, and can tag it with a library mesh's name. When the library's there, the detailed mesh is drawn in its place, fitted to the shape's size, and detail the mesh already has is left out; without it, the simple shapes are drawn. Godot makes each mesh's detail levels when it imports the file. Far models always use the simple shapes. The meshes mark their bevels for the weathering. A test checks that every name a block asks for is in the library.
 
@@ -341,7 +341,7 @@ The first step of terrain and industry: the island's ground is no longer fixed.
 
 ### Air
 - The builder works out what an aircraft is from its parts: wings and propellers or jets make a **plane**, a rotor makes a **helicopter**, lift fans or upward jets make a **VTOL or drone**, and enough gas cells make an **airship**.
-- **Every wing panel and control surface lifts and drags where it sits**, depending on its angle to the airflow, and stalls past about 17°. A plane's stability comes from its shape: wings that lift just behind the center of mass are stable, too far behind is nose-heavy, and ahead of it flips. The builder shows stall speed and top speed, and warns about each of these, about missing control surfaces, and about landing gear the plane would tip off.
+- **Every wing panel and control surface lifts and drags where it sits**, depending on its angle to the airflow, and stalls past about 17°. A swept edge (a panel cut corner to corner) has half a panel's area. A plane's stability comes from its shape: wings that lift just behind the center of mass are stable, too far behind is nose-heavy, and ahead of it flips. The builder shows stall speed and top speed, and warns about each of these, about missing control surfaces, about landing gear the plane would tip off, and about a takeoff run longer than 600 m (worked out from the stall speed and the push, so a heavy jet with strong engines isn't warned for needing 190 km/h).
 - **Control surfaces map themselves** from where they are: at the wingtips they roll (ailerons), on the tailplane they pitch (elevators), standing up on the fin they turn (rudders). How hard a plane can turn depends on their size, how far out they sit, and the airspeed.
 - **Forgiving pilot assists:**
   - Planes fly toward where the mouse points. The assist banks into turns, only as steeply as the wings can hold the weight, levels the wings on target, and won't pull into a stall. W / S set the throttle, and A / D roll by hand.
@@ -447,12 +447,32 @@ The goal is hundreds of vehicles and thousands of shells in the air at once, on 
 - **Flight** uses the same approach: every panel's lift and drag is applied where it is, and the assists are rate controllers on each axis, capped by what the control surfaces can do at the current airspeed. A standalone flight simulation checks the examples take off within the airstrip, hold level flight, turn, recover from a zoom climb, and (for helicopters, drones and airships) hover and hold height.
 - **Level of detail:** full block simulation near players, with gunners thinking less often, simpler far models and lighter effects further out (see *Big battles*). Far-off battles beyond the map will use the core stat math with no physics.
 
+### Era looks
+Things should look their era as well as act it. The first pass, for the modern era, was drawn from real air-defence systems (truck-mounted box launchers, flat phased-array radars, rotating search radars) and real fighters (long radar noses, bubble canopies, straight swept edges, twin fins, folding gear, low-vis grey):
+- **Swept wing edge:** a wing panel cut corner to corner, so wings, tailplanes and fins get straight 45° edges instead of staircases. Half a panel's lift. Mirrored building turns it the right way round.
+- **Nose Cone** (one cell) and **Nose Radome** (3×3×4, a radar under a 2 m pointed nose with a probe): smooth ogives from the part library. Air slides off: a nose cone's face counts 0.15 of a flat one, a radome's 0.1. The radome works as a Search Radar.
+- **Bubble Canopy** (3×2×6): a one-piece blown canopy over the pilot seat, streamlined.
+- **Landing Gear** and **Landing Gear: steering**: a wheel on an oleo leg that folds up into the aircraft above 8 m and comes back down for landing. Folded away it adds no drag.
+- **Variable Nozzle: full size**: a metre across, like a real fighter engine's. Same figures as the Variable Nozzle, its petals reach past its cell.
+- **SAM Box Launcher** (3×5×7): six air-defence missiles in canisters, in a box raised 30° toward its front. Each missile leaves from its own canister's mouth, top row first, and covers show on the loaded ones. It needs clear air in front of the mouths. Reloads one missile at a time at supply points.
+- **Phased-Array Radar** (5×5×3, a fixed face 2.3 m across tilted back) and **Rotating Array Radar** (3×3×3, a flat antenna sweeping round every 2.5 s). Both work as a Search Radar. The old Search Radar's antenna now turns too.
+- **Heavy Wheel** and **Heavy Wheel: steering** (1×3×3): 1.4 m off-road tyres for big wheeled carriers.
+- **Paint jobs:** Low-vis grey (two soft greys, the modern fighter scheme), Stealth grey, Desert tan, Forest digital and Desert digital.
+
+Examples at real scale, each compared with a photo of the real thing (Blender previews of the game's blocks, hull surfaces and paint patterns):
+- **Starling** (air-superiority fighter): 16 m long, 12.5 m span, twin built jets fed by long intake ducts, all-moving tailplanes, twin fins, radome, bubble canopy, folding gear, four radar missiles; flies at about 1,000 km/h and lifts off in about 230 m.
+- **Palisade launcher** (SAM truck): an 8×8 truck with a box launcher raised over the back and outriggers.
+- **Palisade radar** (radar truck): the same truck with a phased-array radar over the tail, a rotating search radar on the operators' shelter, and a command console.
+
+What still separates them from the real ones (for later passes): our fuselages are slab-sided and slimmer, where real jets are deep and blended with curved surfaces; landing gear legs are short; real launchers and radars carry far more mechanical detail (trusses, cables, generators, ladders); and parts can't lean at angles in between (canted fins).
+
 ## Roadmap
 
 ### What's next, in order
 1. **Graphics pass 1: models, effects and environment** *(in progress)*. Done: weathering on everything, the Blender part library, trees, bushes and rocks you can knock down, time of day and weather, ground and roads, the village, a livelier sea, tyre ruts, the new jet exhaust, and the frame-rate fixes from the first PC benchmarks. The PC check is done and its fixes are in, and so is the frame-rate work on big machines (fewer collision shapes, cheaper floating and wheel tests): the battleship close up went from 27-43 to 83 FPS and the deck battle from 38 to 57. Still open: the battle drills (100 and 200 machines) hold at 20 FPS; the next step there is to measure how much of each physics step is the physics engine itself.
 2. **Game mechanics**: jets built from parts, streamlining, engine tuning and heat (see Jets).
 3. **Campaign planning** *(done: see "Campaign plan")*.
+3a. **Sandbox: era looks, first pass** *(done: see "Era looks")*. Parts and paint so modern machines look modern, real-scale examples, and a comparison with photos of the real ones.
 4. **Campaign building**: industry and the planet war (milestones 4 and 5 below).
 5. **If we're in a good spot**: multiplayer (co-op first) and easier creation, somewhere between campaign planning and graphics pass 2.
 6. **Graphics pass 2: explosions, satisfying destruction and UI**, when the campaign starts to need more UI.

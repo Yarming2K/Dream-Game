@@ -128,6 +128,17 @@ public static class ExampleDesigns
         throw new System.ArgumentException($"No orientation faces {facing}.");
     }
 
+    /// <summary>
+    /// Turns a swept wing edge so its cut edge faces <paramref name="cut"/> (e.g. forward and out) with the panel square to
+    /// <paramref name="normal"/>: (0,1,0) for a wing, (1,0,0) for a fin.
+    /// </summary>
+    public static int Edge(Int3 cut, Int3 normal)
+    {
+        for (int o = 0; o < Orientations.Count; o++)
+            if (Orientations.Apply(o, new Int3(-1, 0, -1)) == cut && (Orientations.Up(o) == normal || Orientations.Up(o) == -normal)) return o;
+        throw new System.ArgumentException($"No swept edge faces {cut} square to {normal}.");
+    }
+
     /// <summary>Turns a block so its arrow (forward) points along <paramref name="dir"/>, keeping it upright where possible.</summary>
     public static int Pointing(Int3 dir)
     {
@@ -141,8 +152,244 @@ public static class ExampleDesigns
     public static IReadOnlyList<Blueprint> All => new[]
     {
         Warden(), Vanguard(), Jackal(), Hailstorm(), Juggernaut(), Bulwark(), Skyguard(), Mole(), Corsair(), Trident(), Barracuda(), Kestrel(), Falcon(), Lancer(),
-        Hornet(), Wasp(), Zephyr(), Colossus(),
+        Hornet(), Wasp(), Zephyr(), Colossus(), Starling(), PalisadeLauncher(), PalisadeRadar(),
     };
+
+    /// <summary>
+    /// Starling: a full-size twin-engine air-superiority fighter, 16 m long with a 12.5 m span, drawn from the
+    /// look of today's fighters: a long radar nose, a bubble canopy over a single seat, boxy intakes either
+    /// side of the cockpit feeding two built jets down long ducts, a 45° swept wing with straight edges, twin
+    /// fins on tail booms, landing gear that folds away, and four radar missiles. Low-vis grey.
+    /// </summary>
+    public static Blueprint Starling()
+    {
+        var d = new Draft();
+
+        // Nose: the radome, then the forward fuselage with rounded corners, and the cockpit under its canopy.
+        d.Set(0, 2, -15, "radome");
+        d.Fill(-1, 1, 1, 3, -12, 12, "airframe");
+        for (int z = -12; z <= -9; z++)
+            foreach (int s in new[] { -1, 1 })
+            {
+                d.Set(s, 1, z, "airframe_round", Facing(new Int3(s, -1, 0)));
+                d.Set(s, 3, z, "airframe_round", Facing(new Int3(s, 1, 0)));
+            }
+
+        d.Set(0, 3, -9, "pilot_seat");
+        d.Set(0, 4, -9, "canopy_bubble");
+
+        // The spine behind the canopy, sloping down to the tail, with the flare launcher on top.
+        d.Fill(0, 0, 4, 4, -5, 1, "airframe");
+        foreach (int s in new[] { -1, 1 }) d.FillSlope(s, s, 4, 4, -5, 1, "airframe_slope", new Int3(s, 1, 0));
+        d.Slope(0, 4, 2, "airframe_slope", new Int3(0, 1, 1));
+        d.Set(0, 5, -1, "countermeasures");
+
+        // Fuel down the middle.
+        for (int z = 0; z <= 5; z++)
+            for (int y = 1; y <= 2; y++)
+                d.Set(0, y, z, "fuel_tank");
+
+        // (Hollow inside, where nothing needs to be: it's a light skin round the fuel, the ducts and the engines.)
+        for (int y = 1; y <= 2; y++)
+        {
+            for (int z = -8; z <= -1; z++) d.Remove(0, y, z);
+            for (int z = 6; z <= 11; z++) d.Remove(0, y, z);
+        }
+
+        foreach (int s in new[] { -1, 1 })
+            for (int z = 4; z <= 11; z++)
+                d.Remove(s, 2, z);
+
+        // Intake trunks either side of the cockpit: open ducts down to the engines, the outer corners rounded.
+        foreach (int s in new[] { -1, 1 })
+        {
+            d.Fill(System.Math.Min(2 * s, 3 * s), System.Math.Max(2 * s, 3 * s), 1, 3, -8, 12, "airframe");
+            for (int z = -8; z <= 12; z++)
+            {
+                d.Set(3 * s, 1, z, "airframe_round", Facing(new Int3(s, -1, 0)));
+                d.Set(3 * s, 3, z, "airframe_round", Facing(new Int3(s, 1, 0)));
+            }
+
+            for (int z = -8; z <= 3; z++) d.Remove(2 * s, 2, z);
+
+            // Sharp intake lips at the front, and the trunks tapering in round the nozzles at the back.
+            d.Slope(2 * s, 1, -8, "airframe_slope", new Int3(0, -1, -1));
+            d.Slope(2 * s, 3, -8, "airframe_slope", new Int3(0, 1, -1));
+            d.Slope(3 * s, 2, -8, "airframe_slope", new Int3(s, 0, -1));
+            d.Slope(2 * s, 1, 12, "airframe_slope", new Int3(0, -1, 1));
+            d.Slope(2 * s, 3, 12, "airframe_slope", new Int3(0, 1, 1));
+            d.Slope(3 * s, 2, 12, "airframe_slope", new Int3(s, 0, 1));
+            d.Slope(s, 1, 12, "airframe_slope", new Int3(0, -1, 1));
+            d.Slope(s, 3, 12, "airframe_slope", new Int3(0, 1, 1));
+
+            // The engine, back to front: a full-size nozzle, an afterburner, two turbines, the core, four
+            // compressor stages and a ramp intake at the end of the duct.
+            int x = 2 * s;
+            d.Set(x, 2, 13, "jet_nozzle_large");
+            d.Set(x, 2, 12, "jet_afterburner");
+            d.Set(x, 2, 11, "jet_turbine");
+            d.Set(x, 2, 10, "jet_turbine");
+            d.Set(x, 2, 9, "jet_core");
+            for (int z = 5; z <= 8; z++) d.Set(x, 2, z, "jet_compressor");
+            d.Set(x, 2, 4, "jet_intake_ramp");
+        }
+
+        // A tail cone between the nozzles.
+        d.Slope(0, 1, 12, "airframe_slope", new Int3(0, -1, 1));
+        d.Slope(0, 3, 12, "airframe_slope", new Int3(0, 1, 1));
+        d.Set(0, 2, 13, "airframe");
+        d.Set(0, 2, 14, "nose_cone", Pointing(new Int3(0, 0, 1)));
+
+        // The cannon in the side of the right intake trunk, its muzzle at the intake lip.
+        d.Set(3, 2, -6, "breech_40ac");
+        d.Set(3, 2, -7, "barrel");
+        d.Set(3, 2, -8, "barrel");
+        d.Set(3, 2, -5, "ammo_ap");
+
+        // Wings: a straight leading edge swept back 45° (a swept edge on every row), a straight trailing edge,
+        // ailerons on the outer half.
+        foreach (int s in new[] { -1, 1 })
+            for (int i = 0; i <= 8; i++)
+            {
+                int x = s * (4 + i), lead = -4 + i;
+                d.Set(x, 2, lead, "wing_swept", Edge(new Int3(s, 0, -1), Int3.Up));
+                for (int z = lead + 1; z <= 6; z++) d.Set(x, 2, z, i >= 5 && z == 6 ? "control_surface" : "wing");
+            }
+
+        // Leading-edge extensions: thin strakes running forward along the intakes, for lift at high angles.
+        foreach (int s in new[] { -1, 1 })
+        {
+            d.Set(4 * s, 2, -8, "wing_swept", Edge(new Int3(s, 0, -1), Int3.Up));
+            for (int z = -7; z <= -5; z++) d.Set(4 * s, 2, z, "wing");
+            d.Set(5 * s, 2, -5, "wing_swept", Edge(new Int3(s, 0, -1), Int3.Up));
+            d.Set(5 * s, 2, -4, "wing");
+        }
+
+        // Tail booms, all-moving tailplanes and twin fins with rudders.
+        int upright = Orientations.RotateAroundZ(0, 1);
+        foreach (int s in new[] { -1, 1 })
+        {
+            d.Fill(4 * s, 4 * s, 2, 2, 7, 14, "airframe");
+            d.Set(4 * s, 2, 15, "nose_cone", Pointing(new Int3(0, 0, 1)));
+            for (int i = 0; i <= 3; i++)
+            {
+                int x = s * (5 + i), lead = 11 + i;
+                d.Set(x, 2, lead, "wing_swept", Edge(new Int3(s, 0, -1), Int3.Up));
+                // (All-moving, like a modern fighter's: the whole tailplane swings.)
+                for (int z = lead + 1; z <= 15; z++) d.Set(x, 2, z, "control_surface");
+            }
+
+            for (int j = 0; j <= 4; j++)
+            {
+                int y = 3 + j, lead = 8 + j;
+                d.Set(4 * s, y, lead, "wing_swept", Edge(new Int3(0, 1, -1), Int3.Right));
+                for (int z = lead + 1; z <= 13; z++) d.Set(4 * s, y, z, j is >= 1 and <= 3 && z == 13 ? "control_surface" : "wing", upright);
+            }
+        }
+
+        // Radar missiles under each wing, two a side.
+        foreach (int s in new[] { -1, 1 })
+            foreach ((int x, int rail) in new[] { (7 * s, 5), (10 * s, 6) })
+            {
+                d.Set(x, 1, rail, "missile_rail");
+                d.Set(x, 1, rail - 1, "missile_motor");
+                d.Set(x, 1, rail - 2, "missile_fins");
+                d.Set(x, 1, rail - 3, "missile_warhead");
+                d.Set(x, 1, rail - 4, "seeker_radar");
+            }
+
+        // Landing gear: a steering nose leg under the cockpit, main legs under the engines. They fold away in flight.
+        d.Set(0, 0, -11, "landing_gear_steer");
+        foreach (int s in new[] { -1, 1 }) d.Set(2 * s, 0, 5, "landing_gear");
+        return d.Build("Starling (air-superiority fighter)", "lowvis");
+    }
+
+    /// <summary>
+    /// The heavy 8×8 truck under the Palisade air-defence vehicles: two steering axles and two driven ones on
+    /// 1.4 m tyres, a cab-over cab with a windscreen and side windows, the engine behind it and a flat bed.
+    /// The cab is 2.5 m wide; the whole truck about 10.5 m long.
+    /// </summary>
+    private static void HeavyTruck(Draft d, string rightSeat)
+    {
+        foreach (int s in new[] { -1, 1 })
+        {
+            d.Set(2 * s, 1, -8, "wheel_heavy_steer");
+            d.Set(2 * s, 1, -5, "wheel_heavy_steer");
+            d.Set(2 * s, 1, 4, "wheel_heavy");
+            d.Set(2 * s, 1, 7, "wheel_heavy");
+        }
+
+        // Chassis rails and the bed.
+        d.Fill(-1, 1, 1, 2, -11, 9, "frame");
+        d.Fill(-2, 2, 3, 3, -6, 9, "armor_light");
+        d.Fill(-2, 2, 2, 2, -12, -12, "frame");
+        foreach (int s in new[] { -1, 1 }) d.Set(2 * s, 3, -12, "headlight");
+
+        // The cab: crew seats, the windscreen and side windows, the roof sloped at the front.
+        d.Fill(-2, 2, 3, 5, -11, -7, "armor_light");
+        for (int x = -1; x <= 1; x++)
+        for (int z = -10; z <= -8; z++)
+        for (int y = 3; y <= 4; y++)
+            d.Remove(x, y, z);
+        d.Set(-1, 3, -9, "driver_seat");
+        d.Set(1, 3, -9, rightSeat);
+        for (int x = -2; x <= 2; x++)
+        {
+            d.Set(x, 4, -11, "glazing");
+            d.Slope(x, 5, -11, "armor_light_slope", new Int3(0, 1, -1));
+        }
+
+        foreach (int s in new[] { -1, 1 })
+            for (int z = -10; z <= -8; z++)
+                d.Set(2 * s, 4, z, "glazing");
+
+        // The engine bay behind the cab, with its exhaust stack.
+        d.Fill(-2, 2, 3, 4, -6, -5, "armor_light");
+        d.Set(0, 3, -6, "engine_large");
+        d.Set(-1, 3, -5, "fuel_tank");
+        d.Set(1, 3, -5, "fuel_tank");
+        d.Set(2, 5, -6, "exhaust");
+
+        // Outriggers that brace it level when it stops.
+        foreach (int s in new[] { -1, 1 })
+        {
+            d.Set(2 * s, 2, -2, "stabilizer", Pointing(new Int3(s, 0, 0)));
+            d.Set(2 * s, 2, 9, "stabilizer", Pointing(new Int3(s, 0, 0)));
+        }
+    }
+
+    /// <summary>
+    /// Palisade launcher: a modern surface-to-air missile truck. Six missiles in a box launcher raised over the
+    /// back of an 8×8 truck, the way today's air-defence batteries carry theirs, with outriggers to brace it.
+    /// Pair it with the Palisade radar.
+    /// </summary>
+    public static Blueprint PalisadeLauncher()
+    {
+        var d = new Draft();
+        HeavyTruck(d, "gunner_seat");
+        d.Set(0, 6, 6, "sam_launcher", Pointing(new Int3(0, 0, 1)));
+        d.Fill(-2, 2, 4, 4, -3, -3, "armor_light");
+        d.Set(0, 5, -3, "toolbox");
+        d.Set(2, 4, -4, "antenna");
+        return d.Build("Palisade launcher (SAM truck)", "forest_digital");
+    }
+
+    /// <summary>
+    /// Palisade radar: the battery's eyes and command post. A phased-array radar faces back over the tail of
+    /// an 8×8 truck, a search radar turns on the roof of the operators' shelter, and the shelter holds a command
+    /// console to direct the launchers from (M for the tactical map).
+    /// </summary>
+    public static Blueprint PalisadeRadar()
+    {
+        var d = new Draft();
+        HeavyTruck(d, "commander_seat");
+        d.Fill(-2, 2, 4, 5, -4, 3, "armor_light");
+        d.Set(0, 4, 0, "command_console");
+        d.Set(0, 7, -1, "radar_rotating");
+        d.Set(0, 6, 7, "radar_array", Pointing(new Int3(0, 0, 1)));
+        d.Set(2, 6, -3, "antenna");
+        return d.Build("Palisade radar (radar truck)", "forest_digital");
+    }
 
     /// <summary>
     /// Mole: an armoured dozer. A tracked hull with a blade 4.5 m wide across the front (three sections,

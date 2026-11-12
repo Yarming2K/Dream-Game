@@ -30,6 +30,10 @@ public partial class VehicleBody : RigidBody3D, IGridHost
         public bool Contact;
         public Vector3 HitPos;
         public Vector3 HitNormal;
+
+        /// <summary>Landing gear: folds away in flight. Its leg (on the "Strut" node) stays upright while the wheel turns.</summary>
+        public bool Retracts;
+        public Node3D Strut;
     }
 
     public sealed class GunRt
@@ -111,6 +115,15 @@ public partial class VehicleBody : RigidBody3D, IGridHost
     // What the driver is doing this tick (from the player's input, or held still).
     public float Throttle;
     public float Steer;
+
+    /// <summary>Landing gear comes down below this height above the ground.</summary>
+    private const float GearDownM = 8f;
+
+    /// <summary>Seconds for landing gear to fold up or come down.</summary>
+    private const float GearSwingS = 1.6f;
+
+    /// <summary>How far the landing gear is down: 1 down and locked, 0 folded away.</summary>
+    private float _gear = 1f;
     public bool Braking = true;
 
     public float PowerKw { get; private set; }
@@ -268,7 +281,7 @@ public partial class VehicleBody : RigidBody3D, IGridHost
             {
                 Block = b, Visual = View.VisualOf(b), Mount = Conv.CellPos(w.Cell), Radius = w.RadiusM,
                 Rest = Mobility.RestLength(w.Kind), Kind = w.Kind, LeftSide = w.Cell.X * Conv.CS < comX,
-                Offset = Mobility.RestLength(w.Kind),
+                Offset = Mobility.RestLength(w.Kind), Retracts = b.Def.Retracts, Strut = View.VisualOf(b)?.GetNodeOrNull<Node3D>("Strut"),
             });
         }
     }
@@ -488,6 +501,7 @@ public partial class VehicleBody : RigidBody3D, IGridHost
         FloodViewTick(dt);
         FittingsTick(dt);
         AnimateStabilizers(dt);
+        AnimateRadars(dt);
         foreach (GunRt g in Guns)
         {
             if (g.SalvoLeft > 0) SalvoTick(g, dt);
@@ -701,11 +715,31 @@ public partial class VehicleBody : RigidBody3D, IGridHost
 
         if (!IsAir) ApplyCentralForce(-vel * vel.Length() * 0.5f * Mobility.AirDensity * Analysis.DragArea);
 
+        // Landing gear folds up once the aircraft is well off the ground, and comes down again for landing.
+        bool gearDown = !IsAir || OnGround || HeightAboveGroundM < GearDownM;
+        _gear = Mathf.MoveToward(_gear, gearDown ? 1f : 0f, dt / GearSwingS);
         foreach (WheelRt w in Wheels)
         {
             if (w.Visual == null || !IsInstanceValid(w.Visual)) continue;
             Basis b = new Basis(Vector3.Up, w.SteerAngle) * new Basis(Vector3.Right, -w.Spin);
-            w.Visual.Transform = new Transform3D(b, w.Mount - Vector3.Up * w.Offset);
+            if (!w.Retracts)
+            {
+                w.Visual.Transform = new Transform3D(b, w.Mount - Vector3.Up * w.Offset);
+                continue;
+            }
+
+            // Swings back and up into its bay in the cell above, shrinking out of sight.
+            w.Visual.Visible = _gear > 0.02f;
+            if (!w.Visual.Visible) continue;
+            float g = _gear * _gear * (3f - 2f * _gear);
+            Basis fold = new Basis(Vector3.Right, (1f - g) * 1.3f) * Basis.FromScale(Vector3.One * Mathf.Lerp(0.25f, 1f, g));
+            w.Visual.Transform = new Transform3D(fold * b, w.Mount - Vector3.Up * (w.Offset * g) + Vector3.Up * ((1f - g) * Conv.CS * 0.5f));
+            if (w.Strut != null && IsInstanceValid(w.Strut))
+            {
+                // The leg reaches from the axle to the top of the cell, however far the suspension has stretched.
+                float stretch = (w.Offset * g + Conv.CS * 0.5f) / (Conv.CS * 0.5f);
+                w.Strut.Transform = new Transform3D(new Basis(Vector3.Right, w.Spin) * Basis.FromScale(new Vector3(1, stretch, 1)), Vector3.Zero);
+            }
         }
     }
 

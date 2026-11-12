@@ -310,6 +310,20 @@ def jet_engine():
     attach(ob, ring_of(2, 0.214, lambda: box(0.012, 0.012, 0.13), z=0.115, phase=math.radians(-35)))  # cable runs
     return finish(ob, 0.002, 1, 35)
 
+def ogive():
+    # A smooth pointed nose (a tangent ogive) round Z: the round base at -Z, the point at +Z, 2.2 times as long
+    # as it is wide across the base's radius. Nose cones and radomes are fitted to it.
+    R, L = 1.0, 2.2
+    rho = (R * R + L * L) / (2 * R)
+    prof = []
+    for i in range(41):
+        t = i / 40
+        x = L * (1 - t) ** 1.6          # distance from the tip, closer steps toward the point
+        r = max(0.0, math.sqrt(max(0.0, rho * rho - (L - x) ** 2)) + R - rho)
+        prof.append((max(r, 0.0005), L / 2 - x))
+    ob = new_obj("ogive", lathe(prof, 64))
+    return finish(ob, 0.0)
+
 def jet_nozzle():
     # A convergent nozzle: wide at the front (-Z), narrowing aft, made of overlapping petals, hollow.
     ob = new_obj("jet_nozzle", cylinder(0.19, 0.12, 32, r2=0.15))
@@ -372,7 +386,7 @@ def breech():
     return finish(ob, 0.006, 2, 35)
 
 PARTS = [tire, rim, hub, roadwheel, track_link, muzzle_brake, hatch, periscope, headlight, toolbox, smoke_tube, muffler, prop_blade,
-         jet_engine, jet_nozzle, rotor_blade, breech]
+         jet_engine, jet_nozzle, rotor_blade, breech, ogive]
 made = [f() for f in PARTS]
 
 # Spread out for the preview only; reset before export.

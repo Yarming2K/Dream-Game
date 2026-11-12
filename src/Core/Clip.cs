@@ -87,7 +87,7 @@ public sealed class Clip
         foreach (BlueprintBlock b in Blocks)
         {
             BlockDef def = BlockCatalog.Get(b.Id);
-            c.Blocks.Add(new BlueprintBlock(b.Id, Footprint.MirrorAnchor(def, b.Cell, b.O), Orientations.MirrorX(b.O)));
+            c.Blocks.Add(new BlueprintBlock(b.Id, Footprint.MirrorAnchor(def, b.Cell, b.O), Orientations.MirrorOf(def, b.O)));
         }
 
         c.Normalize();

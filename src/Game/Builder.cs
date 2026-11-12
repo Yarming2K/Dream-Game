@@ -326,7 +326,7 @@ public partial class Builder : Node3D
     private bool Place(Int3 anchor, List<Change> into)
     {
         bool placed = PlaceOne(_selected, anchor, _orientation, into);
-        if (_mirror) PlaceOne(_selected, MirrorAnchor(_selected, anchor, _orientation), Orientations.MirrorX(_orientation), into);
+        if (_mirror) PlaceOne(_selected, MirrorAnchor(_selected, anchor, _orientation), Orientations.MirrorOf(_selected, _orientation), into);
         if (placed)
             Sfx.Play2D(this, _selected.MassKg >= 200 ? SoundId.PlaceHeavy : SoundId.PlaceLight, -4f, _rng.RandfRange(0.92f, 1.08f));
         return placed;
@@ -948,7 +948,7 @@ public partial class Builder : Node3D
         }
 
         Int3 mc = MirrorAnchor(_selected, cell, _orientation);
-        int mo = Orientations.MirrorX(_orientation);
+        int mo = Orientations.MirrorOf(_selected, _orientation);
         bool overlapsSelf = Footprint.Cells(_selected, mc, mo).Any(x => Footprint.Cells(_selected, cell, _orientation).Contains(x));
         bool mirrorShow = show && _mirror && !overlapsSelf;
         _ghostMirror.Visible = mirrorShow;
@@ -1106,7 +1106,7 @@ public partial class Builder : Node3D
         foreach ((BlockDef def, Int3 anchor, int o) in _clip.PlacedAt(baseCell))
         {
             PlaceOne(def, anchor, o, changes, animate);
-            if (_mirror) PlaceOne(def, MirrorAnchor(def, anchor, o), Orientations.MirrorX(o), changes, animate);
+            if (_mirror) PlaceOne(def, MirrorAnchor(def, anchor, o), Orientations.MirrorOf(def, o), changes, animate);
         }
 
         Commit(changes);
@@ -1254,7 +1254,7 @@ public partial class Builder : Node3D
         }
 
         Int3 ext = offMax - offMin + new Int3(1, 1, 1);
-        int mo = Orientations.MirrorX(_orientation);
+        int mo = Orientations.MirrorOf(_selected, _orientation);
         for (int x = lo.X; x + ext.X - 1 <= hi.X; x += ext.X)
         for (int y = lo.Y; y + ext.Y - 1 <= hi.Y; y += ext.Y)
         for (int z = lo.Z; z + ext.Z - 1 <= hi.Z; z += ext.Z)

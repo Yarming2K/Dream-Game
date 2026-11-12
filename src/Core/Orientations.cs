@@ -125,6 +125,23 @@ public static class Orientations
         return IndexOf(m);
     }
 
+    /// <summary>The orientation of a block's mirror image across the X = 0 plane, for a block that looks the same flipped along its own axis <see cref="BlockDef.MirrorAxis"/>.</summary>
+    public static int MirrorOf(BlockDef def, int o) => MirrorX(o, def.MirrorAxis);
+
+    /// <summary>
+    /// The orientation of the mirror image across the X = 0 plane of a block that looks the same flipped along its
+    /// own axis <paramref name="axis"/> (0 X, 1 Y, 2 Z): the mirror, then that flip, which together turn it.
+    /// </summary>
+    public static int MirrorX(int o, int axis)
+    {
+        int[] m = Matrices[o];
+        var r = new int[9];
+        for (int i = 0; i < 3; i++)
+        for (int j = 0; j < 3; j++)
+            r[i * 3 + j] = (i == 0 ? -1 : 1) * m[i * 3 + j] * (j == axis ? -1 : 1);
+        return IndexOf(r);
+    }
+
     /// <summary>The orientation of the block's mirror image across the X = 0 plane.</summary>
     public static int MirrorX(int o)
     {

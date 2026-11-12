@@ -106,6 +106,9 @@ public enum BlockKind
 
     /// <summary>A bulldozer blade: driving forward, it cuts the ground and pushes the earth ahead.</summary>
     DozerBlade,
+
+    /// <summary>A smooth fairing shaped for the air: nose cones and bubble canopies. Light, and it cuts drag at the end of a fuselage.</summary>
+    Fairing,
 }
 
 /// <summary>What a vertical launch cell holds.</summary>
@@ -294,6 +297,28 @@ public sealed class BlockDef
 
     /// <summary>Jet parts: the ramp intake and the variable nozzle, built for speeds past the speed of sound.</summary>
     public bool HighSpeed;
+
+    /// <summary>Wing panels: how much lifting area the panel has, as a share of a full square panel (a swept edge has half).</summary>
+    public float LiftArea = 1f;
+
+    /// <summary>
+    /// Drag of the block's face when it's the front or back of a column of the body, as a share of a flat face
+    /// (below 0: worked out from its shape). Nose cones and canopies are shaped for the air.
+    /// </summary>
+    public float DragFace = -1f;
+
+    /// <summary>Landing gear: folds away into the aircraft in flight, where it adds no drag.</summary>
+    public bool Retracts;
+
+    /// <summary>Box launchers: how far from straight up their missiles leave, tipped toward the front (degrees).</summary>
+    public float LaunchTiltDeg;
+
+    /// <summary>
+    /// Which of its own axes the block looks the same flipped along (0 X, 1 Y, 2 Z), so mirrored building knows
+    /// how to turn its mirror image. Most blocks are the same side to side; a swept wing edge is a corner cut
+    /// off a panel, so its mirror image is the same panel turned upside down.
+    /// </summary>
+    public int MirrorAxis;
 
     public float ColorR, ColorG, ColorB;
     public float Metallic = 0.6f;
@@ -589,6 +614,20 @@ public static class BlockCatalog
         },
         new BlockDef
         {
+            Id = "radar_array", Name = "Phased-Array Radar (5×5×3)", Category = "Control", Kind = BlockKind.Radar, Size = new Int3(5, 5, 3),
+            Description = "A modern radar: a flat face 2.3 m across of hundreds of small transmitters, tilted back to watch the sky, that steers its beam without moving. Works like a Search Radar. The look of a modern air-defence battery's radar; it fills the back of a truck.",
+            MassKg = 1800, Hp = 300, ArmorMm = 6, ColorR = 0.45f, ColorG = 0.47f, ColorB = 0.42f, Metallic = 0.5f, Roughness = 0.55f,
+            Watertight = false,
+        },
+        new BlockDef
+        {
+            Id = "radar_rotating", Name = "Rotating Array Radar (3×3×3)", Category = "Control", Kind = BlockKind.Radar, Size = new Int3(3, 3, 3),
+            Description = "A flat modern radar antenna turning on a pedestal, sweeping the whole sky every couple of seconds. Works like a Search Radar. For the search radar of an air-defence vehicle, a ship or a base.",
+            MassKg = 500, Hp = 120, ArmorMm = 4, HasCollider = false, ColorR = 0.45f, ColorG = 0.47f, ColorB = 0.42f, Metallic = 0.5f, Roughness = 0.55f,
+            Watertight = false,
+        },
+        new BlockDef
+        {
             Id = "gunner_seat", Name = "Gunner Seat", Category = "Control", Kind = BlockKind.GunnerSeat,
             Description = "Whoever sits here aims and fires the guns in the same turret (or the hull guns, if it's in the hull). Empty seats get an AI crew member, so you can drive while your gunner shoots.",
             MassKg = 90, Hp = 80, ArmorMm = 5, ColorR = 0.42f, ColorG = 0.26f, ColorB = 0.2f,
@@ -789,6 +828,20 @@ public static class BlockCatalog
         },
         new BlockDef
         {
+            Id = "wheel_heavy", Name = "Heavy Wheel (1×3×3)", Category = "Mobility", Kind = BlockKind.Wheel, Size = new Int3(1, 3, 3),
+            Description = "A 1.4 m off-road truck tyre on a driven hub, for big wheeled carriers like missile and radar trucks. Put them on the bottom row with nothing underneath.",
+            MassKg = 450, Hp = 300, ArmorMm = 12, WheelRadiusM = 0.7f, HasCollider = false, Watertight = false, Displacement = 0.5f,
+            ColorR = 0.1f, ColorG = 0.1f, ColorB = 0.1f, Metallic = 0.1f, Roughness = 0.9f,
+        },
+        new BlockDef
+        {
+            Id = "wheel_heavy_steer", Name = "Heavy Wheel: steering (1×3×3)", Category = "Mobility", Kind = BlockKind.SteerWheel, Size = new Int3(1, 3, 3),
+            Description = "A Heavy Wheel that turns for steering. Big trucks steer with their front two axles.",
+            MassKg = 460, Hp = 300, ArmorMm = 12, WheelRadiusM = 0.7f, HasCollider = false, Watertight = false, Displacement = 0.5f,
+            ColorR = 0.12f, ColorG = 0.12f, ColorB = 0.14f, Metallic = 0.1f, Roughness = 0.9f,
+        },
+        new BlockDef
+        {
             Id = "great_screw", Name = "Great Screw (3×3×1)", Category = "Sea", Kind = BlockKind.ShipPropeller, Size = new Int3(3, 3, 1),
             Description = "A battleship's propeller, 1.5 m across. Like a Ship Propeller, it pushes the way its arrow points, only under water.",
             MassKg = 3000, Hp = 900, ArmorMm = 25, HasCollider = false, Watertight = false,
@@ -873,6 +926,44 @@ public static class BlockCatalog
         },
         new BlockDef
         {
+            Id = "wing_swept", Name = "Wing Panel: swept edge", Category = "Air", Kind = BlockKind.Wing, LiftArea = 0.5f, MirrorAxis = 1,
+            Description = "A wing panel cut corner to corner. Put them along a wing's front edge for a straight swept edge instead of a staircase, at the tip for a raked wingtip, or stood up (G) on a fin. Half the area of a full panel, so half the lift. Turn it (R) until the cut faces forward.",
+            MassKg = 3, Hp = 25, ArmorMm = 3, Watertight = false, ColorR = 0.55f, ColorG = 0.58f, ColorB = 0.52f, Metallic = 0.6f, Roughness = 0.45f,
+        },
+        new BlockDef
+        {
+            Id = "nose_cone", Name = "Nose Cone", Category = "Air", Kind = BlockKind.Fairing, DragFace = 0.15f,
+            Description = "A pointed cone to finish a one-cell-thick nose, pod, drop tank or tail boom. Air slides off it: far less drag than a flat front. Point it forward.",
+            MassKg = 6, Hp = 30, ArmorMm = 4, ColorR = 0.62f, ColorG = 0.64f, ColorB = 0.62f, Metallic = 0.75f, Roughness = 0.35f,
+        },
+        new BlockDef
+        {
+            Id = "radome", Name = "Nose Radome (3×3×4)", Category = "Air", Kind = BlockKind.Radar, Size = new Int3(3, 3, 4), DragFace = 0.1f,
+            Description = "A fighter's radar in a long pointed fibreglass nose, 1.5 m across and 2 m long, with a probe at the tip. Fits a fuselage three cells across. Works like a Search Radar (everything aboard spots enemies nearly twice as far), and the point cuts drag like a nose cone.",
+            MassKg = 140, Hp = 120, ArmorMm = 4, ColorR = 0.5f, ColorG = 0.52f, ColorB = 0.53f, Metallic = 0.2f, Roughness = 0.5f,
+        },
+        new BlockDef
+        {
+            Id = "canopy_bubble", Name = "Bubble Canopy (3×2×6)", Category = "Air", Kind = BlockKind.Fairing, Size = new Int3(3, 2, 6), DragFace = 0.3f,
+            Description = "A one-piece blown canopy, a metre wide and three long, for an all-round view from the cockpit. Sits on top of the fuselage with the Pilot Seat in the row under its front half. Streamlined: less drag than a stepped canopy of glazing.",
+            MassKg = 90, Hp = 70, ArmorMm = 3, ColorR = 0.62f, ColorG = 0.64f, ColorB = 0.62f, Metallic = 0.75f, Roughness = 0.35f,
+        },
+        new BlockDef
+        {
+            Id = "landing_gear", Name = "Landing Gear", Category = "Air", Kind = BlockKind.Wheel, WheelRadiusM = 0.3f, Retracts = true,
+            Description = "A wheel on a sprung strut that folds up into the aircraft once it's well off the ground, and comes back down below about 8 m for landing. Folded away, it adds no drag. Put it on the bottom row with nothing underneath, like any wheel.",
+            MassKg = 70, Hp = 60, ArmorMm = 5, HasCollider = false, Watertight = false, Displacement = 0.4f,
+            ColorR = 0.72f, ColorG = 0.73f, ColorB = 0.72f, Metallic = 0.4f, Roughness = 0.5f,
+        },
+        new BlockDef
+        {
+            Id = "landing_gear_steer", Name = "Landing Gear: steering", Category = "Air", Kind = BlockKind.SteerWheel, WheelRadiusM = 0.3f, Retracts = true,
+            Description = "A nose wheel on a strut that steers on the ground and folds away in flight like Landing Gear.",
+            MassKg = 70, Hp = 60, ArmorMm = 5, HasCollider = false, Watertight = false, Displacement = 0.4f,
+            ColorR = 0.72f, ColorG = 0.73f, ColorB = 0.72f, Metallic = 0.4f, Roughness = 0.5f,
+        },
+        new BlockDef
+        {
             Id = "air_propeller", Name = "Air Propeller", Category = "Air", Kind = BlockKind.AirPropeller,
             Description = "Pulls the aircraft the way its arrow points, using engine power. Strong at low speed, weaker the faster you go. Its blades sweep 1.3 m around it, so leave room.",
             MassKg = 60, Hp = 60, ArmorMm = 5, HasCollider = false, Watertight = false,
@@ -911,6 +1002,14 @@ public static class BlockCatalog
             Id = "jet_intake_ramp", Name = "Ramp Intake", Category = "Air", Kind = BlockKind.JetIntake,
             Description = "A built jet's intake with an adjustable ramp: heavier, but it keeps feeding the engine well past the speed of sound.",
             MassKg = 100, Hp = 80, ArmorMm = 10, Watertight = false,
+            HighSpeed = true,
+            ColorR = 0.3f, ColorG = 0.3f, ColorB = 0.32f, Metallic = 0.85f, Roughness = 0.3f,
+        },
+        new BlockDef
+        {
+            Id = "jet_nozzle_large", Name = "Variable Nozzle: full size", Category = "Air", Kind = BlockKind.JetNozzle,
+            Description = "A Variable Nozzle a metre across, the size of a real fighter engine's: it works exactly the same, but its petals reach out past its own cell. For full-size jets, with the tail built round it and the cells beside it left clear.",
+            MassKg = 130, Hp = 100, ArmorMm = 10, Watertight = false,
             HighSpeed = true,
             ColorR = 0.3f, ColorG = 0.3f, ColorB = 0.32f, Metallic = 0.85f, Roughness = 0.3f,
         },
@@ -1137,6 +1236,14 @@ public static class BlockCatalog
             Description = "An anti-aircraft missile in a deck cell, launched straight up. It locks on to the enemy aircraft nearest your crosshair and runs it down on its own. Nothing may sit on its hatch. Fire with F.",
             MassKg = 260, Hp = 70, ArmorMm = 12, Watertight = false,
             ColorR = 0.36f, ColorG = 0.38f, ColorB = 0.38f, Metallic = 0.6f, Roughness = 0.5f,
+        },
+        new BlockDef
+        {
+            Id = "sam_launcher", Name = "SAM Box Launcher (3×5×7)", Category = "Weapons", Kind = BlockKind.VlsCell, Vls = VlsLoad.Sam, Size = new Int3(3, 5, 7),
+            AmmoUnits = BoxLauncher.Canisters, LaunchTiltDeg = 60f,
+            Description = "Six air-defence missiles in sealed canisters, in a box raised 30 degrees toward the front, like a modern truck-mounted launcher. Each one locks on to the enemy aircraft nearest your crosshair and runs it down like a VLS air-defence missile. Stand it upright with nothing in front of the canister mouths. Reloads at supply points. Fire with F.",
+            MassKg = 2400, Hp = 300, ArmorMm = 8, Watertight = false,
+            ColorR = 0.36f, ColorG = 0.38f, ColorB = 0.33f, Metallic = 0.5f, Roughness = 0.55f,
         },
 
         // Buildings

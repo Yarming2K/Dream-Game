@@ -56,7 +56,7 @@ public static class Footprint
     {
         var m = new Int3(-anchor.X, anchor.Y, anchor.Z);
         if (!def.IsMultiCell) return m;
-        int mo = Orientations.MirrorX(o);
+        int mo = Orientations.MirrorOf(def, o);
         int want = int.MaxValue, have = int.MaxValue;
         foreach (Int3 c in Cells(def, anchor, o)) want = System.Math.Min(want, -c.X);
         foreach (Int3 c in Cells(def, m, mo)) have = System.Math.Min(have, c.X);
