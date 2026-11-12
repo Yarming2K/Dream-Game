@@ -56,6 +56,11 @@ public class EraLooksTests
         Assert.True(a.Air.Streamlining > A(flatNose).Air.Streamlining + 0.01f);
         Assert.True(a.Air.Streamlining > A(fixedGear).Air.Streamlining);
         Assert.Equal(0.15f, BlockCatalog.Get("nose_cone").DragFace);
+        // Air runs into an intake, out of a nozzle and off a missile's point: none of them is a flat wall.
+        Assert.True(Aero.FaceDrag(BlockCatalog.Get("jet_intake"), true) < 0.5f);
+        Assert.True(Aero.FaceDrag(BlockCatalog.Get("jet_nozzle"), true) < 1f);
+        Assert.True(Aero.FaceDrag(BlockCatalog.Get("seeker_radar"), true) < 0.5f);
+        Assert.Equal(1f, Aero.FaceDrag(BlockCatalog.Get("airframe"), true));
     }
 
     [Fact]
@@ -70,7 +75,9 @@ public class EraLooksTests
         Assert.InRange((a.Max.Z - a.Min.Z + 1) * Blueprint.CellSize, 15f, 17f);
         Assert.InRange((a.Max.X - a.Min.X + 1) * Blueprint.CellSize, 11f, 14f);
         Assert.True(a.Air.MaxPitchDeg > 15f, $"pitch {a.Air.MaxPitchDeg:0}°");
-        Assert.True(a.Air.TopSpeedMs * 3.6f > 900f, $"top {a.Air.TopSpeedMs * 3.6f:0} km/h");
+        // Just past the speed of sound on afterburner, and more push than weight.
+        Assert.True(a.Air.TopSpeedMs > 340f, $"top {a.Air.TopSpeedMs * 3.6f:0} km/h");
+        Assert.True(a.Air.StaticThrustN > a.MassKg * GunMath.Gravity);
         Assert.True(Aero.TakeoffRunM(a.Air.StallSpeedMs, a.Air.StaticThrustN, a.MassKg) < Aero.LongTakeoffRunM);
         Assert.Equal(2, a.BuiltJets.Count(j => j.Runs && j.Stats.VariableNozzle && j.Stats.RampIntake && !j.IntakeBlocked));
         Assert.Equal(4, a.Missiles.Count(m => m.Valid && m.Stats.Seeker == SeekerKind.Radar));

@@ -233,6 +233,20 @@ public static class Aero
         return accel <= 0.1f ? float.PositiveInfinity : stallMs * stallMs / (2f * accel);
     }
 
+    /// <summary>
+    /// Drag of a block's face at the end of a column of the body, as a share of a flat face: its own figure if it
+    /// has one (nose cones, canopies), otherwise by what it is (air runs into a jet intake and out of a nozzle,
+    /// and slides off a missile's pointed seeker), otherwise by its shape.
+    /// </summary>
+    public static float FaceDrag(BlockDef def, bool flatFace) =>
+        def.DragFace >= 0 ? def.DragFace : def.Kind switch
+        {
+            BlockKind.JetIntake => 0.35f,
+            BlockKind.JetNozzle => 0.5f,
+            BlockKind.MissileSeeker => 0.3f,
+            _ => FaceDrag(def.Shape, flatFace),
+        };
+
     public static float FaceDrag(BlockShape shape, bool flatFace) => flatFace ? 1f : shape switch
     {
         BlockShape.Wedge => 0.5f,

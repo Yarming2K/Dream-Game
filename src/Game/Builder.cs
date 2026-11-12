@@ -1743,7 +1743,8 @@ public partial class Builder : Node3D
     {
         _dash.AddChild(Ui.Section("Missiles"));
         // Missiles built the same share a card.
-        foreach (var same in a.Missiles.GroupBy(x => (x.Valid, Parts: x.Parts.Count, x.Stats.Seeker, x.Stats.BurnoutSpeed, x.Stats.Damage, x.Problem)))
+        bool Box(MissileInfo x) => x.IsVls && a.Defs[x.Rail].LaunchTiltDeg > 0;
+        foreach (var same in a.Missiles.GroupBy(x => (x.Valid, Parts: x.Parts.Count, x.Vls, Box: Box(x), x.Stats.Seeker, x.Stats.BurnoutSpeed, x.Stats.Damage, x.Problem)))
         {
             MissileInfo m = same.First();
             int n = same.Count();
@@ -1756,9 +1757,14 @@ public partial class Builder : Node3D
                 SeekerKind.Optical => "Optical: flies to your crosshair",
                 SeekerKind.TopAttack => "Top attack: dives onto your crosshair from above",
                 SeekerKind.Radar => "Radar: chases aircraft",
+                SeekerKind.Navigation => "Cruise: flies itself to your crosshair",
                 _ => "Unguided rocket",
             };
-            top.AddChild(Ui.Heading(n > 1 ? $"{m.Parts.Count}-part missile × {n}" : $"{m.Parts.Count}-part missile"));
+            // Launch cells and box launchers hold ready-made missiles; the rest are built from parts.
+            string name = Box(m) ? $"Box launcher: {a.Defs[m.Rail].AmmoUnits} air-defence missiles"
+                : m.IsVls ? (m.Vls == VlsLoad.Sam ? "Launch cell: air-defence missile" : "Launch cell: strike missile")
+                : $"{m.Parts.Count}-part missile";
+            top.AddChild(Ui.Heading(n > 1 ? $"{name} × {n}" : name));
             top.AddChild(Ui.Spacer());
             top.AddChild(Ui.Caption(kind, m.Valid ? Ui.Info : Ui.Bad));
             col.AddChild(top);

@@ -210,7 +210,7 @@ public static class ExampleDesigns
                 d.Set(3 * s, 3, z, "airframe_round", Facing(new Int3(s, 1, 0)));
             }
 
-            for (int z = -8; z <= 3; z++) d.Remove(2 * s, 2, z);
+            for (int z = -8; z <= 0; z++) d.Remove(2 * s, 2, z);
 
             // Sharp intake lips at the front, and the trunks tapering in round the nozzles at the back.
             d.Slope(2 * s, 1, -8, "airframe_slope", new Int3(0, -1, -1));
@@ -222,16 +222,16 @@ public static class ExampleDesigns
             d.Slope(s, 1, 12, "airframe_slope", new Int3(0, -1, 1));
             d.Slope(s, 3, 12, "airframe_slope", new Int3(0, 1, 1));
 
-            // The engine, back to front: a full-size nozzle, an afterburner, two turbines, the core, four
-            // compressor stages and a ramp intake at the end of the duct.
+            // The engine, back to front: a full-size nozzle, two afterburner stages, three turbines, the core,
+            // five compressor stages and a ramp intake at the end of the duct.
             int x = 2 * s;
             d.Set(x, 2, 13, "jet_nozzle_large");
             d.Set(x, 2, 12, "jet_afterburner");
-            d.Set(x, 2, 11, "jet_turbine");
-            d.Set(x, 2, 10, "jet_turbine");
-            d.Set(x, 2, 9, "jet_core");
-            for (int z = 5; z <= 8; z++) d.Set(x, 2, z, "jet_compressor");
-            d.Set(x, 2, 4, "jet_intake_ramp");
+            d.Set(x, 2, 11, "jet_afterburner");
+            for (int z = 8; z <= 10; z++) d.Set(x, 2, z, "jet_turbine");
+            d.Set(x, 2, 7, "jet_core");
+            for (int z = 2; z <= 6; z++) d.Set(x, 2, z, "jet_compressor");
+            d.Set(x, 2, 1, "jet_intake_ramp");
         }
 
         // A tail cone between the nozzles.

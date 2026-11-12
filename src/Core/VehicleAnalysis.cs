@@ -1036,9 +1036,7 @@ public sealed class VehicleAnalysis
             else columns[(c.X, c.Y)] = (c.Z < col.front.Z ? c : col.front, c.Z > col.back.Z ? c : col.back);
         }
 
-        float FaceDrag(Int3 c, Int3 dir) => Defs[c].DragFace >= 0
-            ? Defs[c].DragFace
-            : Aero.FaceDrag(Defs[c].Shape, Shapes.CoversFace(Defs[c].Shape, Cells[c].O, dir));
+        float FaceDrag(Int3 c, Int3 dir) => Aero.FaceDrag(Defs[c], Shapes.CoversFace(Defs[c].Shape, Cells[c].O, dir));
         float shaped = 0;
         foreach ((Int3 front, Int3 back) in columns.Values)
             shaped += Aero.NoseShare * FaceDrag(front, new Int3(0, 0, -1)) + Aero.TailShare * FaceDrag(back, new Int3(0, 0, 1));

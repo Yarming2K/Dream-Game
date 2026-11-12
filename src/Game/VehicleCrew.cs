@@ -309,7 +309,9 @@ public partial class VehicleBody
     {
         bool aiGuns = AiCrewActive && Roe != Engagement.HoldFire && Guns.Any(g => g.Alive && !PlayerDirects(g) &&
             (ControllerOf(g)?.Occupant == Occupant.Ai || (g.Info.BreechDef.Breech.PointDefense && ControllerOf(g) != null)));
-        if (!aiGuns)
+        // A crew with only missiles (a missile truck) still looks for targets for them.
+        bool aiMissiles = AiCrewActive && Roe != Engagement.HoldFire && PlayerSeat == null && CrewAboardAny && MissilesReady > 0;
+        if (!aiGuns && !aiMissiles)
         {
             _aiHasAim = _aaHasAim = false;
             _aiVehicleTarget = null;
