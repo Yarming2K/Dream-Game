@@ -51,8 +51,11 @@ public sealed partial class GridView
     private readonly Dictionary<BlockInstance, ColliderGroup> _colOf = new();
     private readonly HashSet<ColliderGroup> _colDirty = new();
 
-    /// <summary>Per section: big enough that its slopes collide as whole cells and its boxes merge over bigger groups.</summary>
+    /// <summary>Per section: big enough that its boxes merge over bigger groups.</summary>
     private bool[] _bigCollision;
+
+    /// <summary>Slopes, wedges and corners collide as whole cells (see <see cref="ColliderBoxes.Merges"/>).</summary>
+    private readonly bool _boxSlopes;
 
     public readonly PhysicsBody3D Body;
     public readonly GridModel Model;
@@ -116,8 +119,9 @@ public sealed partial class GridView
     /// <param name="livery">The paint job (null or factory for the blocks' own colors).</param>
     /// <param name="waterline">For ships: the waterline's height in the vehicle's frame, for the ship paint rules.</param>
     public GridView(PhysicsBody3D body, GridModel model, Func<Int3, float> caliberOf = null, object shareKey = null, bool lod = false,
-        Livery livery = null, float? waterline = null, float wear = 0.7f, float mud = 0.5f)
+        Livery livery = null, float? waterline = null, float wear = 0.7f, float mud = 0.5f, bool boxSlopes = false)
     {
+        _boxSlopes = boxSlopes;
         _wear = wear;
         _mud = mud;
         Body = body;
@@ -212,7 +216,7 @@ public sealed partial class GridView
         }
 
         bool big = _bigCollision[b.Section];
-        if (ColliderBoxes.Merges(b.Def, big))
+        if (ColliderBoxes.Merges(b.Def, _boxSlopes || big))
         {
             var gk = (b.Section, ColliderBoxes.GroupOf(b.Cell, big));
             if (!_colGroups.TryGetValue(gk, out ColliderGroup g)) _colGroups[gk] = g = new ColliderGroup { Section = b.Section };

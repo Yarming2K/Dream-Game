@@ -44,11 +44,11 @@ public class ColliderBoxesTests
     }
 
     [Fact]
-    public void SmallMachinesKeepTheirSlopesBigOnesBoxThemIn()
+    public void SlopesBoxInOnlyWhenAsked()
     {
         BlockDef slope = BlockCatalog.All.First(d => d.HasCollider && d.Shape != BlockShape.Cube);
-        Assert.False(ColliderBoxes.Merges(slope, bigSection: false));
-        Assert.True(ColliderBoxes.Merges(slope, bigSection: true));
+        Assert.False(ColliderBoxes.Merges(slope, boxed: false));
+        Assert.True(ColliderBoxes.Merges(slope, boxed: true));
         Assert.False(ColliderBoxes.IsBig(new Int3(0, 0, 0), new Int3(20, 6, 30)));
         Assert.True(ColliderBoxes.IsBig(new Int3(0, 0, 0), new Int3(20, 6, 31)));
     }

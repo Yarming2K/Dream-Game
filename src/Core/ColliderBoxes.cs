@@ -18,9 +18,8 @@ public static class ColliderBoxes
     public const int BigGroup = 32;
 
     /// <summary>
-    /// A section this many cells across or more is "big": its slopes, wedges and corners collide as whole cells
-    /// (a hull's sloped bow becomes steps a quarter of a metre high, which nothing on that scale notices) and its
-    /// boxes merge over bigger groups. Small machines keep their exact shapes.
+    /// A section this many cells across or more is "big": its boxes merge over bigger groups, and its turret
+    /// colliders catch up a few times a second rather than every step.
     /// </summary>
     public const int BigSection = 32;
 
@@ -78,8 +77,14 @@ public static class ColliderBoxes
         return boxes;
     }
 
-    /// <summary>Whether a block collides as a merged box (cubes always; any shape on a big section).</summary>
-    public static bool Merges(BlockDef def, bool bigSection) => def.HasCollider && (bigSection || def.Shape == BlockShape.Cube);
+    /// <summary>
+    /// Whether a block collides as part of a merged box: cubes always, and slopes, wedges and corners too when
+    /// <paramref name="boxed"/>. Machines that move ride on their wheel rays, tracks or water, so their slopes
+    /// only matter for bumps and crashes, where a step of half a metre goes unnoticed; boxing them in makes a
+    /// tank 18 shapes instead of 56, and the physics engine tests every shape of every moving body each step.
+    /// Buildings keep exact slopes, so their ramps drive smoothly.
+    /// </summary>
+    public static bool Merges(BlockDef def, bool boxed) => def.HasCollider && (boxed || def.Shape == BlockShape.Cube);
 
     private static int FloorDiv(int a, int b) => a >= 0 ? a / b : -((-a + b - 1) / b);
 }

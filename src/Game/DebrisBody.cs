@@ -26,7 +26,7 @@ public partial class DebrisBody : RigidBody3D, IGridHost
         var d = new DebrisBody { Name = "Debris", Model = model };
         d.CollisionLayer = GridRegistry.Layers.Debris;
         d.CollisionMask = GridRegistry.Layers.All;
-        d.View = new GridView(d, model);
+        d.View = new GridView(d, model, boxSlopes: true);
         d.Radius = d.View.BoundingRadius();
         d.Transform = where;
         d.Mass = Mathf.Max(model.TotalMassKg(), 1f);
