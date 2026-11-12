@@ -2017,16 +2017,20 @@ public partial class Builder : Node3D
         PopupMenu menu = _loadButton.GetPopup();
         menu.Clear();
         _loadActions.Clear();
-        menu.AddSeparator("Examples");
-        foreach (Blueprint ex in ExampleDesigns.All.Concat(ExampleDesigns.Buildings))
+        // The examples, grouped by front so new ones sit beside their kind.
+        foreach ((string front, Blueprint[] designs) in ExampleDesigns.ByFront.Append(("Buildings", ExampleDesigns.Buildings.ToArray())))
         {
-            Blueprint copy = ex;
-            menu.AddItem(ex.Name, _loadActions.Count);
-            _loadActions.Add(() =>
+            menu.AddSeparator($"Examples: {front.ToLowerInvariant()}");
+            foreach (Blueprint ex in designs)
             {
-                LoadBlueprint(copy, animate: true);
-                Toast($"Loaded example \"{copy.Name}\". Undo (Ctrl+Z) to go back.");
-            });
+                Blueprint copy = ex;
+                menu.AddItem(ex.Name, _loadActions.Count);
+                _loadActions.Add(() =>
+                {
+                    LoadBlueprint(copy, animate: true);
+                    Toast($"Loaded example \"{copy.Name}\". Undo (Ctrl+Z) to go back.");
+                });
+            }
         }
 
         DirAccess.MakeDirRecursiveAbsolute(SaveDir);

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace DreamGame.Core;
 
@@ -149,11 +150,15 @@ public static class ExampleDesigns
         throw new System.ArgumentException($"No orientation points {dir}.");
     }
 
-    public static IReadOnlyList<Blueprint> All => new[]
+    /// <summary>The example machines, front by front (menus list them this way).</summary>
+    public static IReadOnlyList<(string Front, Blueprint[] Designs)> ByFront => new[]
     {
-        Warden(), Vanguard(), Jackal(), Hailstorm(), Juggernaut(), Bulwark(), Skyguard(), Mole(), Corsair(), Trident(), Barracuda(), Kestrel(), Falcon(), Lancer(),
-        Hornet(), Wasp(), Zephyr(), Colossus(), Starling(), PalisadeLauncher(), PalisadeRadar(),
+        ("Land", new[] { Warden(), Vanguard(), Jackal(), Juggernaut(), Bulwark(), Hailstorm(), Skyguard(), PalisadeLauncher(), PalisadeRadar(), Mole() }),
+        ("Sea", new[] { Corsair(), Trident(), Barracuda(), Colossus() }),
+        ("Air", new[] { Kestrel(), Falcon(), Lancer(), Starling(), Hornet(), Wasp(), Zephyr() }),
     };
+
+    public static IReadOnlyList<Blueprint> All => ByFront.SelectMany(g => g.Designs).ToArray();
 
     /// <summary>
     /// Starling: a full-size twin-engine air-superiority fighter, 16 m long with a 12.5 m span, drawn from the
