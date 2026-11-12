@@ -140,7 +140,7 @@ public static class ExampleDesigns
 
     public static IReadOnlyList<Blueprint> All => new[]
     {
-        Warden(), Vanguard(), Jackal(), Hailstorm(), Juggernaut(), Bulwark(), Skyguard(), Mole(), Corsair(), Trident(), Barracuda(), Kestrel(), Falcon(),
+        Warden(), Vanguard(), Jackal(), Hailstorm(), Juggernaut(), Bulwark(), Skyguard(), Mole(), Corsair(), Trident(), Barracuda(), Kestrel(), Falcon(), Lancer(),
         Hornet(), Wasp(), Zephyr(), Colossus(),
     };
 
@@ -1031,6 +1031,98 @@ public static class ExampleDesigns
 
         d.Set(0, 3, 0, "antenna");
         return d.Build("Falcon (jet fighter)", "sky");
+    }
+
+    /// <summary>
+    /// The Falcon's airframe on two jets built from parts: half again the push, an afterburner that pays off past
+    /// the speed of sound, and less fuel per kilometre at cruise. An interceptor: fast to climb and fast to catch up.
+    /// </summary>
+    public static Blueprint Lancer()
+    {
+        var d = new Draft();
+        // Cockpit: pilot seat under a canopy, with a faired spine behind it.
+        d.Set(0, 2, -5, "pilot_seat");
+        d.Set(0, 3, -5, "glazing");
+        d.Set(0, 3, -6, "glazing_slope");
+        d.Set(0, 2, -6, "airframe_slope");
+        d.Set(0, 3, -4, "airframe_slope", Facing(new Int3(0, 1, 1)));
+        d.Set(1, 2, -5, "glazing_plate", Orient(new Int3(0, -1, 0), new Int3(1, 0, 0)));
+        d.Set(-1, 2, -5, "glazing_plate", Orient(new Int3(0, -1, 0), new Int3(-1, 0, 0)));
+
+        // Fuel down the middle, set back to balance the heavier engines' compressors forward.
+        d.Set(0, 1, 0, "fuel_tank");
+        d.Set(0, 1, 1, "fuel_tank");
+        d.Set(0, 1, 2, "fuel_tank");
+
+        // Wing-root cannon with their ammo, and a radar missile under each wing.
+        foreach (int s in new[] { -1, 1 })
+        {
+            d.Set(2 * s, 1, -4, "breech_40ac");
+            d.Set(2 * s, 1, -5, "barrel");
+            d.Set(2 * s, 1, -3, "ammo_ap");
+            int x = 5 * s;
+            d.Set(x, 0, 0, "missile_rail");
+            d.Set(x, 0, -1, "missile_motor");
+            d.Set(x, 0, -2, "missile_fins");
+            d.Set(x, 0, -3, "missile_warhead");
+            d.Set(x, 0, -4, "seeker_radar");
+        }
+
+        // Swept wings: the leading edge steps back half a cell for every cell out, ailerons on the outer trailing edge.
+        foreach (int s in new[] { -1, 1 })
+            for (int i = 0; i <= WingCells; i++)
+            {
+                int x = s * (2 + i);
+                int lead = WingLead + i / 2, trail = WingTrail + i / 3;
+                if (i >= 4) d.Set(x, 1, trail, "control_surface");
+                for (int z = lead; z <= trail; z++) d.Fill(x, x, 1, 1, z, z, "wing");
+            }
+
+        // Strakes: the wing roots run forward along the nose, for more lift at low speed.
+        foreach (int s in new[] { -1, 1 })
+        {
+            d.Fill(3 * s, 3 * s, 1, 1, -6, -5, "wing");
+            d.Set(4 * s, 1, -5, "wing");
+        }
+
+        // Fuselage: a rounded nose, the body, a spine, and the tail cone between the jets.
+        d.Set(0, 1, -9, "airframe_octagon");
+        d.Set(0, 1, -8, "airframe_octagon");
+        foreach (int s in new[] { -1, 1 }) d.Set(s, 1, -7, "airframe_round", Facing(new Int3(s, 0, -1)));
+        d.Fill(-1, 1, 1, 1, -7, JetZ - 1, "airframe");
+        d.Fill(0, 0, 2, 2, -3, 1, "airframe");
+        d.Fill(0, 0, 1, 1, JetZ, 6, "airframe");
+
+        // Tail: stabilizers with elevators, and a fin with a rudder.
+        d.Fill(1, 3, 1, 1, 5, 5, "wing");
+        d.Fill(-3, -1, 1, 1, 5, 5, "wing");
+        d.Fill(1, 3, 1, 1, 6, 6, "control_surface");
+        d.Fill(-3, -1, 1, 1, 6, 6, "control_surface");
+        int upright = Orientations.RotateAroundZ(0, 1);
+        d.Fill(0, 0, 2, 3, 5, 5, "wing", upright);
+        d.Fill(0, 0, 2, 3, 6, 6, "control_surface", upright);
+
+        // Landing gear: a steering nose wheel, and the main wheels under the wing roots.
+        d.Set(0, 0, -6, "wheel_steer");
+        d.Set(-2, 0, MainGearZ, "wheel");
+        d.Set(2, 0, MainGearZ, "wheel");
+
+        d.Set(0, 3, 0, "antenna");
+
+        // Two jets built from parts, one down each side of the fuselage (set last, over the airframe): a ramp
+        // intake for speed, three compressor stages, the core, two turbines, an afterburner and a variable nozzle.
+        foreach (int x in new[] { -1, 1 })
+        {
+            d.Set(x, 1, -4, "jet_intake_ramp");
+            for (int z = -3; z <= -1; z++) d.Set(x, 1, z, "jet_compressor");
+            d.Set(x, 1, 0, "jet_core");
+            d.Set(x, 1, 1, "jet_turbine");
+            d.Set(x, 1, 2, "jet_turbine");
+            d.Set(x, 1, 3, "jet_afterburner");
+            d.Set(x, 1, 4, "jet_nozzle_variable");
+        }
+
+        return d.Build("Lancer (interceptor)", "sky");
     }
 
     // Tuned with the flight harness so the wing lifts just behind the center of mass.

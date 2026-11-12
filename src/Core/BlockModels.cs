@@ -681,6 +681,90 @@ public static class BlockModels
                 k.Node = -1;
                 break;
 
+            // Jets built from parts: casings sized to meet end to end, so a line of them reads as one engine. The
+            // arrow side (−Z) is the front, where the air comes in.
+            case BlockKind.JetIntake when def.HighSpeed:
+                // A square intake with its ramp: a wedge on top that sets the shock wave at speed.
+                k.Bevel(new Vector3(0.46f, 0.44f, Full), Paint.Self, Vector3.Zero, 0.015f);
+                k.Box(new Vector3(0.38f, 0.3f, 0.02f), Paint.Dark, new Vector3(0, -0.03f, -Full * 0.5f - 0.002f));
+                k.Box(new Vector3(0.4f, 0.03f, 0.3f), Paint.SelfDark, new Vector3(0, 0.13f, -0.14f), Rot(Vector3.UnitX, 0.22f));
+                k.Box(new Vector3(0.02f, 0.36f, 0.06f), Paint.Steel, new Vector3(-0.21f, -0.02f, -0.24f));
+                k.Box(new Vector3(0.02f, 0.36f, 0.06f), Paint.Steel, new Vector3(0.21f, -0.02f, -0.24f));
+                break;
+
+            case BlockKind.JetIntake:
+                k.Cyl(0.235f, Full * 0.92f, Paint.Self, new Vector3(0, 0, 0.02f), AlongZ, sides: 24);
+                k.Torus(0.215f, 0.035f, Paint.Steel, new Vector3(0, 0, -0.23f), AlongZ);
+                k.Cyl(0.2f, 0.02f, Paint.Dark, new Vector3(0, 0, -0.215f), AlongZ, sides: 24);
+                k.Cyl(0.06f, 0.08f, Paint.Steel, new Vector3(0, 0, -0.24f), NoseZ, 0.01f, 12);
+                break;
+
+            case BlockKind.JetFan:
+                // The fan's casing is the fattest part of a turbofan: a bypass duct round the core.
+                k.Cyl(0.248f, Full, Paint.Self, Vector3.Zero, AlongZ, sides: 28);
+                k.Cyl(0.252f, 0.04f, Paint.SelfDark, new Vector3(0, 0, -0.18f), AlongZ, sides: 28);
+                k.Cyl(0.252f, 0.04f, Paint.SelfDark, new Vector3(0, 0, 0.18f), AlongZ, sides: 28);
+                k.Box(new Vector3(0.1f, 0.05f, 0.3f), Paint.SelfDark, new Vector3(0, -0.255f, 0));
+                break;
+
+            case BlockKind.JetCompressor:
+                k.Cyl(0.232f, Full, Paint.Self, Vector3.Zero, AlongZ, sides: 24);
+                k.Cyl(0.242f, 0.025f, Paint.Dark, new Vector3(0, 0, -0.12f), AlongZ, sides: 24);
+                k.Cyl(0.242f, 0.025f, Paint.Dark, new Vector3(0, 0, 0.12f), AlongZ, sides: 24);
+                k.Box(new Vector3(0.07f, 0.04f, 0.08f), Paint.Steel, new Vector3(0, 0.245f, 0));
+                break;
+
+            case BlockKind.JetCore:
+                // The combustion section: a fuel manifold ring with pipes running to the burners, and an igniter box.
+                k.Cyl(0.236f, Full, Paint.Self, Vector3.Zero, AlongZ, sides: 24);
+                k.Torus(0.25f, 0.014f, Paint.Brass, new Vector3(0, 0, -0.06f), AlongZ);
+                for (int i = 0; i < 8; i++)
+                {
+                    float a = i * MathF.PI / 4f;
+                    k.Box(new Vector3(0.018f, 0.018f, 0.14f), Paint.Brass, new Vector3(MathF.Cos(a) * 0.244f, MathF.Sin(a) * 0.244f, 0.02f));
+                }
+
+                k.Bevel(new Vector3(0.1f, 0.06f, 0.12f), Paint.SelfDark, new Vector3(0.12f, -0.22f, 0.1f), 0.01f);
+                break;
+
+            case BlockKind.JetTurbine:
+                // Hotter: the casing's darkened, with heavier bands.
+                k.Cyl(0.228f, Full, Paint.SelfDark, Vector3.Zero, AlongZ, sides: 24);
+                k.Cyl(0.24f, 0.04f, Paint.Steel, new Vector3(0, 0, -0.15f), AlongZ, sides: 24);
+                k.Cyl(0.24f, 0.04f, Paint.Steel, new Vector3(0, 0, 0.15f), AlongZ, sides: 24);
+                break;
+
+            case BlockKind.JetAfterburner:
+                // A long hot pipe: bare heat-stained metal with cooling rings.
+                k.Cyl(0.222f, Full, Paint.Dark, Vector3.Zero, AlongZ, sides: 24);
+                foreach (float z in new[] { -0.16f, 0f, 0.16f })
+                    k.Cyl(0.23f, 0.02f, Paint.Steel, new Vector3(0, 0, z), AlongZ, sides: 24);
+                break;
+
+            case BlockKind.JetNozzle:
+            {
+                k.Cyl(0.225f, 0.3f, Paint.Self, new Vector3(0, 0, -0.1f), AlongZ, sides: 24);
+                // A variable nozzle's petals sit on a node of their own, so they can open for the afterburner.
+                if (def.HighSpeed) k.Node = k.AddNode("Petals", new Vector3(0, 0, 0.15f));
+                Vector3 at = def.HighSpeed ? Vector3.Zero : new Vector3(0, 0, 0.15f);
+                k.Cyl(0.19f, 0.2f, Paint.Dark, at, TailZ, 0.15f, 20);
+                k.Lib("jet_nozzle");
+                k.Node = -1;
+                if (def.HighSpeed)
+                    for (int i = 0; i < 6; i++)
+                    {
+                        float a = i * MathF.PI / 3f + 0.3f;
+                        k.Box(new Vector3(0.02f, 0.02f, 0.2f), Paint.Steel, new Vector3(MathF.Cos(a) * 0.205f, MathF.Sin(a) * 0.205f, 0.1f));
+                    }
+
+                k.GlowCyl(0.12f, 0.02f, new Vector3(1f, 0.55f, 0.2f), 2.5f, new Vector3(0, 0, 0.24f), AlongZ);
+                k.Node = k.AddNode("Flame", new Vector3(0, 0, 0.25f));
+                k.GlowCyl(0.13f, 1f, new Vector3(1f, 0.5f, 0.18f), 2.2f, new Vector3(0, 0, 0.5f), TailZ, 0.015f);
+                k.GlowCyl(0.075f, 0.55f, new Vector3(0.65f, 0.8f, 1f), 3f, new Vector3(0, 0, 0.275f), TailZ, 0.01f);
+                k.Node = -1;
+                break;
+            }
+
             case BlockKind.Rotor:
             {
                 k.Cyl(0.07f, Full, Paint.Steel, Vector3.Zero, sides: 12);

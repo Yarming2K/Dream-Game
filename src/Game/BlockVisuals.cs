@@ -448,7 +448,8 @@ public static class BlockVisuals
         }
 
         // Jets shimmer the air behind them.
-        if (def.Kind == BlockKind.JetEngine && root.FindChild("Flame", true, false) is Node3D flameNode) flameNode.AddChild(Exhaust.Haze());
+        if (def.Kind is BlockKind.JetEngine or BlockKind.JetNozzle && root.FindChild("Flame", true, false) is Node3D flameNode)
+            flameNode.AddChild(Exhaust.Haze());
         return root;
     }
 
@@ -501,7 +502,7 @@ public static class BlockVisuals
     /// <summary>Blocks that move on their own (spinning, swinging, rolling, dropping their load): drawn one by one.</summary>
     public static bool IsAnimated(BlockDef def) =>
         def.IsWheelLike || def.Kind is BlockKind.AirPropeller or BlockKind.Rotor or BlockKind.LiftFan or BlockKind.ControlSurface or BlockKind.BombRack
-            or BlockKind.JetEngine or BlockKind.VlsCell or BlockKind.Door or BlockKind.Stabilizer or BlockKind.DozerBlade;
+            or BlockKind.JetEngine or BlockKind.JetNozzle or BlockKind.VlsCell or BlockKind.Door or BlockKind.Stabilizer or BlockKind.DozerBlade;
 
     private static readonly Dictionary<string, List<(Mesh, Material, Transform3D)>> PartsCache = new();
     private static readonly Dictionary<string, List<(Mesh, Material, Transform3D, Paint)>> PaintedPartsCache = new();

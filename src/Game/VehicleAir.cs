@@ -29,8 +29,11 @@ public partial class VehicleBody
     {
         public ThrusterInfo Info;
         public BlockInstance Block;
-        public Node3D Spinner, Flame;
+        public Node3D Spinner, Flame, Petals;
         public Vector3 Local, Dir;
+
+        /// <summary>A jet's figures now: a built jet's change as its parts are shot off.</summary>
+        public JetStats Jet;
         public bool Alive = true;
         public float Output;
         public float Spin;
@@ -107,11 +110,14 @@ public partial class VehicleBody
         foreach (ThrusterInfo t in Analysis.Thrusters)
         {
             if (!Model.Blocks.TryGetValue(t.Cell, out BlockInstance b)) continue;
+            // A built jet's flame comes out of its nozzle, at the back of the line.
+            Node3D flameAt = View.VisualOf(t.Built && Model.Blocks.TryGetValue(t.FlameCell, out BlockInstance nozzle) ? nozzle : b);
             AirThrusters.Add(new ThrusterRt
             {
-                Info = t, Block = b, Local = Conv.CellPos(t.Cell), Dir = t.Direction.G(),
+                Info = t, Block = b, Local = Conv.CellPos(t.Cell), Dir = t.Direction.G(), Jet = t.Jet,
                 Spinner = View.VisualOf(b)?.GetNodeOrNull<Node3D>("Spinner"),
-                Flame = View.VisualOf(b)?.GetNodeOrNull<Node3D>("Flame"),
+                Flame = flameAt?.GetNodeOrNull<Node3D>("Flame"),
+                Petals = flameAt?.GetNodeOrNull<Node3D>("Petals"),
             });
         }
 
@@ -177,7 +183,26 @@ public partial class VehicleBody
         }
 
         foreach (ThrusterRt t in AirThrusters)
+        {
             t.Alive = Model.Blocks.TryGetValue(t.Info.Cell, out BlockInstance b) && b == t.Block && b.Alive;
+            if (!t.Alive || !t.Info.Built) continue;
+            // A built jet runs on whatever's left of its line, from the core out to the first part shot away:
+            // lose a compressor stage and it's weaker, lose the intake or nozzle and it stops.
+            t.Jet = JetDesign.Compute(t.Block.Def, StillThere(t.Info.Front), StillThere(t.Info.Back), out _, out bool runs);
+            t.Alive = runs;
+        }
+    }
+
+    private List<BlockDef> StillThere(List<Int3> line)
+    {
+        var defs = new List<BlockDef>();
+        foreach (Int3 c in line)
+        {
+            if (!Model.Blocks.TryGetValue(c, out BlockInstance b) || !b.Alive) break;
+            defs.Add(b.Def);
+        }
+
+        return defs;
     }
 
     public void SetAirThrottle(float value) => AirThrottle = Mathf.Clamp(value, 0, 1);
@@ -325,13 +350,16 @@ public partial class VehicleBody
         float share = PowerShare(props);
         float disk = Aero.DiskArea(Aero.PropRadiusM);
         bool burner = cmd >= Aero.AfterburnerThrottle && jets > 0;
+        float jetFuel = 0;
         foreach (ThrusterRt t in pushers)
         {
             Vector3 dir = (basis * t.Dir).Normalized();
             bool jet = t.Info.Kind == BlockKind.JetEngine;
-            float thrust = jet ? Aero.JetThrust(cmd) : Aero.PropThrust(share * cmd, Mathf.Max(vel.Dot(dir), 0), disk);
+            float along = Mathf.Max(vel.Dot(dir), 0);
+            float thrust = jet ? t.Jet.Thrust(cmd, along, burner) : Aero.PropThrust(share * cmd, along, disk);
             t.Output = cmd;
-            t.Afterburner = jet && burner;
+            t.Afterburner = jet && burner && t.Jet.HasAfterburner;
+            if (jet) jetFuel += t.Jet.FuelPerSecond(cmd, burner);
             ApplyForce(dir * thrust, xf * t.Local - xf.Origin);
         }
 
@@ -342,14 +370,15 @@ public partial class VehicleBody
         }
 
         // Afterburners drink fuel several times faster.
-        BurnFuel(dt, cmd, jets * cmd * (burner ? Aero.AfterburnerFuel : 1f));
+        BurnFuel(dt, cmd, jetFuel);
         Afterburning = burner;
         _soundLoad = burner ? 1.12f : cmd;
     }
 
-    private void BurnFuel(float dt, float engineLoad, float jetLoad)
+    /// <summary>Burns the engines' fuel at <paramref name="engineLoad"/>, plus what the jets use (litres a second).</summary>
+    private void BurnFuel(float dt, float engineLoad, float jetLps)
     {
-        float burn = PowerKw * Mathf.Clamp(engineLoad, 0, 1) * Mobility.FuelPerKwSecond + jetLoad * Aero.JetFuelPerSecond;
+        float burn = PowerKw * Mathf.Clamp(engineLoad, 0, 1) * Mobility.FuelPerKwSecond + jetLps;
         FuelL = Mathf.Max(0, FuelL - burn * dt);
     }
 
@@ -463,7 +492,7 @@ public partial class VehicleBody
         float share = PowerShare(powered);
         float cap = 0;
         foreach (ThrusterRt t in lifters)
-            cap += t.Info.Kind == BlockKind.JetEngine ? Aero.JetThrustN
+            cap += t.Info.Kind == BlockKind.JetEngine ? t.Jet.Thrust(1f, 0f, false)
                 : Aero.RotorThrust(share, Aero.DiskArea(t.Info.Kind == BlockKind.Rotor ? Aero.RotorRadiusM : Aero.FanRadiusM));
         if (!canRun) cap = 0;
         float thrust = Mathf.Clamp(need, 0, cap);
@@ -473,7 +502,7 @@ public partial class VehicleBody
         LiftOutput = cap > 0 ? thrust / cap : 0;
         ApplyCentralForce(up * thrust);
         foreach (ThrusterRt t in lifters) t.Output = LiftOutput;
-        BurnFuel(dt, LiftOutput, lifters.Count(t => t.Info.Kind == BlockKind.JetEngine) * LiftOutput);
+        BurnFuel(dt, LiftOutput, lifters.Where(t => t.Info.Kind == BlockKind.JetEngine).Sum(t => t.Jet.FuelPerSecond(LiftOutput, false)));
         _soundLoad = Mathf.Max(LiftOutput, 0.3f);
 
         // Any forward propellers or jets help it along when moving forward.
@@ -481,7 +510,7 @@ public partial class VehicleBody
         {
             float cmd = canRun ? Mathf.Max(Throttle, 0) : 0;
             Vector3 dir = (basis * t.Dir).Normalized();
-            float push = t.Info.Kind == BlockKind.JetEngine ? Aero.JetThrustN * cmd
+            float push = t.Info.Kind == BlockKind.JetEngine ? t.Jet.Thrust(cmd, Mathf.Max(vel.Dot(dir), 0), false)
                 : Aero.PropThrust(share * cmd, Mathf.Max(vel.Dot(dir), 0), Aero.DiskArea(Aero.PropRadiusM));
             t.Output = cmd;
             ApplyCentralForce(dir * push);
@@ -523,13 +552,13 @@ public partial class VehicleBody
         foreach (ThrusterRt t in pushers)
         {
             Vector3 dir = (basis * t.Dir).Normalized();
-            float thrust = t.Info.Kind == BlockKind.JetEngine ? Aero.JetThrustN * Mathf.Max(cmd, 0)
+            float thrust = t.Info.Kind == BlockKind.JetEngine ? t.Jet.Thrust(Mathf.Max(cmd, 0), Mathf.Max(vel.Dot(dir), 0), false)
                 : Aero.PropThrust(share * Mathf.Abs(cmd), Mathf.Max(vel.Dot(dir) * Mathf.Sign(cmd), 0), Aero.DiskArea(Aero.PropRadiusM)) * Mathf.Sign(cmd);
             t.Output = Mathf.Abs(cmd);
             ApplyForce(dir * thrust, xf * t.Local - xf.Origin);
         }
 
-        BurnFuel(dt, Mathf.Abs(cmd), 0);
+        BurnFuel(dt, Mathf.Abs(cmd), pushers.Where(t => t.Info.Kind == BlockKind.JetEngine).Sum(t => t.Jet.FuelPerSecond(Mathf.Max(cmd, 0), false)));
         _soundLoad = Mathf.Abs(cmd);
 
         if (Mathf.Abs(PlayerInput.Lift) > 0.01f) HoldAltitude += PlayerInput.Lift * 4f * dt;
@@ -603,6 +632,8 @@ public partial class VehicleBody
                     float wide = (0.6f + 0.4f * o) * (1f + 0.25f * b);
                     t.Flame.Scale = new Vector3(wide, wide, len);
                     Exhaust.Drive(t.Flame, o, b);
+                    // A variable nozzle's petals open wide for the afterburner.
+                    if (t.Petals != null && IsInstanceValid(t.Petals)) t.Petals.Scale = new Vector3(1f + 0.18f * b, 1f + 0.18f * b, 1f);
                 }
             }
 

@@ -1699,6 +1699,44 @@ public partial class Builder : Node3D
         _dash.AddChild(chips);
     }
 
+    /// <summary>Each jet built from parts: its push, what the afterburner adds, fuel, and how it holds up with speed.</summary>
+    private void JetSection(VehicleAnalysis a)
+    {
+        _dash.AddChild(Ui.Section("Jets"));
+        foreach (var same in a.BuiltJets.GroupBy(j => (j.Runs, j.Stats.Compressors, j.Stats.Turbines, j.Stats.Afterburners, j.Stats.Fan,
+                     j.Stats.RampIntake, j.Stats.VariableNozzle, j.Problem)))
+        {
+            BuiltJet j = same.First();
+            JetStats s = j.Stats;
+            int n = same.Count();
+            PanelContainer card = Ui.Card();
+            VBoxContainer col = Ui.Column(6);
+            card.AddChild(col);
+            HBoxContainer top = Ui.Row(8);
+            string kind = s.Fan ? "Turbofan" : "Turbojet";
+            string parts = $"{s.Compressors} compressor{(s.Compressors == 1 ? "" : "s")}, {s.Turbines} turbine{(s.Turbines == 1 ? "" : "s")}" +
+                           (s.Afterburners > 0 ? $", {s.Afterburners} afterburner" + (s.Afterburners > 1 ? "s" : "") : "");
+            top.AddChild(Ui.Heading(n > 1 ? $"{kind} × {n}" : kind));
+            top.AddChild(Ui.Spacer());
+            top.AddChild(Ui.Caption(j.Runs ? parts : "Not ready", j.Runs ? Ui.Info : Ui.Bad));
+            col.AddChild(top);
+            if (j.Runs)
+            {
+                HFlowContainer chips = ChipFlow();
+                chips.AddChild(Ui.Chip("Push", $"{s.DryThrustN / 1000f:0.0} kN", Ui.Accent));
+                if (s.HasAfterburner) chips.AddChild(Ui.Chip("Afterburner", $"{s.Thrust(1, 0, true) / 1000f:0.0} kN"));
+                chips.AddChild(Ui.Chip("Fuel", $"{s.FuelLps:0.00} L/s" + (s.HasAfterburner ? $" ({s.FuelPerSecond(1, true):0.0} burning)" : "")));
+                chips.AddChild(Ui.Chip("At 1,000 km/h", $"{s.SpeedFactor(278f) * 100f:0}%", s.SpeedFactor(278f) >= 1f ? Ui.Good : Ui.Warn));
+                chips.AddChild(Ui.Chip("At 2,000 km/h", $"{s.SpeedFactor(556f) * 100f:0}%", s.SpeedFactor(556f) >= 1f ? Ui.Good : Ui.Warn));
+                chips.AddChild(Ui.Chip("Weight", $"{s.MassKg:0} kg · {s.DryThrustN / GunMath.Gravity / s.MassKg:0.0}× its weight"));
+                col.AddChild(chips);
+            }
+
+            if (j.Problem != null) col.AddChild(Ui.Wrapped(j.Problem, 14, j.Runs ? Ui.Warn : Ui.Bad));
+            _dash.AddChild(card);
+        }
+    }
+
     private void MissileSection(VehicleAnalysis a)
     {
         _dash.AddChild(Ui.Section("Missiles"));
@@ -1823,6 +1861,7 @@ public partial class Builder : Node3D
         if (a.IsNaval) HullSection(a);
         if (a.IsAir) AirSection(a);
         if (a.Missiles.Count > 0) MissileSection(a);
+        if (a.BuiltJets.Count > 0) JetSection(a);
 
         _dash.AddChild(Ui.Section("Armor"));
         _dash.AddChild(Ui.Small("How much armor a shell must get through to reach the insides. The tick is the weakest spot."));
