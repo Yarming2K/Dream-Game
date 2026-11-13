@@ -1135,7 +1135,7 @@ public partial class Builder : Node3D
         Toast($"Pasted {changes.Count:N0} block(s). Ctrl+Z takes it back.");
     }
 
-    /// <summary>Keeps the clipboard as a part in the parts folder (it shows up under Load, Parts).</summary>
+    /// <summary>Keeps the clipboard as a part in the parts folder (it shows up under Open, Parts).</summary>
     private void SavePart()
     {
         if (_clip == null) return;
@@ -1145,7 +1145,7 @@ public partial class Builder : Node3D
         string name = $"Part {n}";
         using FileAccess f = FileAccess.Open($"{PartsDir}/part-{n}.json", FileAccess.ModeFlags.Write);
         f?.StoreString(_clip.ToBlueprint(name).ToJson());
-        Toast($"Saved \"{name}\" ({_clip.Count} blocks). Load, Parts brings it back to paste.");
+        Toast($"Saved \"{name}\" ({_clip.Count} blocks). Open, Parts brings it back to paste.");
         Sfx.Play2D(this, SoundId.Reload, -6f);
     }
 
@@ -1157,7 +1157,7 @@ public partial class Builder : Node3D
         _boxActive = false;
         if (_boxButton != null)
         {
-            _boxButton.Text = mode == BoxMode.Off ? "BOX" : $"BOX: {mode.ToString().ToUpperInvariant()}";
+            _boxButton.Text = mode == BoxMode.Off ? "BOX · B" : $"BOX: {mode.ToString().ToUpperInvariant()} · B";
             _boxButton.SetPressedNoSignal(mode != BoxMode.Off);
         }
 
@@ -1302,37 +1302,32 @@ public partial class Builder : Node3D
     {
         Control root = Ui.Root(this);
 
-        PanelContainer top = Ui.Card("TopBar");
+        // The top rail, bowed like the top of a visor: undo, save, open and paint on the left, the design's name in the
+        // middle, the overlay, help and the drive buttons on the right.
+        var top = new CurvedRail { Bow = 22f, Band = 52f };
         root.AddChild(top);
-        top.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.TopWide);
-        HBoxContainer bar = Ui.Row(8);
-        top.AddChild(bar);
-        Label title = Ui.Title("BUILDER");
-        title.AddThemeColorOverride("font_color", Ui.Accent);
-        bar.AddChild(title);
-        bar.AddChild(new Control { CustomMinimumSize = new Vector2(6, 0) });
-        _nameEdit = new LineEdit { Text = _name, CustomMinimumSize = new Vector2(260, 0), PlaceholderText = "Name your design" };
-        _nameEdit.TextChanged += t => _name = string.IsNullOrWhiteSpace(t) ? "Untitled" : t.Trim();
-        _nameEdit.TextSubmitted += _ => _nameEdit.ReleaseFocus();
-        bar.AddChild(_nameEdit);
-        bar.AddChild(Ui.Button("Undo", () => Undo(false), "Undo (Ctrl+Z)", "GhostButton"));
-        bar.AddChild(Ui.Button("Redo", () => Undo(true), "Redo (Ctrl+Y)", "GhostButton"));
-        bar.AddChild(new VSeparator());
-        bar.AddChild(Ui.Button("New", NewDesign, "Start an empty design (Undo brings the old one back)"));
-        bar.AddChild(Ui.Button("Save", Save, "Save to your blueprints folder (Ctrl+S)"));
+        top.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.CenterTop);
+        top.GrowHorizontal = Control.GrowDirection.Both;
+        top.OffsetTop = 6;
+        top.AddChild(Ui.Button("Undo", () => Undo(false), "Undo (Ctrl+Z)", "GhostButton"));
+        top.AddChild(Ui.Button("Redo", () => Undo(true), "Redo (Ctrl+Y)", "GhostButton"));
+        top.AddChild(Ui.Button("Save", Save, "Save to your blueprints folder (Ctrl+S)"));
         _loadButton = new MenuButton
         {
-            Text = "Load", TooltipText = "Open an example or one of your saved designs", ThemeTypeVariation = "Button",
-            FocusMode = Control.FocusModeEnum.None,
+            Text = "Open", TooltipText = "A new design, an example, one of your saved designs or parts, or the blueprints folder",
+            ThemeTypeVariation = "Button", FocusMode = Control.FocusModeEnum.None,
         };
         _loadButton.AboutToPopup += FillLoadMenu;
         _loadButton.GetPopup().IdPressed += id =>
         {
             if (id >= 0 && id < _loadActions.Count) _loadActions[(int)id]();
         };
-        bar.AddChild(_loadButton);
-        bar.AddChild(Ui.Button("Folder", OpenFolder, "Open the folder with your blueprint files, to share them with friends"));
-        _paintPicker = new OptionButton { FocusMode = Control.FocusModeEnum.None, TooltipText = "Paint job. Ships always get red below the waterline and grey decks." };
+        top.AddChild(_loadButton);
+        _paintPicker = new OptionButton
+        {
+            FocusMode = Control.FocusModeEnum.None, TooltipText = "Paint job. Ships always get red below the waterline and grey decks.",
+            FitToLongestItem = false, ClipText = true, CustomMinimumSize = new Vector2(170, 0),
+        };
         _paintPicker.AddItem("Paint: default");
         foreach (Livery l in Liveries.All) _paintPicker.AddItem("Paint: " + l.Name);
         for (int i = 0; i < Liveries.All.Count; i++) _paintPicker.SetItemTooltip(i + 1, Liveries.All[i].Description);
@@ -1342,8 +1337,24 @@ public partial class Builder : Node3D
             SetPaint(i == 0 ? null : Liveries.All[(int)i - 1].Id);
             Sfx.Play2D(this, SoundId.Tick, -8f);
         };
-        bar.AddChild(_paintPicker);
-        _overlayPicker = new OptionButton { FocusMode = Control.FocusModeEnum.None, TooltipText = "How the instruments are drawn when you drive it. Each cockpit comes with a style; pick another here." };
+        top.AddChild(_paintPicker);
+
+        HBoxContainer nameBox = Ui.Row(8);
+        Label title = Ui.Title("BUILDER");
+        title.AddThemeColorOverride("font_color", Ui.Accent);
+        title.AddThemeFontSizeOverride("font_size", 17);
+        nameBox.AddChild(title);
+        _nameEdit = new LineEdit { Text = _name, CustomMinimumSize = new Vector2(240, 0), PlaceholderText = "Name your design" };
+        _nameEdit.TextChanged += t => _name = string.IsNullOrWhiteSpace(t) ? "Untitled" : t.Trim();
+        _nameEdit.TextSubmitted += _ => _nameEdit.ReleaseFocus();
+        nameBox.AddChild(_nameEdit);
+        top.AddChild(nameBox);
+
+        _overlayPicker = new OptionButton
+        {
+            FocusMode = Control.FocusModeEnum.None, TooltipText = "How the instruments are drawn when you drive it. Each cockpit comes with a style; pick another here.",
+            FitToLongestItem = false, ClipText = true, CustomMinimumSize = new Vector2(180, 0),
+        };
         foreach (OverlayStyle o in Overlays.Choices)
         {
             bool built = o == OverlayStyle.Auto || Overlays.IsBuilt(o);
@@ -1358,34 +1369,22 @@ public partial class Builder : Node3D
             SetOverlay(Overlays.Id(Overlays.Choices[(int)i]));
             Sfx.Play2D(this, SoundId.Tick, -8f);
         };
-        bar.AddChild(_overlayPicker);
-        _savePartButton = Ui.Button("Save part", SavePart, "Keep what you copied as a part, to paste into any design later (Load, Parts)");
-        _savePartButton.Disabled = true;
-        bar.AddChild(_savePartButton);
-        bar.AddChild(Ui.Spacer());
-        _mirrorButton = Ui.Button("MIRROR", () => SetMirror(!_mirror), "Build both sides at once (M)", "Pill");
-        _mirrorButton.ToggleMode = true;
-        bar.AddChild(_mirrorButton);
-        _boxButton = Ui.Button("BOX", () => SetBoxMode((BoxMode)(((int)_boxMode + 1) % 5)),
-            "Box tool (B): drag out a box to fill it, build a hollow shell, or clear it", "Pill");
-        _boxButton.ToggleMode = true;
-        bar.AddChild(_boxButton);
-        _armorButton = Ui.Button("ARMOR", () => SetArmorView(!_batch.ArmorView), "Armor view (O): color every block by how thick its armor is", "Pill");
-        _armorButton.ToggleMode = true;
-        bar.AddChild(_armorButton);
-        SetMirror(_mirror);
-        bar.AddChild(Ui.Button("Help", () => _help.Visible = !_help.Visible, "Controls and how designs work (F1)", "GhostButton"));
-        bar.AddChild(Ui.Button("TEST DRIVE", () => RequestTestDrive(), "Drive this design on the test range (Tab)", "PrimaryButton"));
-        bar.AddChild(Ui.Button("WORLD", () => RequestTestDrive(true), "Take this design out into the campaign world: islands with mountains, fjords, canyons and a volcano", "PrimaryButton"));
+        top.AddChild(_overlayPicker);
+        top.AddChild(Ui.Button("Help", () => _help.Visible = !_help.Visible, "Controls and how designs work (F1)", "GhostButton"));
+        top.AddChild(Ui.Button("TEST DRIVE", () => RequestTestDrive(), "Drive this design on the test range (Tab)", "PrimaryButton"));
+        top.AddChild(Ui.Button("WORLD", () => RequestTestDrive(true), "Take this design out into the campaign world: islands with mountains, fjords, canyons and a volcano", "PrimaryButton"));
 
-        // Parts drawer on the left.
+        // Parts on the left, on a glass panel leaning in toward you.
+        var leftTilt = new TiltedPanel { Hinge = Hinge.Left, Angle = 18f, Name = "PartsPanel" };
+        root.AddChild(leftTilt);
+        leftTilt.SetAnchorsPreset(Control.LayoutPreset.LeftWide);
+        leftTilt.OffsetLeft = 12;
+        leftTilt.OffsetRight = 12 + 300;
+        leftTilt.OffsetTop = 96;
+        leftTilt.OffsetBottom = -12;
         var left = new PanelContainer();
-        root.AddChild(left);
-        left.SetAnchorsPreset(Control.LayoutPreset.LeftWide);
-        left.OffsetLeft = 12;
-        left.OffsetRight = 12 + 300;
-        left.OffsetTop = 72;
-        left.OffsetBottom = -12;
+        leftTilt.Content.AddChild(left);
+        left.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
         VBoxContainer lcol = Ui.Column(10);
         left.AddChild(lcol);
         lcol.AddChild(Ui.Section("Parts"));
@@ -1402,15 +1401,18 @@ public partial class Builder : Node3D
         _partCard.SizeFlagsVertical = Control.SizeFlags.ExpandFill;
         lcol.AddChild(_partCard);
 
-        // Design dashboard on the right.
+        // The design's numbers on the right, leaning in the other way.
+        var rightTilt = new TiltedPanel { Hinge = Hinge.Right, Angle = 18f, Name = "DesignPanel" };
+        root.AddChild(rightTilt);
+        rightTilt.SetAnchorsPreset(Control.LayoutPreset.RightWide);
+        rightTilt.OffsetLeft = -352;
+        rightTilt.OffsetRight = -12;
+        rightTilt.OffsetTop = 96;
+        rightTilt.OffsetBottom = -12;
+        rightTilt.GrowHorizontal = Control.GrowDirection.Begin;
         var right = new PanelContainer();
-        root.AddChild(right);
-        right.SetAnchorsPreset(Control.LayoutPreset.RightWide);
-        right.OffsetLeft = -352;
-        right.OffsetRight = -12;
-        right.OffsetTop = 72;
-        right.OffsetBottom = -12;
-        right.GrowHorizontal = Control.GrowDirection.Begin;
+        rightTilt.Content.AddChild(right);
+        right.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
         var scroll = new ScrollContainer { HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled };
         right.AddChild(scroll);
         _dash = Ui.Column(10);
@@ -1418,33 +1420,43 @@ public partial class Builder : Node3D
         _dash.CustomMinimumSize = new Vector2(310, 0);
         scroll.AddChild(_dash);
 
-        // Key hints along the bottom.
-        var hints = new PanelContainer();
-        root.AddChild(hints);
-        hints.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.CenterBottom);
-        hints.GrowHorizontal = Control.GrowDirection.Both;
-        hints.GrowVertical = Control.GrowDirection.Begin;
-        hints.OffsetBottom = -14;
-        HBoxContainer hintRow = Ui.Row(14);
-        hints.AddChild(hintRow);
-        foreach ((string key, string what) in new[]
-                 {
-                     ("LMB", "place"), ("RMB", "remove"), ("MMB", "pick"), ("R T G", "rotate"), ("V", "shape"), ("Ctrl C / V", "copy / paste"), ("WASD Q E", "move"),
-                     ("M", "mirror"), ("B", "box"), ("F1", "help"),
-                 })
+        // The tools on a curved rail along the bottom: the mouse buttons as reminders, the rest as buttons.
+        var tools = new CurvedRail { Bottom = true, Bow = 18f, Band = 46f };
+        root.AddChild(tools);
+        tools.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.CenterBottom);
+        tools.GrowHorizontal = Control.GrowDirection.Both;
+        tools.GrowVertical = Control.GrowDirection.Begin;
+        tools.OffsetBottom = -4;
+        foreach ((string key, string what) in new[] { ("LMB", "place"), ("RMB", "remove"), ("MMB", "pick") })
         {
             HBoxContainer pair = Ui.Row(5);
             pair.AddChild(Ui.Chip(null, key, Ui.Accent));
             pair.AddChild(Ui.Small(what));
-            hintRow.AddChild(pair);
+            tools.AddChild(pair);
         }
+
+        _boxButton = Ui.Button("BOX · B", () => SetBoxMode((BoxMode)(((int)_boxMode + 1) % 5)),
+            "Box tool (B): drag out a box to fill it, build a hollow shell, or clear it", "Pill");
+        _boxButton.ToggleMode = true;
+        tools.AddChild(_boxButton);
+        tools.AddChild(Ui.Button("COPY · CTRL C", () => SetBoxMode(BoxMode.Copy), "Copy (Ctrl+C): drag out a box round part of the design, then click to paste it", "Pill"));
+        _mirrorButton = Ui.Button("MIRROR · M", () => SetMirror(!_mirror), "Build both sides at once (M)", "Pill");
+        _mirrorButton.ToggleMode = true;
+        tools.AddChild(_mirrorButton);
+        _armorButton = Ui.Button("ARMOR · O", () => SetArmorView(!_batch.ArmorView), "Armor view (O): color every block by how thick its armor is", "Pill");
+        _armorButton.ToggleMode = true;
+        tools.AddChild(_armorButton);
+        tools.AddChild(Ui.Button("SHAPE · V", () => CycleShape(1), "Next shape for armor and glazing (V, Shift+V goes back)", "Pill"));
+        tools.AddChild(Ui.Button("TURN · R T G", () => Rotate(Orientations.RotateAroundY(_orientation, 1)), "Turn the part (R round the up axis, T the side, G the front)", "Pill"));
+        tools.AddChild(Ui.Button("FOCUS · F", FocusCamera, "Bring the camera back to the design (F)", "Pill"));
+        SetMirror(_mirror);
 
         _armorLegend = BuildArmorLegend();
         root.AddChild(_armorLegend);
         _armorLegend.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.CenterBottom);
         _armorLegend.GrowHorizontal = Control.GrowDirection.Both;
         _armorLegend.GrowVertical = Control.GrowDirection.Begin;
-        _armorLegend.OffsetBottom = -64;
+        _armorLegend.OffsetBottom = -96;
 
         _toast = Ui.Card("Toast");
         _toast.Visible = false;
@@ -1452,7 +1464,7 @@ public partial class Builder : Node3D
         root.AddChild(_toast);
         _toast.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.CenterTop);
         _toast.GrowHorizontal = Control.GrowDirection.Both;
-        _toast.OffsetTop = 80;
+        _toast.OffsetTop = 104;
         _toastLabel = Ui.Label("", 16);
         _toast.AddChild(_toastLabel);
 
@@ -1472,7 +1484,7 @@ public partial class Builder : Node3D
     }
 
     private const string HelpText =
-        "[b][color=#ffb845]Building[/color][/b]\n" +
+        "[b][color=#7fe3ff]Building[/color][/b]\n" +
         "[table=2]" +
         "[cell]Left click  [/cell][cell]place a block (hold and drag to paint a row)[/cell]" +
         "[cell]Right click[/cell][cell]remove a block[/cell]" +
@@ -1486,7 +1498,7 @@ public partial class Builder : Node3D
         "[cell]1-9,  [ ][/cell][cell]pick a block / switch category[/cell]" +
         "[cell]Ctrl+Z / Ctrl+Y[/cell][cell]undo / redo[/cell]" +
         "[/table]\n" +
-        "[b][color=#ffb845]Camera[/color][/b]\n" +
+        "[b][color=#7fe3ff]Camera[/color][/b]\n" +
         "[table=2]" +
         "[cell]Right drag[/cell][cell]orbit[/cell]" +
         "[cell]Middle drag[/cell][cell]pan[/cell]" +
@@ -1494,7 +1506,7 @@ public partial class Builder : Node3D
         "[cell]Mouse wheel[/cell][cell]zoom[/cell]" +
         "[cell]F[/cell][cell]focus on the design[/cell]" +
         "[/table]\n" +
-        "[b][color=#ffb845]How designs work[/color][/b]\n" +
+        "[b][color=#7fe3ff]How designs work[/color][/b]\n" +
         "The front of the vehicle faces the FRONT arrow. Every vehicle needs a driver seat, an engine, a fuel tank, " +
         "and wheels or tracks on the bottom row.\n" +
         "A gun is a breech with barrel segments in a line in front of it (the yellow arrow). Loaders and propellant must touch " +
@@ -1509,7 +1521,7 @@ public partial class Builder : Node3D
         _mirror = on;
         if (_mirrorButton == null) return;
         _mirrorButton.SetPressedNoSignal(on);
-        _mirrorButton.Text = on ? "MIRROR ON" : "MIRROR OFF";
+        _mirrorButton.Text = on ? "MIRROR ON · M" : "MIRROR · M";
     }
 
     private void SetCategory(int i)
@@ -1607,7 +1619,7 @@ public partial class Builder : Node3D
         if (IsCockpit(d))
         {
             OverlayStyle brings = Overlays.CockpitDefault(new[] { d.Id }), pickNow = Overlays.FromId(_overlay);
-            _partCard.AddChild(Ui.Caption($"Overlay: comes with {Overlays.Name(brings)}" + (Overlays.IsBuilt(brings) ? "" : " (shows as Glass for now)")));
+            _partCard.AddChild(Ui.Caption($"Overlay: comes with {Overlays.Name(brings)}" + (Overlays.IsBuilt(brings) ? "" : " (shows as the Ring for now)")));
             var styleRow = new HFlowContainer();
             styleRow.AddThemeConstantOverride("h_separation", 4);
             styleRow.AddThemeConstantOverride("v_separation", 4);
@@ -2070,7 +2082,7 @@ public partial class Builder : Node3D
 
         f.StoreString(CurrentBlueprint().ToJson());
         Sfx.Play2D(this, SoundId.Reload, -8f);
-        Toast($"Saved \"{_name}\". The Folder button opens your blueprints.");
+        Toast($"Saved \"{_name}\". Open, blueprints folder shows where it went.");
     }
 
     private void OpenFolder()
@@ -2084,6 +2096,13 @@ public partial class Builder : Node3D
         PopupMenu menu = _loadButton.GetPopup();
         menu.Clear();
         _loadActions.Clear();
+        menu.AddItem("New empty design", _loadActions.Count);
+        _loadActions.Add(NewDesign);
+        menu.AddItem("Save the copied part (to paste later)", _loadActions.Count);
+        _loadActions.Add(SavePart);
+        menu.SetItemDisabled(menu.ItemCount - 1, _clip == null);
+        menu.AddItem("Open the blueprints folder (to share designs)", _loadActions.Count);
+        _loadActions.Add(OpenFolder);
         // The examples, grouped by front so new ones sit beside their kind.
         foreach ((string front, Blueprint[] designs) in ExampleDesigns.ByFront.Append(("Buildings", ExampleDesigns.Buildings.ToArray())))
         {

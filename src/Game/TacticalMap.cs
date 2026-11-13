@@ -83,6 +83,25 @@ public partial class TacticalMap : Control
 
     private static double Now => Time.GetTicksMsec() / 1000.0;
 
+    // The holo table: the map is drawn flat on its canvas, which a tilted panel shows in perspective; units stand up
+    // off it on stalks, drawn (and clicked) on the pin layer above.
+    private TiltedPanel _table;
+    private MapCanvas _canvas;
+    private PinLayer _pins;
+    private TiltedPanel _leftPanel, _rightPanel;
+    private Button _tableButton;
+    private bool _tableOn = true;
+    private const float TableAngle = 36f;
+
+    /// <summary>What the drawing helpers draw on: the map's canvas, or the pin layer.</summary>
+    private CanvasItem _ci;
+
+    private Vector2? _lastMouse;
+    private readonly List<(Rect2 rect, VehicleBody v, Vector2 flat)> _pinHits = new();
+
+    /// <summary>The size of the flat map (the table's canvas).</summary>
+    private Vector2 MapSize => _canvas != null && _canvas.Size.X > 1 ? _canvas.Size : Size;
+
     public override void _Ready()
     {
         SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
@@ -127,7 +146,7 @@ public partial class TacticalMap : Control
         _selected.RemoveWhere(v => !Alive(v));
         Sense();
         RefreshDeploy();
-        QueueRedraw();
+        Redraw();
     }
 
     public void Close()
@@ -219,12 +238,12 @@ public partial class TacticalMap : Control
         if (_redraw <= 0)
         {
             _redraw = 0.05f;
-            QueueRedraw();
+            Redraw();
         }
     }
 
-    private Vector2 ToScreen(Vector3 w) => Size / 2f + (new Vector2(w.X, w.Z) - _center) * _zoom;
-    private Vector2 ToWorld2(Vector2 s) => (s - Size / 2f) / _zoom + _center;
+    private Vector2 ToScreen(Vector3 w) => MapSize / 2f + (new Vector2(w.X, w.Z) - _center) * _zoom;
+    private Vector2 ToWorld2(Vector2 s) => (s - MapSize / 2f) / _zoom + _center;
 
     private Vector3 ToWorld(Vector2 s)
     {
@@ -338,13 +357,13 @@ public partial class TacticalMap : Control
             };
             if (_zoom < minZoom) continue;
             Vector2 at = ToScreen(new Vector3(f.At.X, 0, f.At.Y));
-            if (at.X < -200 || at.Y < -40 || at.X > Size.X + 40 || at.Y > Size.Y + 40) continue;
+            if (at.X < -200 || at.Y < -40 || at.X > MapSize.X + 40 || at.Y > MapSize.Y + 40) continue;
             string text = f.Kind is FeatureKind.Peak or FeatureKind.Volcano or FeatureKind.Pass ? $"{f.Name}  {f.Height:0} m" : f.Name;
-            if (f.Kind is FeatureKind.Peak or FeatureKind.Volcano) DrawPolygon(new[] { at + new Vector2(0, -6), at + new Vector2(5, 3), at + new Vector2(-5, 3) }, new[] { col });
-            else if (f.Kind != FeatureKind.Island && f.Kind != FeatureKind.Range) DrawCircle(at, 2.5f, col);
+            if (f.Kind is FeatureKind.Peak or FeatureKind.Volcano) _ci.DrawPolygon(new[] { at + new Vector2(0, -6), at + new Vector2(5, 3), at + new Vector2(-5, 3) }, new[] { col });
+            else if (f.Kind != FeatureKind.Island && f.Kind != FeatureKind.Range) _ci.DrawCircle(at, 2.5f, col);
             Vector2 tp = at + new Vector2(f.Kind is FeatureKind.Island or FeatureKind.Range ? -text.Length * size * 0.28f : 8f, 5f);
-            DrawStringOutline(font, tp, text, HorizontalAlignment.Left, -1, size, 5, new Color(0, 0, 0, 0.75f));
-            DrawString(font, tp, text, HorizontalAlignment.Left, -1, size, col);
+            _ci.DrawStringOutline(font, tp, text, HorizontalAlignment.Left, -1, size, 5, new Color(0, 0, 0, 0.75f));
+            _ci.DrawString(font, tp, text, HorizontalAlignment.Left, -1, size, col);
         }
     }
 
@@ -355,12 +374,8 @@ public partial class TacticalMap : Control
         // The places take the deploy panel's side of the screen.
         if (_deployPanel != null) _deployPanel.Visible = false;
         var panel = new PanelContainer { MouseFilter = MouseFilterEnum.Stop };
-        AddChild(panel);
-        panel.SetAnchorsAndOffsetsPreset(LayoutPreset.RightWide);
-        panel.OffsetLeft = -290;
-        panel.OffsetRight = -14;
-        panel.OffsetTop = 80;
-        panel.OffsetBottom = -90;
+        _rightPanel.Content.AddChild(panel);
+        panel.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
         VBoxContainer col = Ui.Column(4);
         panel.AddChild(col);
         col.AddChild(Ui.Heading("Go to"));
@@ -390,48 +405,50 @@ public partial class TacticalMap : Control
         }
     }
 
-    public override void _Draw()
+    /// <summary>The flat map, drawn on the table's canvas.</summary>
+    private void DrawMap()
     {
-        DrawRect(new Rect2(Vector2.Zero, Size), Sea);
+        _ci = _canvas;
+        _ci.DrawRect(new Rect2(Vector2.Zero, MapSize), Sea);
         HeightField f = WorldQuery.Ground;
         if (_terrain != null && World != null)
         {
             Vector2 a = ToScreen(new Vector3(-WorldMap.Half, 0, -WorldMap.Half)), b = ToScreen(new Vector3(WorldMap.Half, 0, WorldMap.Half));
-            DrawTextureRect(_terrain, new Rect2(a, b - a), false);
+            _ci.DrawTextureRect(_terrain, new Rect2(a, b - a), false);
             DrawPlaces();
         }
         else if (_terrain != null && f != null)
         {
             Vector2 a = ToScreen(new Vector3(f.Origin.X, 0, f.Origin.Y));
             Vector2 b = ToScreen(new Vector3(f.Origin.X + (f.Width - 1) * f.Spacing, 0, f.Origin.Y + (f.Depth - 1) * f.Spacing));
-            DrawTextureRect(_terrain, new Rect2(a, b - a), false);
+            _ci.DrawTextureRect(_terrain, new Rect2(a, b - a), false);
             // The airstrip.
             Vector2 s0 = ToScreen(new Vector3(Terrain.StripX - Terrain.StripHalfWidth, 0, -Terrain.StripHalfLength));
             Vector2 s1 = ToScreen(new Vector3(Terrain.StripX + Terrain.StripHalfWidth, 0, Terrain.StripHalfLength));
-            DrawRect(new Rect2(s0, s1 - s0), new Color(0.45f, 0.45f, 0.43f, 0.85f));
+            _ci.DrawRect(new Rect2(s0, s1 - s0), new Color(0.45f, 0.45f, 0.43f, 0.85f));
         }
 
         Font font = Ui.BodyFont;
         // A grid every 100 m (every 500 m when zoomed out), labeled.
         float step = _zoom < 0.25f ? 500f : 100f;
-        Vector2 w0 = ToWorld2(Vector2.Zero), w1 = ToWorld2(Size);
+        Vector2 w0 = ToWorld2(Vector2.Zero), w1 = ToWorld2(MapSize);
         var grid = new Color(1, 1, 1, 0.06f);
         for (float x = Mathf.Floor(w0.X / step) * step; x <= w1.X; x += step)
-            DrawLine(ToScreen(new Vector3(x, 0, w0.Y)), ToScreen(new Vector3(x, 0, w1.Y)), grid);
+            _ci.DrawLine(ToScreen(new Vector3(x, 0, w0.Y)), ToScreen(new Vector3(x, 0, w1.Y)), grid);
         for (float z = Mathf.Floor(w0.Y / step) * step; z <= w1.Y; z += step)
-            DrawLine(ToScreen(new Vector3(w0.X, 0, z)), ToScreen(new Vector3(w1.X, 0, z)), grid);
+            _ci.DrawLine(ToScreen(new Vector3(w0.X, 0, z)), ToScreen(new Vector3(w1.X, 0, z)), grid);
 
         // Command range round the console.
         Vector3 cp = ConsolePos();
-        DrawArc(ToScreen(cp), CommandRange() * _zoom, 0, Mathf.Tau, 128, new Color(Mine, 0.35f), 1.5f, true);
-        DrawCircle(ToScreen(cp), 5f, Mine);
+        _ci.DrawArc(ToScreen(cp), CommandRange() * _zoom, 0, Mathf.Tau, 128, new Color(Mine, 0.35f), 1.5f, true);
+        _ci.DrawCircle(ToScreen(cp), 5f, Mine);
 
         VehicleBody me = PlayerVehicle?.Invoke();
         List<VehicleBody> all = Vehicles().ToList();
 
         // Sight circles of the units you've picked.
         foreach (VehicleBody v in _selected)
-            if (Alive(v)) DrawArc(ToScreen(v.GlobalPosition), v.SightM * _zoom, 0, Mathf.Tau, 64, new Color(Friendly, 0.12f), 1f, true);
+            if (Alive(v)) _ci.DrawArc(ToScreen(v.GlobalPosition), v.SightM * _zoom, 0, Mathf.Tau, 64, new Color(Friendly, 0.12f), 1f, true);
 
         // What each of your units is doing: a line to where it's going, with an arrowhead and a marker there.
         foreach (VehicleBody v in all)
@@ -446,29 +463,29 @@ public partial class TacticalMap : Control
                 {
                     Color c = v.Stuck ? new Color(CommandLog.Warn, alpha) : new Color(Friendly, alpha);
                     Vector2 to = ToScreen(v.OrderPoint);
-                    DrawDashedLine(at, to, c, picked ? 2f : 1.5f, 6f);
+                    _ci.DrawDashedLine(at, to, c, picked ? 2f : 1.5f, 6f);
                     Arrowhead(at, to, c);
-                    DrawArc(to, 5f, 0, Mathf.Tau, 16, c, 1.5f, true);
+                    _ci.DrawArc(to, 5f, 0, Mathf.Tau, 16, c, 1.5f, true);
                     break;
                 }
                 case OrderKind.Attack when Alive(v.OrderTarget):
                 {
                     Vector2 to = ToScreen(v.OrderTarget.GlobalPosition);
                     var c = new Color(Enemy, alpha);
-                    DrawLine(at, to, c, picked ? 2f : 1.5f, true);
+                    _ci.DrawLine(at, to, c, picked ? 2f : 1.5f, true);
                     Arrowhead(at, to, c);
                     Brackets(to, 11f, c);
                     break;
                 }
                 case OrderKind.Escort when Alive(v.OrderTarget):
-                    DrawDashedLine(at, ToScreen(v.OrderTarget.GlobalPosition), new Color(0.6f, 0.9f, 1f, alpha), 1.2f, 3f);
+                    _ci.DrawDashedLine(at, ToScreen(v.OrderTarget.GlobalPosition), new Color(0.6f, 0.9f, 1f, alpha), 1.2f, 3f);
                     break;
                 case OrderKind.Patrol:
                 {
                     var c = new Color(0.7f, 1f, 0.7f, alpha);
                     Vector2 to = ToScreen(v.OrderPoint);
-                    DrawDashedLine(at, to, c, 1.2f, 8f);
-                    DrawArc(to, 5f, 0, Mathf.Tau, 16, c, 1.2f, true);
+                    _ci.DrawDashedLine(at, to, c, 1.2f, 8f);
+                    _ci.DrawArc(to, 5f, 0, Mathf.Tau, 16, c, 1.2f, true);
                     break;
                 }
             }
@@ -479,7 +496,7 @@ public partial class TacticalMap : Control
         foreach ((Vector3 pos, double t, Color c) in _pings)
         {
             float k = (float)((Now - t) / 1.2);
-            DrawArc(ToScreen(pos), 6f + 30f * k, 0, Mathf.Tau, 32, new Color(c, 1f - k), 2.5f * (1f - k) + 0.5f, true);
+            _ci.DrawArc(ToScreen(pos), 6f + 30f * k, 0, Mathf.Tau, 32, new Color(c, 1f - k), 2.5f * (1f - k) + 0.5f, true);
         }
 
         // Units.
@@ -492,42 +509,50 @@ public partial class TacticalMap : Control
         {
             if (!Alive(v)) continue;
             DrawUnit(v, now ? v.GlobalPosition : pos, Enemy, now ? 1f : 0.4f, font);
-            if (!now) DrawString(font, ToScreen(pos) + new Vector2(8, -8), "?", HorizontalAlignment.Left, -1, 13, new Color(Enemy, 0.7f));
+            if (!now) _ci.DrawString(font, ToScreen(pos) + new Vector2(8, -8), "?", HorizontalAlignment.Left, -1, 13, new Color(Enemy, 0.7f));
         }
 
         // The box being dragged out.
         if (_dragging && _dragStart.DistanceTo(_dragNow) > 4f)
         {
             var r = new Rect2(_dragStart, _dragNow - _dragStart).Abs();
-            DrawRect(r, new Color(1, 1, 1, 0.08f));
-            DrawRect(r, new Color(1, 1, 1, 0.7f), false, 1f);
+            _ci.DrawRect(r, new Color(1, 1, 1, 0.08f));
+            _ci.DrawRect(r, new Color(1, 1, 1, 0.7f), false, 1f);
         }
 
         // Placing a unit: a ghost marker under the cursor.
         if (_placing != null)
         {
-            Vector2 m = GetLocalMousePosition();
-            DrawCircle(m, 7f, new Color(_placingSide == 0 ? Friendly : Enemy, 0.6f));
-            DrawString(font, m + new Vector2(12, 4), $"{_placing.Name}  (click to place, right click to stop)", HorizontalAlignment.Left, -1, 14, Colors.White);
+            Vector2 m = _canvas.GetLocalMousePosition();
+            _ci.DrawCircle(m, 7f, new Color(_placingSide == 0 ? Friendly : Enemy, 0.6f));
+            _ci.DrawString(font, m + new Vector2(12, 4), $"{_placing.Name}  (click to place, right click to stop)", HorizontalAlignment.Left, -1, 14, Colors.White);
         }
 
         // Scale bar.
         float bar = step * _zoom;
-        var b0 = new Vector2(24, Size.Y - 96);
-        DrawLine(b0, b0 + new Vector2(bar, 0), Colors.White, 2f);
-        DrawString(font, b0 + new Vector2(0, -6), step >= 1000 ? $"{step / 1000:0} km" : $"{step:0} m", HorizontalAlignment.Left, -1, 13, Colors.White);
+        var b0 = new Vector2(MapSize.X * 0.5f - 60f, MapSize.Y - 110);
+        _ci.DrawLine(b0, b0 + new Vector2(bar, 0), Colors.White, 2f);
+        _ci.DrawString(font, b0 + new Vector2(0, -6), step >= 1000 ? $"{step / 1000:0} km" : $"{step:0} m", HorizontalAlignment.Left, -1, 13, Colors.White);
     }
 
     /// <summary>A unit's icon: a block for land, a hull shape for ships, a chevron for aircraft, facing its heading.</summary>
     private void DrawUnit(VehicleBody v, Vector3 pos, Color c, float alpha, Font font)
     {
         Vector2 at = ToScreen(pos);
-        if (at.X < -40 || at.Y < -40 || at.X > Size.X + 40 || at.Y > Size.Y + 40) return;
+        if (at.X < -40 || at.Y < -40 || at.X > MapSize.X + 40 || at.Y > MapSize.Y + 40) return;
+        var col = new Color(c, alpha);
+        if (_tableOn)
+        {
+            _ci.DrawCircle(at, 4.5f, new Color(col, 0.55f * alpha));
+            _ci.DrawArc(at, 6.5f, 0, Mathf.Tau, 20, col, 1.5f, true);
+            if (_selected.Contains(v)) _ci.DrawArc(at, 11f, 0, Mathf.Tau, 24, Colors.White, 1.5f, true);
+            return;
+        }
+
         Vector3 f3 = -v.GlobalTransform.Basis.Z;
         var fwd = new Vector2(f3.X, f3.Z);
         fwd = fwd.LengthSquared() > 1e-4f ? fwd.Normalized() : new Vector2(0, -1);
         var right = new Vector2(-fwd.Y, fwd.X);
-        var col = new Color(c, alpha);
         // Drawn at its real size from above (no smaller than an icon you can click), offset to where its blocks are.
         Rect2 plan = v.Plan;
         Vector2 mid = plan.GetCenter();
@@ -556,32 +581,33 @@ public partial class TacticalMap : Control
         if (v.Faction == 0 && alpha >= 1f)
         {
             float pulse = 0.5f + 0.5f * Mathf.Sin((float)Now * 6f);
-            if (v.UnderFire) DrawArc(at, 13f + 3f * pulse, 0, Mathf.Tau, 24, new Color(CommandLog.Bad, 0.35f + 0.45f * pulse), 2f, true);
-            if (v.FiringNow) DrawArc(at, 10f, 0, Mathf.Tau, 20, new Color(1f, 0.7f, 0.3f, 0.85f), 1.5f, true);
+            if (v.UnderFire) _ci.DrawArc(at, 13f + 3f * pulse, 0, Mathf.Tau, 24, new Color(CommandLog.Bad, 0.35f + 0.45f * pulse), 2f, true);
+            if (v.FiringNow) _ci.DrawArc(at, 10f, 0, Mathf.Tau, 20, new Color(1f, 0.7f, 0.3f, 0.85f), 1.5f, true);
         }
 
-        DrawColoredPolygon(poly, col);
+        _ci.DrawColoredPolygon(poly, col);
         var outline = new Vector2[poly.Length + 1];
         poly.CopyTo(outline, 0);
         outline[^1] = poly[0];
         bool picked = _selected.Contains(v);
-        DrawPolyline(outline, picked ? Colors.White : new Color(0, 0, 0, 0.6f * alpha), picked ? 2f : 1f, true);
-        if (picked) DrawArc(at, 16f, 0, Mathf.Tau, 24, Colors.White, 1.5f, true);
+        _ci.DrawPolyline(outline, picked ? Colors.White : new Color(0, 0, 0, 0.6f * alpha), picked ? 2f : 1f, true);
+        if (picked) _ci.DrawArc(at, 16f, 0, Mathf.Tau, 24, Colors.White, 1.5f, true);
 
         // Health bar, and a name when zoomed in.
         float hp = v.Health;
-        DrawRect(new Rect2(at + new Vector2(-10, 12), new Vector2(20, 3)), new Color(0, 0, 0, 0.6f * alpha));
-        DrawRect(new Rect2(at + new Vector2(-10, 12), new Vector2(20 * hp, 3)), new Color(Ui.Grade(hp, 0.35f, 0.7f), alpha));
+        _ci.DrawRect(new Rect2(at + new Vector2(-10, 12), new Vector2(20, 3)), new Color(0, 0, 0, 0.6f * alpha));
+        _ci.DrawRect(new Rect2(at + new Vector2(-10, 12), new Vector2(20 * hp, 3)), new Color(Ui.Grade(hp, 0.35f, 0.7f), alpha));
         // What it's doing, as an icon beside it.
         if (v.Faction == 0) StatusIcon(v, at + right * 0f + new Vector2(13, -11), alpha);
         // Names when zoomed in, or for a small pick, so a crowded map stays readable.
         if (_zoom > 1.6f || (picked && _selected.Count <= 6))
-            DrawString(font, at + new Vector2(-50, 28), v.Faction == 0 ? v.Callsign : v.ShortName, HorizontalAlignment.Center, 100, 12, new Color(1, 1, 1, 0.85f * alpha));
+            _ci.DrawString(font, at + new Vector2(-50, 28), v.Faction == 0 ? v.Callsign : v.ShortName, HorizontalAlignment.Center, 100, 12, new Color(1, 1, 1, 0.85f * alpha));
     }
 
     // ------------------------------------------------------------------ input
 
-    public override void _GuiInput(InputEvent e)
+    /// <summary>Mouse input on the map, in the flat map's coordinates (the table maps it back through its perspective).</summary>
+    private void MapInput(InputEvent e)
     {
         if (e is InputEventMouseButton mb)
         {
@@ -623,13 +649,16 @@ public partial class TacticalMap : Control
                     break;
             }
 
-            AcceptEvent();
+            _canvas.AcceptEvent();
         }
         else if (e is InputEventMouseMotion mm)
         {
-            if (_panning) _center -= mm.Relative / _zoom;
+            // (Measured on the flat map, so a drag pans the same wherever it is on the tilted table.)
+            Vector2 rel = _lastMouse is Vector2 last ? mm.Position - last : mm.Relative;
+            _lastMouse = mm.Position;
+            if (_panning) _center -= rel / _zoom;
             if (_dragging) _dragNow = mm.Position;
-            AcceptEvent();
+            _canvas.AcceptEvent();
         }
     }
 
@@ -689,7 +718,7 @@ public partial class TacticalMap : Control
         d = d.Normalized();
         var side = new Vector2(-d.Y, d.X);
         Vector2 tip = to - d * 7f;
-        DrawColoredPolygon(new[] { tip, tip - d * 9f + side * 4.5f, tip - d * 9f - side * 4.5f }, c);
+        _ci.DrawColoredPolygon(new[] { tip, tip - d * 9f + side * 4.5f, tip - d * 9f - side * 4.5f }, c);
     }
 
     /// <summary>Corner brackets round a target.</summary>
@@ -699,8 +728,8 @@ public partial class TacticalMap : Control
         foreach ((float sx, float sy) in new[] { (-1f, -1f), (1f, -1f), (1f, 1f), (-1f, 1f) })
         {
             var corner = at + new Vector2(sx * r, sy * r);
-            DrawLine(corner, corner - new Vector2(sx * l, 0), c, 1.5f, true);
-            DrawLine(corner, corner - new Vector2(0, sy * l), c, 1.5f, true);
+            _ci.DrawLine(corner, corner - new Vector2(sx * l, 0), c, 1.5f, true);
+            _ci.DrawLine(corner, corner - new Vector2(0, sy * l), c, 1.5f, true);
         }
     }
 
@@ -717,46 +746,46 @@ public partial class TacticalMap : Control
             _ => new Color(0.85f, 0.92f, 1f),
         };
         c = new Color(c, alpha);
-        DrawCircle(p, 6.5f, new Color(0.05f, 0.07f, 0.09f, 0.8f * alpha));
+        _ci.DrawCircle(p, 6.5f, new Color(0.05f, 0.07f, 0.09f, 0.8f * alpha));
         switch (d)
         {
             case VehicleBody.Doing.Moving:
-                DrawColoredPolygon(new[] { p + new Vector2(-2.5f, -3.5f), p + new Vector2(3.5f, 0), p + new Vector2(-2.5f, 3.5f) }, c);
+                _ci.DrawColoredPolygon(new[] { p + new Vector2(-2.5f, -3.5f), p + new Vector2(3.5f, 0), p + new Vector2(-2.5f, 3.5f) }, c);
                 break;
             case VehicleBody.Doing.Holding:
-                DrawRect(new Rect2(p - new Vector2(2.5f, 2.5f), new Vector2(5, 5)), c);
+                _ci.DrawRect(new Rect2(p - new Vector2(2.5f, 2.5f), new Vector2(5, 5)), c);
                 break;
             case VehicleBody.Doing.Closing:
-                DrawArc(p, 3.5f, 0, Mathf.Tau, 12, c, 1.2f, true);
-                DrawLine(p + new Vector2(-5, 0), p + new Vector2(5, 0), c, 1f);
-                DrawLine(p + new Vector2(0, -5), p + new Vector2(0, 5), c, 1f);
+                _ci.DrawArc(p, 3.5f, 0, Mathf.Tau, 12, c, 1.2f, true);
+                _ci.DrawLine(p + new Vector2(-5, 0), p + new Vector2(5, 0), c, 1f);
+                _ci.DrawLine(p + new Vector2(0, -5), p + new Vector2(0, 5), c, 1f);
                 break;
             case VehicleBody.Doing.Firing:
                 for (int i = 0; i < 4; i++)
                 {
                     float a = i * Mathf.Pi / 2f + Mathf.Pi / 4f;
-                    DrawLine(p, p + new Vector2(Mathf.Cos(a), Mathf.Sin(a)) * 4.5f, c, 1.5f);
+                    _ci.DrawLine(p, p + new Vector2(Mathf.Cos(a), Mathf.Sin(a)) * 4.5f, c, 1.5f);
                 }
 
                 break;
             case VehicleBody.Doing.Escorting:
-                DrawArc(p, 3.5f, Mathf.Pi, Mathf.Tau, 8, c, 1.5f, true);
-                DrawLine(p + new Vector2(-3.5f, 0), p + new Vector2(0, 4), c, 1.5f);
-                DrawLine(p + new Vector2(3.5f, 0), p + new Vector2(0, 4), c, 1.5f);
+                _ci.DrawArc(p, 3.5f, Mathf.Pi, Mathf.Tau, 8, c, 1.5f, true);
+                _ci.DrawLine(p + new Vector2(-3.5f, 0), p + new Vector2(0, 4), c, 1.5f);
+                _ci.DrawLine(p + new Vector2(3.5f, 0), p + new Vector2(0, 4), c, 1.5f);
                 break;
             case VehicleBody.Doing.Patrolling:
-                DrawArc(p, 3.5f, 0.3f, Mathf.Tau - 0.6f, 12, c, 1.5f, true);
+                _ci.DrawArc(p, 3.5f, 0.3f, Mathf.Tau - 0.6f, 12, c, 1.5f, true);
                 break;
             case VehicleBody.Doing.Stuck:
-                DrawLine(p + new Vector2(0, -4), p + new Vector2(0, 1), c, 2f);
-                DrawCircle(p + new Vector2(0, 3.2f), 1f, c);
+                _ci.DrawLine(p + new Vector2(0, -4), p + new Vector2(0, 1), c, 2f);
+                _ci.DrawCircle(p + new Vector2(0, 3.2f), 1f, c);
                 break;
             case VehicleBody.Doing.Out:
-                DrawLine(p + new Vector2(-3, -3), p + new Vector2(3, 3), c, 1.5f);
-                DrawLine(p + new Vector2(3, -3), p + new Vector2(-3, 3), c, 1.5f);
+                _ci.DrawLine(p + new Vector2(-3, -3), p + new Vector2(3, 3), c, 1.5f);
+                _ci.DrawLine(p + new Vector2(3, -3), p + new Vector2(-3, 3), c, 1.5f);
                 break;
             default:
-                DrawCircle(p, 1.5f, c);
+                _ci.DrawCircle(p, 1.5f, c);
                 break;
         }
     }
@@ -947,52 +976,81 @@ public partial class TacticalMap : Control
 
     private void BuildUi()
     {
-        _title = Ui.Label("TACTICAL MAP", 20, Ui.Accent, "Title");
-        AddChild(_title);
-        _title.Position = new Vector2(24, 16);
-        Label hint = Ui.Small("Left click / drag: pick units   ·   Right click: attack, escort or move   ·   Shift+right click: patrol   ·   H hold   ·   Ctrl+1-9 save a group, 1-9 pick it   ·   F formation   ·   J jump in   ·   Wheel zoom, W A S D pan   ·   M close");
+        // A dark room behind the table, so the game doesn't show round its edges.
+        var room = new ColorRect { Color = new Color(0.01f, 0.025f, 0.035f, 0.92f), MouseFilter = MouseFilterEnum.Ignore };
+        AddChild(room);
+        room.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
+
+        // The table: the map drawn flat on its canvas, shown tilted away from you.
+        _table = new TiltedPanel { Hinge = Hinge.Bottom, Angle = TableAngle, Depth = 1600f, Glass = false, Name = "Table" };
+        AddChild(_table);
+        _table.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
+        _table.OffsetTop = 70;
+        _canvas = new MapCanvas { Map = this, MouseFilter = MouseFilterEnum.Stop, ClipContents = true };
+        _table.Content.AddChild(_canvas);
+        _canvas.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
+        _pins = new PinLayer { Map = this, MouseFilter = MouseFilterEnum.Pass };
+        AddChild(_pins);
+        _pins.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
+
+        // The top rail: the title, flat or table, the keys, and close.
+        var top = new CurvedRail { Bow = 20f, Band = 50f };
+        AddChild(top);
+        top.SetAnchorsAndOffsetsPreset(LayoutPreset.CenterTop);
+        top.GrowHorizontal = GrowDirection.Both;
+        top.OffsetTop = 6;
+        _title = Ui.Label("COMMAND", 18, Ui.Accent, "Title");
+        top.AddChild(_title);
+        _tableButton = Ui.Button("TABLE", ToggleTable, "Show the map as a tilted table, or flat from above", "Pill");
+        _tableButton.ToggleMode = true;
+        _tableButton.SetPressedNoSignal(true);
+        top.AddChild(_tableButton);
+        top.AddChild(Ui.Button("CLOSE · M", () =>
+        {
+            Close();
+            Closed?.Invoke();
+        }, "Close the map (M)", "GhostButton"));
+        Label hint = Ui.Small("Click or drag: pick units  ·  right click: attack, escort or move  ·  Shift+right: patrol  ·  H hold  ·  Ctrl+1-9 save a group, 1-9 pick it  ·  F formation  ·  J jump in  ·  wheel zoom, W A S D or middle drag pan");
         AddChild(hint);
-        hint.Position = new Vector2(24, 48);
+        hint.SetAnchorsAndOffsetsPreset(LayoutPreset.CenterTop);
+        hint.GrowHorizontal = GrowDirection.Both;
+        hint.OffsetTop = 80;
+        hint.HorizontalAlignment = HorizontalAlignment.Center;
         hint.MouseFilter = MouseFilterEnum.Ignore;
 
-        // What's picked, on the left.
+        // What's picked and what your units report, on glass leaning in from the left.
+        _leftPanel = new TiltedPanel { Hinge = Hinge.Left, Angle = 22f, Name = "UnitsPanel" };
+        AddChild(_leftPanel);
+        _leftPanel.SetAnchorsPreset(LayoutPreset.LeftWide);
+        _leftPanel.OffsetLeft = 14;
+        _leftPanel.OffsetRight = 14 + 320;
+        _leftPanel.OffsetTop = 110;
+        _leftPanel.OffsetBottom = -110;
         var left = new PanelContainer { MouseFilter = MouseFilterEnum.Stop };
-        AddChild(left);
-        left.Position = new Vector2(16, 80);
-        left.CustomMinimumSize = new Vector2(300, 0);
+        _leftPanel.Content.AddChild(left);
+        left.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
         VBoxContainer lc = Ui.Column(6);
         left.AddChild(lc);
         _info = Ui.Heading("No units picked");
         lc.AddChild(_info);
         _list = Ui.Rich();
-        _list.CustomMinimumSize = new Vector2(280, 0);
+        _list.CustomMinimumSize = new Vector2(290, 0);
         lc.AddChild(_list);
-
-        // What your units report, bottom left.
-        var logBox = new PanelContainer { MouseFilter = MouseFilterEnum.Ignore };
-        AddChild(logBox);
-        logBox.SetAnchorsAndOffsetsPreset(LayoutPreset.BottomLeft);
-        logBox.GrowVertical = GrowDirection.Begin;
-        logBox.OffsetLeft = 16;
-        logBox.OffsetBottom = -120;
-        VBoxContainer lb = Ui.Column(4);
-        logBox.AddChild(lb);
-        lb.AddChild(Ui.Caption("Unit reports"));
+        lc.AddChild(new HSeparator());
+        lc.AddChild(Ui.Caption("Unit reports"));
         _log = Ui.Rich();
-        _log.CustomMinimumSize = new Vector2(380, 0);
+        _log.CustomMinimumSize = new Vector2(290, 0);
         _log.MouseFilter = MouseFilterEnum.Ignore;
-        lb.AddChild(_log);
+        lc.AddChild(_log);
 
-        // Orders along the bottom.
-        var bar = new PanelContainer { MouseFilter = MouseFilterEnum.Stop };
+        // Orders on a curved rail along the bottom.
+        var bar = new CurvedRail { Bottom = true, Bow = 16f, Band = 46f };
         AddChild(bar);
         bar.SetAnchorsAndOffsetsPreset(LayoutPreset.CenterBottom);
         bar.GrowHorizontal = GrowDirection.Both;
         bar.GrowVertical = GrowDirection.Begin;
-        bar.OffsetBottom = -14;
-        HBoxContainer row = Ui.Row(6);
-        bar.AddChild(row);
-        row.AddChild(Ui.Caption("Formation"));
+        bar.OffsetBottom = -4;
+        bar.AddChild(Ui.Caption("Formation"));
         foreach (Formation f in Enum.GetValues<Formation>())
         {
             Formation pick = f;
@@ -1000,10 +1058,10 @@ public partial class TacticalMap : Control
             b.ToggleMode = true;
             b.FocusMode = FocusModeEnum.None;
             _formationButtons.Add(b);
-            row.AddChild(b);
+            bar.AddChild(b);
         }
 
-        row.AddChild(Ui.Caption("  Fire"));
+        bar.AddChild(Ui.Caption("  Fire"));
         foreach ((Engagement roe, string label, string tip) in new[]
                  {
                      (Engagement.FireAtWill, "At will", "Shoot any enemy in reach"),
@@ -1015,25 +1073,30 @@ public partial class TacticalMap : Control
             Button b = Ui.Button(label, () => SetRoe(pick), tip, "Pill");
             b.FocusMode = FocusModeEnum.None;
             _roeButtons.Add(b);
-            row.AddChild(b);
+            bar.AddChild(b);
         }
 
-        Button hold = Ui.Button("Hold (H)", Hold, "Stop and hold where they are");
+        Button hold = Ui.Button("Hold · H", Hold, "Stop and hold where they are");
         hold.FocusMode = FocusModeEnum.None;
-        row.AddChild(hold);
-        Button jump = Ui.Button("Jump in (J)", Jump, "Take over the first unit picked", "PrimaryButton");
+        bar.AddChild(hold);
+        Button jump = Ui.Button("Jump in · J", Jump, "Take over the first unit picked", "PrimaryButton");
         jump.FocusMode = FocusModeEnum.None;
-        row.AddChild(jump);
+        bar.AddChild(jump);
         SetFormation(_formation);
 
-        // Deploy, on the right.
+        // Deploy (or, in the world, places to go), on glass leaning in from the right.
+        _rightPanel = new TiltedPanel { Hinge = Hinge.Right, Angle = 22f, Name = "DeployPanel" };
+        AddChild(_rightPanel);
+        _rightPanel.SetAnchorsPreset(LayoutPreset.RightWide);
+        _rightPanel.OffsetLeft = -14 - 280;
+        _rightPanel.OffsetRight = -14;
+        _rightPanel.OffsetTop = 110;
+        _rightPanel.OffsetBottom = -110;
+        _rightPanel.GrowHorizontal = GrowDirection.Begin;
         var right = new PanelContainer { MouseFilter = MouseFilterEnum.Stop };
         _deployPanel = right;
-        AddChild(right);
-        right.SetAnchorsAndOffsetsPreset(LayoutPreset.TopRight);
-        right.GrowHorizontal = GrowDirection.Begin;
-        right.OffsetRight = -16;
-        right.OffsetTop = 80;
+        _rightPanel.Content.AddChild(right);
+        right.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
         VBoxContainer rc = Ui.Column(6);
         right.AddChild(rc);
         rc.AddChild(Ui.Heading("Deploy"));
@@ -1045,11 +1108,158 @@ public partial class TacticalMap : Control
         }, "Whose side the units you call in fight on");
         _sideButton.FocusMode = FocusModeEnum.None;
         rc.AddChild(_sideButton);
-        var scroll = new ScrollContainer { CustomMinimumSize = new Vector2(240, 360), HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled };
+        var scroll = new ScrollContainer { SizeFlagsVertical = SizeFlags.ExpandFill, HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled };
         rc.AddChild(scroll);
         _deployList = Ui.Column(4);
         _deployList.SizeFlagsHorizontal = SizeFlags.ExpandFill;
         scroll.AddChild(_deployList);
+    }
+
+    private void Redraw()
+    {
+        _canvas?.QueueRedraw();
+        _pins?.QueueRedraw();
+    }
+
+    /// <summary>Tilts the map into a table, or lays it flat (seen straight from above).</summary>
+    private void ToggleTable()
+    {
+        _tableOn = !_tableOn;
+        _table.Angle = _tableOn ? TableAngle : 0f;
+        _tableButton.SetPressedNoSignal(_tableOn);
+        _tableButton.Text = _tableOn ? "TABLE" : "FLAT";
+        Redraw();
+    }
+
+    // ------------------------------------------------------------------ the pins: units standing up off the table
+
+    /// <summary>
+    /// On the table, each unit stands up off the map on a stalk, its icon, name, health and what it's doing on top,
+    /// so a crowded map stays easy to read and click. Aircraft stand on taller stalks, by their height.
+    /// </summary>
+    private void DrawPins(Control layer)
+    {
+        _pinHits.Clear();
+        if (!_tableOn || _canvas == null) return;
+        _ci = layer;
+        VehicleBody me = PlayerVehicle?.Invoke();
+        var pins = new List<(VehicleBody v, Vector3 pos, Color c, float alpha)>();
+        foreach (VehicleBody v in Vehicles())
+            if (v.Faction == 0) pins.Add((v, v.GlobalPosition, v == me ? Mine : InRange(v) ? Friendly : Friendly.Darkened(0.45f), 1f));
+        foreach ((VehicleBody v, (Vector3 pos, double seen, bool now)) in _spotted)
+            if (Alive(v)) pins.Add((v, now ? v.GlobalPosition : pos, Enemy, now ? 1f : 0.4f));
+
+        Vector2 tableAt = _table.Position, size = MapSize;
+        var placed = new List<(VehicleBody v, Vector2 foot, Vector2 head, float k, Color c, float alpha, Vector2 flat)>();
+        foreach ((VehicleBody v, Vector3 pos, Color c, float alpha) in pins)
+        {
+            Vector2 flat = ToScreen(pos);
+            if (flat.X < 0 || flat.Y < 0 || flat.X > size.X || flat.Y > size.Y) continue;
+            Vector2 foot = tableAt + _table.FlatToLocal(flat);
+            float k = Mathf.Clamp(_table.ScaleAt(flat), 0.55f, 1.2f);
+            float air = v.IsAir && !v.OnGround ? Mathf.Clamp(v.GlobalPosition.Y * 0.12f, 30f, 200f) : 0f;
+            float stalk = (26f + air) * k;
+            placed.Add((v, foot, foot - new Vector2(0, stalk), k, c, alpha, flat));
+        }
+
+        // Far ones first, so nearer pins are drawn over them.
+        placed.Sort((x, y) => x.foot.Y.CompareTo(y.foot.Y));
+        Font font = Ui.HeadingBoldFont;
+        bool crowded = placed.Count > 30 && _zoom < 1f;
+        foreach ((VehicleBody v, Vector2 foot, Vector2 head, float k, Color c, float alpha, Vector2 flat) in placed)
+        {
+            bool picked = _selected.Contains(v);
+            _ci.DrawLine(foot, head, new Color(c, 0.75f * alpha), 2f * k, true);
+            var box = new Rect2(head - new Vector2(15f, 22f) * k, new Vector2(30f, 20f) * k);
+            _ci.DrawRect(box, new Color(0.02f, 0.05f, 0.07f, 0.88f * alpha));
+            _ci.DrawRect(box, picked ? Colors.White : new Color(c, alpha), false, (picked ? 2.2f : 1.6f) * k);
+            Vector2 m = box.GetCenter();
+            Color g = new(c, alpha);
+            // What kind of unit it is, inside the box.
+            if (v.IsAir) _ci.DrawColoredPolygon(new[] { m + new Vector2(0, -6) * k, m + new Vector2(8, 6) * k, m + new Vector2(-8, 6) * k }, g);
+            else if (v.IsNaval) _ci.DrawColoredPolygon(new[] { m + new Vector2(-10, -3) * k, m + new Vector2(10, -3) * k, m + new Vector2(6, 5) * k, m + new Vector2(-6, 5) * k }, g);
+            else if (v.IsBuilding) _ci.DrawRect(new Rect2(m - new Vector2(5, 5) * k, new Vector2(10, 10) * k), g, false, 1.6f * k);
+            else _ci.DrawRect(new Rect2(m - new Vector2(9, 4.5f) * k, new Vector2(18, 9) * k), g, false, 1.6f * k);
+            // Health under it, what it's doing beside it, its name above.
+            float hp = v.Health;
+            var hb = new Rect2(box.Position.X, box.End.Y + 2f * k, box.Size.X, 3f * k);
+            _ci.DrawRect(hb, new Color(0, 0, 0, 0.6f * alpha));
+            _ci.DrawRect(new Rect2(hb.Position, new Vector2(hb.Size.X * hp, hb.Size.Y)), new Color(Ui.Grade(hp, 0.35f, 0.7f), alpha));
+            if (v.Faction == 0) StatusIcon(v, new Vector2(box.End.X + 8f * k, box.Position.Y + 4f * k), alpha);
+            if (picked || !crowded)
+            {
+                string name = (v.Faction == 0 ? v.Callsign : v.ShortName).ToUpperInvariant();
+                int px = Mathf.Max(9, (int)(11f * k));
+                Vector2 tp = new(m.X - 60f, box.Position.Y - 5f * k);
+                _ci.DrawStringOutline(font, tp, name, HorizontalAlignment.Center, 120, px, 4, new Color(0, 0, 0, 0.8f * alpha));
+                _ci.DrawString(font, tp, name, HorizontalAlignment.Center, 120, px, new Color(picked ? Colors.White : new Color(0.9f, 0.96f, 1f), alpha));
+            }
+
+            _pinHits.Add((box.Grow(4f), v, flat));
+        }
+    }
+
+    /// <summary>The pin under a point on screen (the nearest one drawn on top), if any.</summary>
+    private int PinAt(Vector2 p)
+    {
+        for (int i = _pinHits.Count - 1; i >= 0; i--)
+            if (_pinHits[i].rect.HasPoint(p)) return i;
+        return -1;
+    }
+
+    /// <summary>A click on a pin: pick it (Shift adds), or give the picked units an order on it (right click).</summary>
+    private void PinInput(InputEvent e)
+    {
+        if (e is not InputEventMouseButton { Pressed: true } mb) return;
+        int i = PinAt(mb.Position);
+        if (i < 0) return;
+        (Rect2 _, VehicleBody v, Vector2 flat) = _pinHits[i];
+        switch (mb.ButtonIndex)
+        {
+            case MouseButton.Left:
+                if (!mb.ShiftPressed) _selected.Clear();
+                if (Commandable(v))
+                {
+                    if (mb.ShiftPressed && _selected.Contains(v)) _selected.Remove(v);
+                    else _selected.Add(v);
+                }
+
+                UpdatePanels();
+                break;
+            case MouseButton.Right:
+                OrderAt(flat, mb.ShiftPressed);
+                break;
+            case MouseButton.WheelUp:
+                ZoomAt(flat, 1.15f);
+                break;
+            case MouseButton.WheelDown:
+                ZoomAt(flat, 1f / 1.15f);
+                break;
+        }
+
+        Redraw();
+        _pins.AcceptEvent();
+    }
+
+    /// <summary>The flat map: draws it and takes its mouse input, for the map.</summary>
+    private partial class MapCanvas : Control
+    {
+        public TacticalMap Map;
+        public override void _Draw() => Map.DrawMap();
+        public override void _GuiInput(InputEvent e) => Map.MapInput(e);
+        public override void _Notification(int what)
+        {
+            if (what == NotificationMouseExit) Map._lastMouse = null;
+        }
+    }
+
+    /// <summary>The units standing up off the table: drawn here, over it, and clicked here.</summary>
+    private partial class PinLayer : Control
+    {
+        public TacticalMap Map;
+        public override void _Draw() => Map.DrawPins(this);
+        public override bool _HasPoint(Vector2 point) => Map.PinAt(point) >= 0;
+        public override void _GuiInput(InputEvent e) => Map.PinInput(e);
     }
 
     /// <summary>The designs that can be called in: the examples, then your own saved designs.</summary>

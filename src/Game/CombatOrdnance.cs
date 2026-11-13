@@ -90,6 +90,15 @@ public partial class Combat
         if (vertical) Effects.Backblast(this, pos, -dir);
     }
 
+    /// <summary>Where each live missile chasing <paramref name="target"/> is now: for the warning on the overlay.</summary>
+    public void IncomingMissiles(VehicleBody target, List<Vector3> into)
+    {
+        into.Clear();
+        if (target == null) return;
+        foreach (MissileRun m in _missiles)
+            if (!m.Dead && m.Target == target) into.Add(m.Pos);
+    }
+
     private void OrdnanceTick(float dt)
     {
         PhysicsDirectSpaceState3D space = GetWorld3D().DirectSpaceState;

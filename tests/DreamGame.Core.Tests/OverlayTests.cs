@@ -12,8 +12,8 @@ public class OverlayTests
     [Fact]
     public void EachCockpitBringsItsOwnStyle()
     {
-        Assert.Equal(OverlayStyle.Glass, Overlays.Chosen(ExampleDesigns.Halcyon()));
-        Assert.Equal(OverlayStyle.Glass, Overlays.Chosen(ExampleDesigns.Nightjar()));
+        Assert.Equal(OverlayStyle.Ring, Overlays.Chosen(ExampleDesigns.Halcyon()));
+        Assert.Equal(OverlayStyle.Ring, Overlays.Chosen(ExampleDesigns.Nightjar()));
         Assert.Equal(OverlayStyle.FighterHud, Overlays.Chosen(ExampleDesigns.Starling()));
         Assert.Equal(OverlayStyle.FighterHud, Overlays.Chosen(ExampleDesigns.Seraph()));
         Assert.Equal(OverlayStyle.Gauges, Overlays.Chosen(ExampleDesigns.Shrike()));
@@ -23,11 +23,14 @@ public class OverlayTests
     }
 
     [Fact]
-    public void ADesignsOwnPickWinsAndStylesNotBuiltYetShowAsGlass()
+    public void ADesignsOwnPickWinsAndStylesNotBuiltYetShowAsTheRing()
     {
         Blueprint bp = ExampleDesigns.Starling();
         Assert.Null(bp.Overlay);
-        Assert.Equal(OverlayStyle.Glass, Overlays.Shown(bp)); // its Fighter HUD isn't built yet
+        Assert.Equal(OverlayStyle.Ring, Overlays.Shown(bp)); // its Fighter HUD isn't built yet
+        Assert.Equal(OverlayStyle.Ring, Overlays.Shown(ExampleDesigns.Warden())); // nor is Tactical
+        bp.Overlay = Overlays.Id(OverlayStyle.Glass);
+        Assert.Equal(OverlayStyle.Glass, Overlays.Shown(bp)); // the old panels can still be picked
         bp.Overlay = Overlays.Id(OverlayStyle.Classic);
         Assert.Equal(OverlayStyle.Classic, Overlays.Chosen(bp));
         Assert.Equal(OverlayStyle.Classic, Overlays.Shown(bp));

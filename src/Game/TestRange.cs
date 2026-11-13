@@ -99,6 +99,7 @@ public partial class TestRange : Node3D
 
     // The Glass overlay and the vehicle options panel (O).
     private HudGlass _glass;
+    private HudRing _ring;
     private HudOptions _options;
     private bool _optionsOpen;
     private RichTextLabel _status, _guns, _feed, _crew;
@@ -1423,6 +1424,9 @@ public partial class TestRange : Node3D
         _glass = new HudGlass { Visible = false };
         root.AddChild(_glass);
         _glass.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
+        _ring = new HudRing { Visible = false };
+        root.AddChild(_ring);
+        _ring.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
         _options = new HudOptions(new OptionActions
         {
             Lights = () => { if (Mounted && _mount.HasLights) _mount.ToggleLights(); },
@@ -1595,30 +1599,30 @@ public partial class TestRange : Node3D
         RichTextLabel text = Ui.Rich();
         text.CustomMinimumSize = new Vector2(620, 0);
         text.Text =
-            "[b][color=#ffb845]In a vehicle[/color][/b]\n" +
+            "[b][color=#7fe3ff]In a vehicle[/color][/b]\n" +
             "W / S throttle · A / D steer (tanks turn on the spot) · Space brake · R flip upright\n" +
             "Mouse aims: turrets turn and guns elevate on their own. The circles show where each gun will land (green = loaded).\n" +
             "Left click fire · Right click zoom (the commander seat zooms much further) · Q switch AP / HE\n" +
             "1 / 2 / 3 switch to the driver, gunner or commander seat · G gunner follows your aim / picks its own targets\n" +
             "E get out\n\n" +
-            "[b][color=#ffb845]At sea[/color][/b]\n" +
+            "[b][color=#7fe3ff]At sea[/color][/b]\n" +
             "Ships and submarines start off the east coast. W / S move the engine telegraph a notch (it holds the speed, so you can leave the wheel for a gun) · A / D rudder · Space all stop\n" +
             "Submarines: hold C to order the boat deeper, hold Space to come up. The crew floods and blows the ballast tanks to hold the depth you order.\n" +
             "F fires a torpedo from any seat. It turns onto the bearing you're aiming at, then runs straight just under the surface. Torpedoes sink ships by flooding them. X fires missiles, if the ship carries any.\n" +
             "Holes below the waterline flood compartments: get out, weld them shut (3), and the bilge pumps clear the water. Stop inside the buoy ring to rearm and refuel.\n" +
             "In the water you swim: Space up, C down, E to climb into a boat you're looking at.\n\n" +
-            "[b][color=#ffb845]In the air[/color][/b]\n" +
+            "[b][color=#7fe3ff]In the air[/color][/b]\n" +
             "Planes start on the airstrip in the western hills: W / S set the throttle, and the plane flies toward wherever you point the mouse (A / D roll, Space brakes on the ground). Open the throttle, let it run, and climb once you're past stall speed. Throttle all the way open lights a jet's afterburner; N gives its jets emergency power, 15% more push until they overheat (watch the engine heat).\n" +
             "Helicopters and drones start on the helipad: W A S D move, Space / C climb and descend, and they turn to face where you look. Let go and they stop and hover. V switches a VTOL between hovering and wing-borne flight.\n" +
             "Airships: W / S telegraph, A / D turn, Space / C order it higher or lower. B drops a bomb where the diamond is. F (or X) fires a missile: optical ones fly to your crosshair, radar ones chase the aircraft in the red box.\n" +
             "Q cycles AP, HE and FLAK: flak bursts near aircraft, or at the range you're aiming at. Drones are flown by remote: you stay standing where you were.\n\n" +
-            "[b][color=#ffb845]On foot[/color][/b]\n" +
+            "[b][color=#7fe3ff]On foot[/color][/b]\n" +
             "W A S D move · Shift sprint · Space jump · Mouse look · Right click aim\n" +
             "1 rifle · 2 AT rocket · 3 welding torch · 4 shovel · Left click fire · R reload\n" +
             "The torch repairs damaged blocks and rebuilds destroyed ones (blue outlines): aim at them and hold the trigger.\n" +
             "The shovel digs where you look (left click; you carry the earth, and once full it's thrown ahead as a parapet) and piles it (right click). Blasts dig craters.\n" +
             "E get into the vehicle you're looking at. The supply pad heals you and refills ammo and fuel.\n\n" +
-            "[b][color=#ffb845]Range[/color][/b]\n" +
+            "[b][color=#7fe3ff]Range[/color][/b]\n" +
             "L live fire: the parked vehicles' crews shoot back · T reset targets · Backspace respawn · Tab builder · Esc free the mouse\n" +
             "M tactical map (fleet command), from a vehicle with a command console or at the command post by the depot: pick units, right click to attack, escort or move them in formation; J jumps into one; Deploy calls more in\n" +
             "F8 battle drill: two armies (about 100 vehicles; again for about 200, again to clear) fight across the range · F3 performance readout · F4 full-resolution 3D on or off\n" +
@@ -1698,8 +1702,10 @@ public partial class TestRange : Node3D
 
         bool mounted = Mounted;
         bool glass = mounted && _mount.OverlayShown == OverlayStyle.Glass;
-        _vehicleHud.Visible = mounted && !glass;
+        bool ring = mounted && _mount.OverlayShown == OverlayStyle.Ring;
+        _vehicleHud.Visible = mounted && !glass && !ring;
         _glass.Visible = glass;
+        _ring.Visible = ring;
         if (_optionsOpen && !mounted) SetOptions(false);
         _options.Visible = _optionsOpen;
         if (_optionsOpen) _options.Refresh(_mount, _cam, dt);
@@ -1711,8 +1717,8 @@ public partial class TestRange : Node3D
             if (!cam.IsPositionBehind(p)) _reticle.Marks.Add((cam.UnprojectPosition(p), ready));
         _reticle.BombMark = mounted && _bombImpact is Vector3 bomb && !cam.IsPositionBehind(bomb) ? cam.UnprojectPosition(bomb) : null;
         Vector3? lockAt = mounted && _lock != null && IsInstanceValid(_lock) ? _lock.GlobalTransform * _lock.CenterOfMass : null;
-        // (The Glass overlay draws its own brackets round the lock.)
-        _reticle.LockMark = lockAt is Vector3 la && !cam.IsPositionBehind(la) && !(mounted && _mount.OverlayShown == OverlayStyle.Glass) ? cam.UnprojectPosition(la) : null;
+        // (The Glass and Ring overlays draw their own brackets round the lock.)
+        _reticle.LockMark = lockAt is Vector3 la && !cam.IsPositionBehind(la) && !glass && !ring ? cam.UnprojectPosition(la) : null;
         _reticle.Leads.Clear();
         if (mounted) AddLeads(_mount, cam);
         _reticle.QueueRedraw();
@@ -1725,6 +1731,8 @@ public partial class TestRange : Node3D
 
         if (glass)
             _glass.Refresh(new GlassFeed { Vehicle = _mount, Camera = _cam, Lock = _lock != null && IsInstanceValid(_lock) ? _lock : null, Alerts = VehicleAlerts(_mount) }, dt);
+        else if (ring)
+            _ring.Refresh(new RingFeed { Vehicle = _mount, Camera = _cam, Lock = _lock != null && IsInstanceValid(_lock) ? _lock : null, Alerts = VehicleAlerts(_mount), Combat = _combat }, dt);
         else if (mounted) UpdateVehicleHud();
         else UpdateFootHud();
     }
@@ -1903,7 +1911,7 @@ public partial class TestRange : Node3D
 
         var gs = new StringBuilder();
         bool ap = v.SelectedAmmo == AmmoType.AP;
-        string Pick(AmmoType t, string name) => v.SelectedAmmo == t ? $"[b][color=#ffb845][{name}][/color][/b]" : name;
+        string Pick(AmmoType t, string name) => v.SelectedAmmo == t ? $"[b][color=#7fe3ff][{name}][/color][/b]" : name;
         gs.Append($"Ammo: {Pick(AmmoType.AP, "AP")}  {Pick(AmmoType.HE, "HE")}{(v.HasFlak ? "  " + Pick(AmmoType.Flak, "FLAK") : "")}   [color={Ui.Hex(Ui.Dim)}](Q switches)[/color]");
         if (v.Guns.Count == 0) gs.Append($"\n[color={Ui.Hex(Ui.Dim)}]No guns on this design.[/color]");
         _guns.Text = gs.ToString();
@@ -1988,7 +1996,7 @@ public partial class TestRange : Node3D
                 if (v.CanSwitchVtol) sb.Append($"[color={dim}]V switches back to hovering[/color]\n");
                 break;
             case MobilityMode.Airship:
-                sb.Append($"[b][color=#ffb845]{v.TelegraphName}[/color][/b]   holding {v.HoldAltitude:0} m   gas {v.LiftOutput * 100f:0}%\n");
+                sb.Append($"[b][color=#7fe3ff]{v.TelegraphName}[/color][/b]   holding {v.HoldAltitude:0} m   gas {v.LiftOutput * 100f:0}%\n");
                 sb.Append($"[color={dim}]W / S telegraph · A / D turn · Space / C higher / lower[/color]\n");
                 break;
             default:
@@ -2014,7 +2022,7 @@ public partial class TestRange : Node3D
         string dim = Ui.Hex(Ui.Dim);
         float kn = Mathf.Abs(v.SpeedKmh) / 1.852f;
         sb.Append($"[font_size=22][b]{kn:0}[/b][/font_size] kn [color={dim}]({Mathf.Abs(v.SpeedKmh):0} km/h)[/color]   ");
-        sb.Append($"[b][color=#ffb845]{v.TelegraphName}[/color][/b]\n");
+        sb.Append($"[b][color=#7fe3ff]{v.TelegraphName}[/color][/b]\n");
         float deg = v.RudderAngle * 35f;
         string rudder = Mathf.Abs(deg) < 2f ? "amidships" : $"{Mathf.Abs(deg):0}° {(deg < 0 ? "port" : "starboard")}";
         sb.Append($"Rudder {rudder}   ");

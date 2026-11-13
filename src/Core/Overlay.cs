@@ -11,6 +11,9 @@ public enum OverlayStyle
     /// <summary>Whatever its cockpit comes with.</summary>
     Auto,
 
+    /// <summary>Nothing boxed in: speed, height and heading on one ring round the aim point, weapons in a line under it.</summary>
+    Ring,
+
     /// <summary>Smoked-glass panels floating beside the vehicle: flight or drive data, weapons, systems, damage, radar.</summary>
     Glass,
 
@@ -30,18 +33,19 @@ public enum OverlayStyle
 /// <summary>Which overlay a vehicle shows, and what each style is.</summary>
 public static class Overlays
 {
-    /// <summary>The styles the game draws so far; any other shows as <see cref="OverlayStyle.Glass"/> until it's built.</summary>
-    public static readonly OverlayStyle[] Built = { OverlayStyle.Glass, OverlayStyle.Classic };
+    /// <summary>The styles the game draws so far; any other shows as <see cref="OverlayStyle.Ring"/> until it's built.</summary>
+    public static readonly OverlayStyle[] Built = { OverlayStyle.Ring, OverlayStyle.Glass, OverlayStyle.Classic };
 
     /// <summary>Every style a player can pick, in the order the pickers list them.</summary>
     public static readonly OverlayStyle[] Choices =
-        { OverlayStyle.Auto, OverlayStyle.Glass, OverlayStyle.FighterHud, OverlayStyle.Gauges, OverlayStyle.Tactical, OverlayStyle.Classic };
+        { OverlayStyle.Auto, OverlayStyle.Ring, OverlayStyle.Glass, OverlayStyle.FighterHud, OverlayStyle.Gauges, OverlayStyle.Tactical, OverlayStyle.Classic };
 
     public static bool IsBuilt(OverlayStyle s) => Array.IndexOf(Built, s) >= 0;
 
     public static string Name(OverlayStyle s) => s switch
     {
         OverlayStyle.Auto => "From the cockpit",
+        OverlayStyle.Ring => "Ring",
         OverlayStyle.Glass => "Glass",
         OverlayStyle.FighterHud => "Fighter HUD",
         OverlayStyle.Gauges => "Gauges",
@@ -51,11 +55,12 @@ public static class Overlays
 
     public static string Describe(OverlayStyle s) => s switch
     {
-        OverlayStyle.Auto => "Whatever the cockpit comes with: the Stealth Canopy brings Glass, the Bubble and Tandem the Fighter HUD, the framed canopies Gauges, and seats in land vehicles and ships Tactical.",
+        OverlayStyle.Auto => "Whatever the cockpit comes with: the Stealth Canopy brings the Ring, the Bubble and Tandem the Fighter HUD, the framed canopies Gauges, and seats in land vehicles and ships Tactical. Styles not built yet show as the Ring.",
+        OverlayStyle.Ring => "Nothing boxed in: speed, height and heading on one ring round the aim point, weapons in a line under it, contacts round its edge. A missile coming at you lights up the ring on its side; damage shows for a moment after a hit.",
         OverlayStyle.Glass => "Smoked-glass panels floating beside the vehicle: speed and heading, weapons, systems, throttle and fuel, damage, radar, and a card on the target you're locked on.",
-        OverlayStyle.FighterHud => "Green symbology over the view: heading, speed and height tapes, a pitch ladder and the lock box. Not built yet: shows as Glass for now.",
-        OverlayStyle.Gauges => "A reflector gunsight and a period instrument panel. Not built yet: shows as Glass for now.",
-        OverlayStyle.Tactical => "A compass with hull and turret, damage diagram, ammo cards and crew. Not built yet: shows as Glass for now.",
+        OverlayStyle.FighterHud => "Green symbology over the view: heading, speed and height tapes, a pitch ladder and the lock box. Not built yet: shows as the Ring for now.",
+        OverlayStyle.Gauges => "A reflector gunsight and a period instrument panel. Not built yet: shows as the Ring for now.",
+        OverlayStyle.Tactical => "A compass with hull and turret, damage diagram, ammo cards and crew. Not built yet: shows as the Ring for now.",
         _ => "The original text panels in the corners, with every key spelled out.",
     };
 
@@ -73,7 +78,7 @@ public static class Overlays
     public static OverlayStyle CockpitDefault(IEnumerable<string> blockIds)
     {
         var ids = new HashSet<string>(blockIds);
-        if (ids.Contains("canopy_stealth")) return OverlayStyle.Glass;
+        if (ids.Contains("canopy_stealth")) return OverlayStyle.Ring;
         if (ids.Contains("canopy_bubble") || ids.Contains("canopy_tandem")) return OverlayStyle.FighterHud;
         if (ids.Contains("canopy_framed") || ids.Contains("canopy_highback")) return OverlayStyle.Gauges;
         return OverlayStyle.Tactical;
@@ -86,10 +91,10 @@ public static class Overlays
         return pick != OverlayStyle.Auto ? pick : CockpitDefault(bp?.Blocks.Select(b => b.Id) ?? Enumerable.Empty<string>());
     }
 
-    /// <summary>What actually shows: <see cref="Chosen"/>, or Glass while that style isn't built yet.</summary>
+    /// <summary>What actually shows: <see cref="Chosen"/>, or the Ring while that style isn't built yet.</summary>
     public static OverlayStyle Shown(Blueprint bp) => Shown(Chosen(bp));
 
-    public static OverlayStyle Shown(OverlayStyle s) => IsBuilt(s) ? s : OverlayStyle.Glass;
+    public static OverlayStyle Shown(OverlayStyle s) => IsBuilt(s) ? s : OverlayStyle.Ring;
 }
 
 /// <summary>The instruments' arithmetic: compass headings, radar plots, fuel endurance and the damage map.</summary>

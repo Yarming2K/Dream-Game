@@ -9,24 +9,25 @@ namespace DreamGame.Game;
 /// </summary>
 public static class Ui
 {
-    public static readonly Color Text = new(0.9f, 0.91f, 0.89f);
-    public static readonly Color Dim = new(0.6f, 0.63f, 0.62f);
-    public static readonly Color Faint = new(0.42f, 0.45f, 0.45f);
-    public static readonly Color Accent = new(1f, 0.72f, 0.27f);
-    public static readonly Color AccentBright = new(1f, 0.82f, 0.45f);
-    public static readonly Color AccentDark = new(0.52f, 0.36f, 0.12f);
-    public static readonly Color Good = new(0.45f, 0.92f, 0.52f);
-    public static readonly Color Bad = new(1f, 0.42f, 0.38f);
-    public static readonly Color Warn = new(1f, 0.8f, 0.4f);
-    public static readonly Color Info = new(0.55f, 0.75f, 1f);
-    public static readonly Color Ink = new(0.07f, 0.07f, 0.07f);
+    // Tactical Glass: smoked dark glass, thin cyan lines, near-white text; amber is kept for warnings.
+    public static readonly Color Text = new(0.91f, 0.96f, 0.98f);
+    public static readonly Color Dim = new(0.6f, 0.76f, 0.82f);
+    public static readonly Color Faint = new(0.4f, 0.5f, 0.55f);
+    public static readonly Color Accent = new(0.5f, 0.89f, 1f);
+    public static readonly Color AccentBright = new(0.78f, 0.96f, 1f);
+    public static readonly Color AccentDark = new(0.16f, 0.4f, 0.48f);
+    public static readonly Color Good = new(0.43f, 1f, 0.66f);
+    public static readonly Color Bad = new(1f, 0.36f, 0.31f);
+    public static readonly Color Warn = new(1f, 0.71f, 0.28f);
+    public static readonly Color Info = new(0.5f, 0.89f, 1f);
+    public static readonly Color Ink = new(0.02f, 0.07f, 0.1f);
 
-    private static readonly Color PanelBg = new(0.065f, 0.072f, 0.08f, 0.93f);
-    private static readonly Color CardBg = new(0.11f, 0.12f, 0.13f, 1f);
-    private static readonly Color FieldBg = new(0.045f, 0.05f, 0.055f, 1f);
-    private static readonly Color ButtonBg = new(0.135f, 0.148f, 0.16f, 1f);
-    private static readonly Color ButtonHover = new(0.18f, 0.197f, 0.21f, 1f);
-    private static readonly Color Line = new(1f, 1f, 1f, 0.07f);
+    private static readonly Color PanelBg = new(0.03f, 0.055f, 0.08f, 0.72f);
+    private static readonly Color CardBg = new(0.5f, 0.89f, 1f, 0.05f);
+    private static readonly Color FieldBg = new(0.02f, 0.04f, 0.06f, 0.85f);
+    private static readonly Color ButtonBg = new(0.5f, 0.89f, 1f, 0.06f);
+    private static readonly Color ButtonHover = new(0.5f, 0.89f, 1f, 0.14f);
+    private static readonly Color Line = new(0.5f, 0.89f, 1f, 0.26f);
 
     private static Theme _theme;
     private static Font _body, _bodyBold, _heading, _headingBold, _caption;
@@ -61,7 +62,10 @@ public static class Ui
         float marginY = -1)
     {
         var sb = new StyleBoxFlat { BgColor = bg, AntiAliasing = true };
-        sb.SetCornerRadiusAll(radius);
+        // Glass corners: the top-right and bottom-left cut off at 45°, the other two square.
+        sb.CornerDetail = 1;
+        sb.CornerRadiusTopLeft = sb.CornerRadiusBottomRight = 0;
+        sb.CornerRadiusTopRight = sb.CornerRadiusBottomLeft = radius > 10 ? radius : radius * 2;
         sb.ContentMarginLeft = sb.ContentMarginRight = margin;
         sb.ContentMarginTop = sb.ContentMarginBottom = marginY < 0 ? margin : marginY;
         if (border.HasValue)
@@ -94,13 +98,13 @@ public static class Ui
     {
         var t = new Theme { DefaultFont = BodyFont, DefaultFontSize = 15 };
 
-        t.SetStylebox("panel", "PanelContainer", Box(PanelBg, 8, 12, Line));
+        t.SetStylebox("panel", "PanelContainer", Box(PanelBg, 7, 12, Line));
         Variation(t, "Card", "PanelContainer");
         t.SetStylebox("panel", "Card", Box(CardBg, 6, 10));
         Variation(t, "Chip", "PanelContainer");
         t.SetStylebox("panel", "Chip", Box(new Color(1, 1, 1, 0.06f), 4, 7, null, 0, 2));
         Variation(t, "TopBar", "PanelContainer");
-        StyleBoxFlat top = Box(new Color(0.05f, 0.056f, 0.062f, 0.96f), 0, 12, null, 0, 8);
+        StyleBoxFlat top = Box(new Color(0.03f, 0.055f, 0.08f, 0.82f), 0, 12, null, 0, 8);
         top.BorderColor = new Color(Accent, 0.35f);
         top.BorderWidthBottom = 1;
         t.SetStylebox("panel", "TopBar", top);
@@ -109,9 +113,9 @@ public static class Ui
 
         // Buttons
         ButtonStyle(t, "Button",
-            Box(ButtonBg, 5, 12, Line, 1, 6), Box(ButtonHover, 5, 12, new Color(Accent, 0.45f), 1, 6),
-            Box(new Color(0.24f, 0.19f, 0.1f), 5, 12, Accent, 1, 6), Text, Colors.White, AccentBright);
-        t.SetFont("font", "Button", BodyBoldFont);
+            Box(ButtonBg, 4, 12, Line, 1, 6), Box(ButtonHover, 4, 12, new Color(Accent, 0.6f), 1, 6),
+            Box(new Color(Accent, 0.2f), 4, 12, Accent, 1, 6), Text, Colors.White, AccentBright);
+        t.SetFont("font", "Button", HeadingFont);
 
         Variation(t, "PrimaryButton", "Button");
         ButtonStyle(t, "PrimaryButton", Box(Accent, 5, 18, null, 0, 7), Box(AccentBright, 5, 18, null, 0, 7),
@@ -120,18 +124,19 @@ public static class Ui
         t.SetFontSize("font_size", "PrimaryButton", 16);
 
         Variation(t, "Pill", "Button");
-        ButtonStyle(t, "Pill", Box(new Color(1, 1, 1, 0.05f), 14, 12, null, 0, 4), Box(new Color(1, 1, 1, 0.1f), 14, 12, null, 0, 4),
-            Box(Accent, 14, 12, null, 0, 4), Dim, Text, Ink);
+        ButtonStyle(t, "Pill", Box(new Color(Accent, 0.04f), 4, 10, Line, 1, 4), Box(new Color(Accent, 0.12f), 4, 10, new Color(Accent, 0.6f), 1, 4),
+            Box(new Color(Accent, 0.2f), 4, 10, Accent, 1, 4), Dim, Text, AccentBright);
         t.SetFont("font", "Pill", HeadingFont);
         t.SetFontSize("font_size", "Pill", 13);
 
         Variation(t, "Tile", "Button");
-        ButtonStyle(t, "Tile", Box(CardBg, 6, 4, new Color(1, 1, 1, 0.04f)), Box(new Color(0.15f, 0.165f, 0.18f), 6, 4, new Color(Accent, 0.4f)),
-            Box(new Color(0.2f, 0.17f, 0.1f), 6, 4, Accent, 2), Text, Colors.White, AccentBright);
+        ButtonStyle(t, "Tile", Box(CardBg, 4, 4, Line), Box(new Color(Accent, 0.12f), 4, 4, new Color(Accent, 0.6f)),
+            Box(new Color(Accent, 0.16f), 4, 4, Accent, 2), Text, Colors.White, AccentBright);
 
         Variation(t, "GhostButton", "Button");
-        ButtonStyle(t, "GhostButton", Box(new Color(0, 0, 0, 0), 5, 10, null, 0, 6), Box(new Color(1, 1, 1, 0.07f), 5, 10, null, 0, 6),
-            Box(new Color(1, 1, 1, 0.12f), 5, 10, null, 0, 6), Dim, Text, AccentBright);
+        ButtonStyle(t, "GhostButton", Box(new Color(0, 0, 0, 0), 4, 10, null, 0, 6), Box(new Color(Accent, 0.1f), 4, 10, null, 0, 6),
+            Box(new Color(Accent, 0.18f), 4, 10, null, 0, 6), Dim, Text, AccentBright);
+        t.SetFont("font", "GhostButton", HeadingFont);
 
         // Fields, menus, tooltips, scrollbars
         t.SetStylebox("normal", "LineEdit", Box(FieldBg, 5, 10, Line, 1, 6));
