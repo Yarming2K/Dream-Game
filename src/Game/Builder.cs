@@ -81,6 +81,14 @@ public partial class Builder : Node3D
     private string _overlay;
     private OptionButton _overlayPicker;
     private VehicleAnalysis _analysis;
+
+    // Tutorials: the cards, how far the camera has been moved by hand (for the boot camp's first step), and glowing
+    // boxes where the boot camp's parts go.
+    private TutorialOverlay _tutorial;
+    private float _camTravel;
+    private Node3D _spotMarks;
+    private Label3D _spotLabel;
+    private ShaderMaterial _spotMat;
     private bool _dirty = true;
     private bool _paletteDirty;
 
@@ -200,6 +208,79 @@ public partial class Builder : Node3D
         LoadBlueprint(ExampleDesigns.Warden(), recordUndo: false, animate: false);
         Toast("Loaded the example Warden tank. Press Tab to drive it, or start changing it.");
         SnapCamera();
+        // The very first game: a welcome with the boot camp on offer. After that, the builder's tip (once).
+        if (!Tutorial.Progress.Welcomed) _tutorial.ShowWelcome();
+        else _tutorial.ShowTip("builder");
+    }
+
+    /// <summary>Starts the boot camp: its car (a chassis with no driver, engine, fuel or gun) replaces the design (Undo brings it back).</summary>
+    private void StartBootCamp()
+    {
+        Tutorial.StartBootCamp();
+        _help.Visible = false;
+        LoadBlueprint(BootCamp.Car(), recordUndo: true, animate: true);
+        _camTravel = 0f;
+        Toast("Boot camp: follow the card at the top. Undo (Ctrl+Z) brings your old design back.");
+    }
+
+    /// <summary>
+    /// Glowing boxes where the boot camp's current step wants its parts, with the first one's name over it; gone once
+    /// each spot is filled, or when the step isn't about placing parts.
+    /// </summary>
+    private void UpdateSpotMarks()
+    {
+        TutorialStep step = Tutorial.Running ? Tutorial.Camp.Current : null;
+        bool any = step != null && step.Place == TutorialPlace.Builder && step.Spots.Count > 0;
+        if (_spotMarks == null)
+        {
+            if (!any) return;
+            _spotMarks = new Node3D { Name = "BootCampSpots" };
+            AddChild(_spotMarks);
+            _spotMat = Shaders.Hologram(new Color(0.5f, 0.89f, 1f), 0.9f);
+            _spotLabel = new Label3D
+            {
+                FontSize = 44, PixelSize = 0.008f, Font = Ui.HeadingBoldFont, OutlineSize = 10, NoDepthTest = true,
+                Billboard = BaseMaterial3D.BillboardModeEnum.Enabled, Modulate = new Color(0.75f, 0.95f, 1f),
+            };
+            _spotMarks.AddChild(_spotLabel);
+        }
+
+        _spotMarks.Visible = any;
+        if (!any) return;
+        float pulse = 0.85f + 0.15f * Mathf.Sin(Time.GetTicksMsec() / 1000f * 5f);
+        int shown = 0;
+        string first = null;
+        Vector3 firstAt = default;
+        foreach (TutorialSpot spot in step.Spots)
+        {
+            if (_blocks.ContainsKey(spot.Cell)) continue;
+            MeshInstance3D box;
+            if (shown + 1 < _spotMarks.GetChildCount()) box = _spotMarks.GetChild<MeshInstance3D>(shown + 1);
+            else
+            {
+                box = new MeshInstance3D { Mesh = new BoxMesh { Size = Vector3.One * Conv.CS }, MaterialOverride = _spotMat, CastShadow = GeometryInstance3D.ShadowCastingSetting.Off };
+                _spotMarks.AddChild(box);
+            }
+
+            box.Visible = true;
+            box.Position = Conv.CellPos(spot.Cell);
+            box.Scale = Vector3.One * pulse;
+            if (first == null)
+            {
+                first = BlockCatalog.TryGet(spot.Part, out BlockDef d) ? d.Name : spot.Part;
+                firstAt = box.Position;
+            }
+
+            shown++;
+        }
+
+        for (int i = shown + 1; i < _spotMarks.GetChildCount(); i++) _spotMarks.GetChild<Node3D>(i).Visible = false;
+        _spotLabel.Visible = first != null;
+        if (first != null)
+        {
+            _spotLabel.Text = first;
+            _spotLabel.Position = firstAt + Vector3.Up * (Conv.CS * 1.4f);
+        }
     }
 
     public override void _EnterTree()
@@ -569,9 +650,11 @@ public partial class Builder : Node3D
                 break;
             case MouseButton.WheelUp when mb.Pressed:
                 _goalDist = Mathf.Clamp(_goalDist * 0.88f, 3f, 700f);
+                _camTravel += 0.15f;
                 break;
             case MouseButton.WheelDown when mb.Pressed:
                 _goalDist = Mathf.Clamp(_goalDist * 1.12f, 3f, 700f);
+                _camTravel += 0.15f;
                 break;
             case MouseButton.Left when _pasting && _boxMode == BoxMode.Off:
                 if (mb.Pressed && !OverUi()) PasteHere();
@@ -661,11 +744,13 @@ public partial class Builder : Node3D
         {
             _goalYaw -= mm.Relative.X * 0.006f;
             _goalPitch = Mathf.Clamp(_goalPitch + mm.Relative.Y * 0.006f, Mathf.DegToRad(-10f), Mathf.DegToRad(88f));
+            _camTravel += mm.Relative.Length() * 0.006f;
         }
         else if (_mmbDown && _dragged)
         {
             Basis b = _cam.GlobalTransform.Basis;
             _goalTarget += (-b.X * mm.Relative.X + b.Y * mm.Relative.Y) * _dist * 0.0016f;
+            _camTravel += mm.Relative.Length() * 0.004f;
         }
         else if (_boxActive)
         {
@@ -848,6 +933,8 @@ public partial class Builder : Node3D
 
         MoveCamera(dt);
         UpdateGhost();
+        _tutorial?.Tick(TutorialFacts.FromDesign(_analysis, _camTravel > 1.2f), dt);
+        UpdateSpotMarks();
         if (_toastTime > 0)
         {
             _toastTime -= dt;
@@ -1480,7 +1567,22 @@ public partial class Builder : Node3D
         helpText.CustomMinimumSize = new Vector2(600, 0);
         helpText.Text = HelpText;
         helpCol.AddChild(helpText);
-        helpCol.AddChild(Ui.Button("Got it", () => _help.Visible = false, null, "PrimaryButton"));
+        HBoxContainer helpButtons = Ui.Row(8);
+        helpCol.AddChild(helpButtons);
+        helpButtons.AddChild(Ui.Button("Got it", () => _help.Visible = false, null, "PrimaryButton"));
+        helpButtons.AddChild(Ui.Button("Start boot camp", StartBootCamp, "Five minutes: fit the parts that make a small car drive and shoot, then try it on the range"));
+
+        // Tutorials: the boot camp card, first-time tips and the welcome, under the top rail.
+        _tutorial = new TutorialOverlay(104f, false)
+        {
+            StartCamp = StartBootCamp,
+            PickPart = id =>
+            {
+                if (BlockCatalog.TryGet(id, out BlockDef d)) Select(d);
+            },
+        };
+        root.AddChild(_tutorial);
+        _tutorial.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
     }
 
     private const string HelpText =

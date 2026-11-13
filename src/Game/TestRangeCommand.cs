@@ -93,6 +93,7 @@ public partial class TestRange
 
         _map.Open();
         Input.MouseMode = Input.MouseModeEnum.Visible;
+        _tutorial?.ShowTip("map");
     }
 
     /// <summary>Takes over one of your units from the map: you move into its driver's seat.</summary>

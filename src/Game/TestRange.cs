@@ -100,6 +100,12 @@ public partial class TestRange : Node3D
     // The Glass overlay and the vehicle options panel (O).
     private HudGlass _glass;
     private HudRing _ring;
+
+    // Tutorials: the cards, and what the boot camp counts here.
+    private TutorialOverlay _tutorial;
+    private float _drivenM, _rangeTime;
+    private int _targetsDown, _ammoSwitches, _optionsOpened;
+    private Vector3? _lastMountPos;
     private HudOptions _options;
     private bool _optionsOpen;
     private RichTextLabel _status, _guns, _feed, _crew;
@@ -458,7 +464,11 @@ public partial class TestRange : Node3D
             AddChild(t);
             t.GlobalPosition = new Vector3(x, Ground, SpawnPoint.Z - d);
             t.Rotation = new Vector3(0, Mathf.Atan2(SpawnPoint.X - x, d) * 0.5f, 0);
-            t.KnockedDown += target => AddFeed($"[color={Ui.Hex(Ui.Good)}]TARGET DOWN  {target.DistanceM:0} m[/color]", true);
+            t.KnockedDown += target =>
+            {
+                AddFeed($"[color={Ui.Hex(Ui.Good)}]TARGET DOWN  {target.DistanceM:0} m[/color]", true);
+                _targetsDown++;
+            };
         }
 
         AddChild(Sign("Pop-up targets", new Vector3(34f, Ground + 3f, SpawnPoint.Z - 8f), 64));
@@ -629,6 +639,8 @@ public partial class TestRange : Node3D
         BuildGunRows();
         Sfx.Play2D(this, SoundId.PlaceLight, -6f, 0.8f);
         Big(_remote ? $"Flying {v.DisplayName} by remote" : $"{Crew.Name(seat.Role)} seat");
+        // The first time in each kind of machine: how to drive it.
+        if (seat.Role == SeatRole.Driver && !v.IsBuilding) _tutorial?.ShowTip(v.IsAir ? "aircraft" : v.IsNaval ? "ship" : "vehicle");
     }
 
     private void ExitVehicle(bool silent = false)
@@ -1206,7 +1218,11 @@ public partial class TestRange : Node3D
         }
 
         if (e.IsActionPressed("interact")) _interactQueued = true; // handled in the physics step, where ray tests are safe
-        else if (e.IsActionPressed("toggle_ammo") && Mounted) _mount.ToggleAmmo();
+        else if (e.IsActionPressed("toggle_ammo") && Mounted)
+        {
+            _mount.ToggleAmmo();
+            _ammoSwitches++;
+        }
         else if (e.IsActionPressed("recover") && Mounted) _mount.Recover();
         else if (e.IsActionPressed("gunner_mode") && Mounted) ToggleGunnerMode();
         else if (e.IsActionPressed("torpedo") && Mounted) _torpedoQueued = true;
@@ -1436,7 +1452,12 @@ public partial class TestRange : Node3D
             LiveFireOn = () => _liveFire,
             Flight = ToggleFlightMode,
             DirectFlight = () => _directFlight,
-            Ammo = () => { if (Mounted) _mount.ToggleAmmo(); },
+            Ammo = () =>
+            {
+                if (!Mounted) return;
+                _mount.ToggleAmmo();
+                _ammoSwitches++;
+            },
             Overlay = s =>
             {
                 if (!Mounted) return;
@@ -1631,6 +1652,36 @@ public partial class TestRange : Node3D
             "[color=#ffcc66]RICOCHET[/color] bounced off a steep angle";
         helpCol.AddChild(text);
         helpCol.AddChild(Ui.Button("Back", () => _help.Visible = false, null, "PrimaryButton"));
+
+        // Tutorials: the boot camp card and first-time tips, top left (the middle is for aiming). Not in a benchmark run.
+        if (Bench.Active) return;
+        _tutorial = new TutorialOverlay(14f, true);
+        root.AddChild(_tutorial);
+        _tutorial.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
+    }
+
+    /// <summary>Each frame: what the boot camp counts here (how far you've driven, targets down, ammo switched, options opened, on foot), and first-time tips.</summary>
+    private void TickTutorial(bool mounted, float dt)
+    {
+        if (_tutorial == null) return;
+        _rangeTime += dt;
+        if (mounted && IsInstanceValid(_mount))
+        {
+            Vector3 p = _mount.GlobalPosition;
+            // (A jump of more than 20 m in a frame is a respawn or a teleport, not driving.)
+            if (_lastMountPos is Vector3 lp && new Vector2(p.X - lp.X, p.Z - lp.Z).Length() is float d && d < 20f) _drivenM += d;
+            _lastMountPos = p;
+        }
+        else _lastMountPos = null;
+
+        _tutorial.MouseHeld = Input.MouseMode == Input.MouseModeEnum.Captured;
+        _tutorial.Tick(new TutorialFacts
+        {
+            OnRange = true, DrivenM = _drivenM, TargetsDown = _targetsDown, AmmoSwitches = _ammoSwitches, OptionsOpened = _optionsOpened,
+            OnFoot = !mounted && _me.Alive,
+        }, dt);
+        if (_rangeTime > 2f && !mounted && _me.Alive) _tutorial.ShowTip("range");
+        if (_rangeTime > 3f && InWorld) _tutorial.ShowTip("world");
     }
 
     private void Big(string text)
@@ -1722,6 +1773,7 @@ public partial class TestRange : Node3D
         _reticle.Leads.Clear();
         if (mounted) AddLeads(_mount, cam);
         _reticle.QueueRedraw();
+        TickTutorial(mounted, dt);
 
         if (!_me.Alive)
         {
@@ -1740,6 +1792,12 @@ public partial class TestRange : Node3D
     /// <summary>Opens or closes the vehicle options: the mouse is free while they're open.</summary>
     private void SetOptions(bool open)
     {
+        if (open && Mounted && !_optionsOpen)
+        {
+            _optionsOpened++;
+            _tutorial?.ShowTip("options");
+        }
+
         _optionsOpen = open && Mounted;
         _options.Visible = _optionsOpen;
         // (A click that closes the panel mustn't also fire the guns.)

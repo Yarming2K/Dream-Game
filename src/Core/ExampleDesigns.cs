@@ -634,6 +634,33 @@ public static partial class ExampleDesigns
     }
 
     /// <summary>
+    /// The boot camp's starting point: a scout car's rolling chassis (wheels, floor, a little armor and a turret
+    /// ring) with no driver, engine, fuel or gun, so a new player fits those themselves. The spots the boot camp
+    /// suggests for each are in <see cref="BootCamp"/>.
+    /// </summary>
+    public static Blueprint BootCampChassis()
+    {
+        var d = new Draft();
+        foreach (int x in new[] { -2, 2 })
+        {
+            d.Set(x, 0, -3, "wheel_steer");
+            d.Set(x, 0, 0, "wheel");
+            d.Set(x, 0, 2, "wheel");
+        }
+
+        d.Fill(-1, 1, 0, 0, -3, 3, "frame");
+        d.Set(0, 1, 0, "turret_ring");
+        d.Set(-1, 1, 0, "frame");
+        d.Set(1, 1, 0, "frame");
+        d.Fill(-2, 2, 0, 1, -4, -4, "armor_light_slope");
+        d.Fill(-2, -2, 1, 1, -3, 3, "armor_light");
+        d.Fill(2, 2, 1, 1, -3, 3, "armor_light");
+        d.Fill(-1, 1, 1, 1, 3, 3, "armor_light");
+        d.Fill(-2, 2, 0, 0, 3, 3, "armor_light");
+        return d.Build("Boot camp car", "desert");
+    }
+
+    /// <summary>
     /// Juggernaut: a tracked carrier for the 420 mm siege mortar. It can bring a heavy weapon anywhere, but
     /// it has to stop and put its four stabilizers down before it can fire, and it reloads at half a
     /// building's rate.
