@@ -22,9 +22,9 @@ public static class Tutorial
 
     public static bool Running => Camp != null && !Camp.Finished;
 
-    public static void StartBootCamp()
+    public static void StartBootCamp(TutorialCourse course = null)
     {
-        Camp = new BootCamp();
+        Camp = new BootCamp(course);
         Progress.Welcomed = true;
         Save();
     }
@@ -38,7 +38,8 @@ public static class Tutorial
         TutorialStep done = Camp.Update(f);
         if (done != null && Camp.Finished)
         {
-            Progress.BootCampDone = true;
+            if (Camp.Course == Courses.Land) Progress.BootCampDone = true;
+            if (!Progress.CoursesDone.Contains(Camp.Course.Id)) Progress.CoursesDone.Add(Camp.Course.Id);
             Save();
         }
 
@@ -62,16 +63,17 @@ public static class Tutorial
 /// </summary>
 public partial class TutorialOverlay : Control
 {
-    /// <summary>Builder: pick this part on the parts panel.</summary>
-    public Action<string> PickPart;
+    /// <summary>Builder: pick the part this step still needs (and turn it the way its spot wants).</summary>
+    public Action<TutorialStep> PickPart;
 
-    /// <summary>Builder: start the boot camp (loads its car).</summary>
-    public Action StartCamp;
+    /// <summary>Builder: start a boot camp course (loads its design).</summary>
+    public Action<TutorialCourse> StartCamp;
 
     /// <summary>On the range the mouse is usually held by the game: say how to free it for the buttons.</summary>
     public bool MouseHeld;
 
-    private readonly PanelContainer _card, _tip, _welcome;
+    private readonly PanelContainer _card, _tip, _welcome, _picker;
+    private readonly VBoxContainer _courseList;
     private readonly Label _caption, _title, _body, _keys, _tipTitle, _tipBody, _mouseHint, _tipMouseHint;
     private readonly HBoxContainer _pips, _buttons;
     private readonly Button _pick, _skip, _leave, _close;
@@ -105,7 +107,7 @@ public partial class TutorialOverlay : Control
         col.AddChild(_keys);
         _buttons = Ui.Row(8);
         col.AddChild(_buttons);
-        _pick = Ui.Button("Pick it for me", () => { if (_shown?.Part != null) PickPart?.Invoke(_shown.Part); }, "Picks this step's part on the parts panel");
+        _pick = Ui.Button("Pick it for me", () => { if (_shown != null) PickPart?.Invoke(_shown); }, "Picks the part still missing for this step, turned the right way");
         _skip = Ui.Button("Skip step", () => { Tutorial.Camp?.Skip(); Refresh(); }, "Move on without doing this step", "GhostButton");
         _leave = Ui.Button("Leave boot camp", () => { Tutorial.StopBootCamp(); Refresh(); }, "Stop the boot camp (Help in the builder starts it again)", "GhostButton");
         _close = Ui.Button("Close", () => { Tutorial.StopBootCamp(); Refresh(); }, null, "PrimaryButton");
@@ -150,9 +152,16 @@ public partial class TutorialOverlay : Control
         wb.AddChild(Ui.Button("Start boot camp", () =>
         {
             _welcome.Visible = false;
-            StartCamp?.Invoke();
+            StartCamp?.Invoke(Courses.Land);
             Refresh();
-        }, null, "PrimaryButton"));
+        }, "The land course: a scout car", "PrimaryButton"));
+        wb.AddChild(Ui.Button("Other courses", () =>
+        {
+            _welcome.Visible = false;
+            Tutorial.Progress.Welcomed = true;
+            Tutorial.Save();
+            ShowCourses();
+        }, "Sea, air and structures"));
         wb.AddChild(Ui.Button("Not now", () =>
         {
             _welcome.Visible = false;
@@ -161,7 +170,47 @@ public partial class TutorialOverlay : Control
             ShowTip("builder");
         }, "Help (top rail) starts the boot camp any time"));
         _welcome.Visible = false;
+
+        // The course picker: each front's course, with a tick on the ones done.
+        _picker = Card(top, left, 620);
+        VBoxContainer pc = Ui.Column(8);
+        _picker.AddChild(pc);
+        pc.AddChild(Ui.Caption("Boot camp", Ui.Accent));
+        pc.AddChild(Ui.Label("Pick a course", 22, Ui.Text, "Title"));
+        pc.AddChild(Ui.Wrapped("Each one hands you a design with the parts that make it work taken out. Fit them back (glowing boxes show where), then try it on the range. Five to ten minutes each.", 14, Ui.Dim));
+        _courseList = Ui.Column(6);
+        pc.AddChild(_courseList);
+        pc.AddChild(Ui.Button("Close", () => _picker.Visible = false, null, "GhostButton"));
+        _picker.Visible = false;
         Refresh();
+    }
+
+    /// <summary>The course picker (Help, Boot camp in the builder).</summary>
+    public void ShowCourses()
+    {
+        foreach (Node n in _courseList.GetChildren()) n.QueueFree();
+        foreach (TutorialCourse c in Courses.All)
+        {
+            TutorialCourse course = c;
+            bool done = Tutorial.Progress.CoursesDone.Contains(c.Id);
+            HBoxContainer row = Ui.Row(10);
+            Button go = Ui.Button((done ? "✓ " : "") + c.Name.ToUpperInvariant(), () =>
+            {
+                _picker.Visible = false;
+                StartCamp?.Invoke(course);
+                Refresh();
+            }, "Start this course", c == Courses.Land && !done ? "PrimaryButton" : null);
+            go.CustomMinimumSize = new Vector2(150, 0);
+            row.AddChild(go);
+            Label blurb = Ui.Wrapped(c.Blurb, 14);
+            blurb.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+            row.AddChild(blurb);
+            _courseList.AddChild(row);
+        }
+
+        _welcome.Visible = false;
+        _tip.Visible = false;
+        _picker.Visible = true;
     }
 
     private PanelContainer Card(float top, bool left, float width)
@@ -267,7 +316,7 @@ public partial class TutorialOverlay : Control
         _caption.RemoveThemeColorOverride("font_color");
         _caption.AddThemeColorOverride("font_color", Ui.Accent);
         _title.RemoveThemeColorOverride("font_color");
-        int n = BootCamp.Steps.Count;
+        int n = camp.Steps.Count;
         foreach (Node c in _pips.GetChildren()) c.QueueFree();
         for (int i = 0; i < n; i++)
             _pips.AddChild(new ColorRect
@@ -278,9 +327,9 @@ public partial class TutorialOverlay : Control
 
         if (camp.Finished)
         {
-            _caption.Text = "Boot camp · done";
-            _title.Text = "That's the basics";
-            _body.Text = "You built a car, drove it and hit a target with it. Next: open the examples (Open, top rail) and take them out; walk into the command post by the depot and press M to command units on the map; or fly the Kestrel from the airstrip. F1 lists every key.";
+            _caption.Text = $"Boot camp · {camp.Course.Name} · done";
+            _title.Text = camp.Course == Courses.Land ? "That's the basics" : $"{camp.Course.Name}: done";
+            _body.Text = camp.Course.Finale;
             _keys.Text = "";
             _pick.Visible = _skip.Visible = _leave.Visible = false;
             _close.Visible = true;
@@ -288,7 +337,7 @@ public partial class TutorialOverlay : Control
         }
 
         TutorialStep s = camp.Current;
-        _caption.Text = $"Boot camp · {camp.Index + 1} of {n} · {(s.Place == TutorialPlace.Builder ? "builder" : "range")}";
+        _caption.Text = $"Boot camp · {camp.Course.Name} · {camp.Index + 1} of {n} · {(s.Place == TutorialPlace.Builder ? "builder" : "range")}";
         _title.Text = s.Title;
         _body.Text = s.Text;
         _keys.Text = s.Keys;

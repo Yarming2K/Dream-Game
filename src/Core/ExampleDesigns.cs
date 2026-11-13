@@ -660,6 +660,14 @@ public static partial class ExampleDesigns
         return d.Build("Boot camp car", "desert");
     }
 
+    /// <summary>The structures course's starting point: a bare foundation slab, 11 by 11 cells, to build a gun emplacement on.</summary>
+    public static Blueprint BootCampSlab()
+    {
+        var d = new Draft();
+        d.Fill(-5, 5, 0, 0, -5, 5, "foundation");
+        return d.Build("Boot camp emplacement", "olive");
+    }
+
     /// <summary>
     /// Juggernaut: a tracked carrier for the 420 mm siege mortar. It can bring a heavy weapon anywhere, but
     /// it has to stop and put its four stabilizers down before it can fire, and it reloads at half a

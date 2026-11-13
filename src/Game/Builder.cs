@@ -86,6 +86,7 @@ public partial class Builder : Node3D
     // boxes where the boot camp's parts go.
     private TutorialOverlay _tutorial;
     private float _camTravel;
+    private int _boxPlaced;
     private Node3D _spotMarks;
     private Label3D _spotLabel;
     private ShaderMaterial _spotMat;
@@ -213,14 +214,30 @@ public partial class Builder : Node3D
         else _tutorial.ShowTip("builder");
     }
 
-    /// <summary>Starts the boot camp: its car (a chassis with no driver, engine, fuel or gun) replaces the design (Undo brings it back).</summary>
-    private void StartBootCamp()
+    /// <summary>Starts a boot camp course: its unfinished design replaces the one in the builder (Undo brings it back).</summary>
+    private void StartBootCamp(TutorialCourse course)
     {
-        Tutorial.StartBootCamp();
+        Tutorial.StartBootCamp(course);
         _help.Visible = false;
-        LoadBlueprint(BootCamp.Car(), recordUndo: true, animate: true);
+        LoadBlueprint(course.Starter(), recordUndo: true, animate: true);
         _camTravel = 0f;
+        _boxPlaced = 0;
+        if (_boxMode != BoxMode.Off) SetBoxMode(BoxMode.Off);
         Toast("Boot camp: follow the card at the top. Undo (Ctrl+Z) brings your old design back.");
+    }
+
+    /// <summary>
+    /// "Pick it for me": the part the step still needs (the first glowing box that's empty), turned the way that spot
+    /// wants it, or the step's part if it has no boxes.
+    /// </summary>
+    private void PickForStep(TutorialStep step)
+    {
+        TutorialSpot? next = step.Spots.Where(sp => !_cells.ContainsKey(sp.Cell)).Cast<TutorialSpot?>().FirstOrDefault();
+        string id = next?.Part ?? step.Part;
+        if (id == null || !BlockCatalog.TryGet(id, out BlockDef d)) return;
+        Select(d);
+        if (next.HasValue) Rotate(next.Value.O);
+        Toast($"{d.Name} picked{(next.HasValue ? ": click in the glowing box" : "")}.");
     }
 
     /// <summary>
@@ -253,7 +270,7 @@ public partial class Builder : Node3D
         Vector3 firstAt = default;
         foreach (TutorialSpot spot in step.Spots)
         {
-            if (_blocks.ContainsKey(spot.Cell)) continue;
+            if (_cells.ContainsKey(spot.Cell)) continue;
             MeshInstance3D box;
             if (shown + 1 < _spotMarks.GetChildCount()) box = _spotMarks.GetChild<MeshInstance3D>(shown + 1);
             else
@@ -933,7 +950,7 @@ public partial class Builder : Node3D
 
         MoveCamera(dt);
         UpdateGhost();
-        _tutorial?.Tick(TutorialFacts.FromDesign(_analysis, _camTravel > 1.2f), dt);
+        _tutorial?.Tick(TutorialFacts.FromDesign(_analysis, _camTravel > 1.2f, cell => _cells.TryGetValue(cell, out BlueprintBlock b) ? b.Id : null, _boxPlaced), dt);
         UpdateSpotMarks();
         if (_toastTime > 0)
         {
@@ -1379,6 +1396,7 @@ public partial class Builder : Node3D
         }
 
         if (changes.Count > 0) Sfx.Play2D(this, _selected.MassKg >= 200 ? SoundId.PlaceHeavy : SoundId.PlaceLight, -2f, 0.85f);
+        _boxPlaced += changes.Count;
         Toast(changes.Count > 0 ? $"Placed {changes.Count:N0} block(s)." : "No room in that box.");
         Commit(changes);
     }
@@ -1479,14 +1497,22 @@ public partial class Builder : Node3D
         _categoryFlow.AddThemeConstantOverride("h_separation", 5);
         _categoryFlow.AddThemeConstantOverride("v_separation", 5);
         lcol.AddChild(_categoryFlow);
+        // The tiles and the part card scroll (the wheel, or drag the bar), under the categories that stay put.
+        var partsScroll = new ScrollContainer
+        {
+            HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled, SizeFlagsVertical = Control.SizeFlags.ExpandFill,
+        };
+        lcol.AddChild(partsScroll);
+        VBoxContainer partsCol = Ui.Column(10);
+        partsCol.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+        partsScroll.AddChild(partsCol);
         _tileGrid = new GridContainer { Columns = 3, MouseFilter = Control.MouseFilterEnum.Ignore };
         _tileGrid.AddThemeConstantOverride("h_separation", 6);
         _tileGrid.AddThemeConstantOverride("v_separation", 6);
-        lcol.AddChild(_tileGrid);
-        lcol.AddChild(new HSeparator());
+        partsCol.AddChild(_tileGrid);
+        partsCol.AddChild(new HSeparator());
         _partCard = Ui.Column(8);
-        _partCard.SizeFlagsVertical = Control.SizeFlags.ExpandFill;
-        lcol.AddChild(_partCard);
+        partsCol.AddChild(_partCard);
 
         // The design's numbers on the right, leaning in the other way.
         var rightTilt = new TiltedPanel { Hinge = Hinge.Right, Angle = 18f, Name = "DesignPanel" };
@@ -1570,17 +1596,14 @@ public partial class Builder : Node3D
         HBoxContainer helpButtons = Ui.Row(8);
         helpCol.AddChild(helpButtons);
         helpButtons.AddChild(Ui.Button("Got it", () => _help.Visible = false, null, "PrimaryButton"));
-        helpButtons.AddChild(Ui.Button("Start boot camp", StartBootCamp, "Five minutes: fit the parts that make a small car drive and shoot, then try it on the range"));
+        helpButtons.AddChild(Ui.Button("Boot camp", () =>
+        {
+            _help.Visible = false;
+            _tutorial.ShowCourses();
+        }, "Courses for land, sea, air and structures: fit the parts that make a design work, then try it on the range"));
 
         // Tutorials: the boot camp card, first-time tips and the welcome, under the top rail.
-        _tutorial = new TutorialOverlay(104f, false)
-        {
-            StartCamp = StartBootCamp,
-            PickPart = id =>
-            {
-                if (BlockCatalog.TryGet(id, out BlockDef d)) Select(d);
-            },
-        };
+        _tutorial = new TutorialOverlay(104f, false) { StartCamp = StartBootCamp, PickPart = PickForStep };
         root.AddChild(_tutorial);
         _tutorial.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
     }
@@ -1665,7 +1688,7 @@ public partial class Builder : Node3D
             var tile = new Button
             {
                 ToggleMode = true, ButtonGroup = group, ThemeTypeVariation = "Tile", FocusMode = Control.FocusModeEnum.None,
-                CustomMinimumSize = new Vector2(86, 106), TooltipText = d.Description,
+                CustomMinimumSize = new Vector2(84, 106), TooltipText = d.Description,
             };
             bool chosen = d == _selected || (d.BaseId != null && d.BaseId == _selected.BaseId);
             tile.SetPressedNoSignal(chosen);

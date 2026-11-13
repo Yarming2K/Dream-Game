@@ -103,9 +103,11 @@ public partial class TestRange : Node3D
 
     // Tutorials: the cards, and what the boot camp counts here.
     private TutorialOverlay _tutorial;
-    private float _drivenM, _rangeTime;
-    private int _targetsDown, _ammoSwitches, _optionsOpened;
+    private float _drivenM, _rangeTime, _turnDeg, _maxHeightM;
+    private int _targetsDown, _ammoSwitches, _optionsOpened, _flightModeSwitches, _torpedoesFired, _bombsDropped, _mounts;
+    private bool _landed;
     private Vector3? _lastMountPos;
+    private float? _lastHeading;
     private HudOptions _options;
     private bool _optionsOpen;
     private RichTextLabel _status, _guns, _feed, _crew;
@@ -618,6 +620,7 @@ public partial class TestRange : Node3D
         }
 
         _mount = v;
+        _mounts++;
         _remote = seat.Info.Remote;
         if (_remote) _me.SetRemote(true);
         else
@@ -862,7 +865,11 @@ public partial class TestRange : Node3D
             if (_bombQueued)
             {
                 _bombQueued = false;
-                if (_mount.DropBomb(true)) AddFeed($"[color={Ui.Hex(Ui.Info)}]BOMB AWAY  ·  {_mount.BombsLeft} left[/color]", true);
+                if (_mount.DropBomb(true))
+                {
+                    AddFeed($"[color={Ui.Hex(Ui.Info)}]BOMB AWAY  ·  {_mount.BombsLeft} left[/color]", true);
+                    _bombsDropped++;
+                }
                 else
                 {
                     Big(_mount.Analysis.BombRacks.Count == 0 ? "No bomb racks" : "Out of bombs");
@@ -1300,6 +1307,7 @@ public partial class TestRange : Node3D
         VehicleBody v = _mount;
         if (v.FireTorpedo(true, v.PlayerInput.Aim))
         {
+            _torpedoesFired++;
             AddFeed($"[color={Ui.Hex(Ui.Info)}]TORPEDO AWAY  ·  {v.TorpedoesLeft} left[/color]", true);
             _trauma = Mathf.Min(1f, _trauma + 0.15f);
             return;
@@ -1671,14 +1679,31 @@ public partial class TestRange : Node3D
             // (A jump of more than 20 m in a frame is a respawn or a teleport, not driving.)
             if (_lastMountPos is Vector3 lp && new Vector2(p.X - lp.X, p.Z - lp.Z).Length() is float d && d < 20f) _drivenM += d;
             _lastMountPos = p;
+            // How far it's turned while under way, all added up.
+            Vector3 fwd = -_mount.GlobalTransform.Basis.Z;
+            float hdg = Instruments.Heading(new System.Numerics.Vector3(fwd.X, fwd.Y, fwd.Z));
+            float speed = _mount.IsAir ? _mount.AirspeedKmh : Mathf.Abs(_mount.SpeedKmh);
+            if (_lastHeading is float lh && speed > 8f) _turnDeg += Mathf.Abs(Instruments.Turn(lh, hdg));
+            _lastHeading = hdg;
+            // Aircraft: the height reached, and coming back down to a stop after it.
+            if (_mount.IsAir)
+            {
+                if (!_mount.OnGround) _maxHeightM = Mathf.Max(_maxHeightM, _mount.HeightAboveGroundM);
+                if (_maxHeightM >= 30f && _mount.OnGround && _mount.AirspeedKmh < 40f) _landed = true;
+            }
         }
-        else _lastMountPos = null;
+        else
+        {
+            _lastMountPos = null;
+            _lastHeading = null;
+        }
 
         _tutorial.MouseHeld = Input.MouseMode == Input.MouseModeEnum.Captured;
         _tutorial.Tick(new TutorialFacts
         {
             OnRange = true, DrivenM = _drivenM, TargetsDown = _targetsDown, AmmoSwitches = _ammoSwitches, OptionsOpened = _optionsOpened,
-            OnFoot = !mounted && _me.Alive,
+            OnFoot = !mounted && _me.Alive, TurnDeg = _turnDeg, MaxHeightM = _maxHeightM, Landed = _landed,
+            FlightModeSwitches = _flightModeSwitches, TorpedoesFired = _torpedoesFired, BombsDropped = _bombsDropped, Mounts = _mounts,
         }, dt);
         if (_rangeTime > 2f && !mounted && _me.Alive) _tutorial.ShowTip("range");
         if (_rangeTime > 3f && InWorld) _tutorial.ShowTip("world");
@@ -1808,6 +1833,7 @@ public partial class TestRange : Node3D
     /// <summary>Swaps how planes are flown: directly (stick and rudder), or by the instructor (it flies where you look).</summary>
     private void ToggleFlightMode()
     {
+        _flightModeSwitches++;
         _directFlight = !_directFlight;
         _stick = Vector2.Zero;
         Big(_directFlight

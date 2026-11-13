@@ -255,8 +255,35 @@ void fragment() {
         // the button's release with it.)
         bool release = m is InputEventMouseButton { Pressed: false };
         if (!inside && m.ButtonMask == 0 && !release) return;
+        // The wheel scrolls whatever list is under the pointer, done here: a wheel passed on into the panel didn't
+        // reach its scroll areas. Where there's no list (the map table), it's passed on (to zoom).
+        if (m is InputEventMouseButton { ButtonIndex: MouseButton.WheelUp or MouseButton.WheelDown } wheel &&
+            ScrollAt(Content, uv * Size) is ScrollContainer sc)
+        {
+            if (wheel.Pressed)
+            {
+                float notch = 64f * (wheel.Factor > 0 ? wheel.Factor : 1f);
+                sc.ScrollVertical += (int)(wheel.ButtonIndex == MouseButton.WheelUp ? -notch : notch);
+            }
+
+            AcceptEvent();
+            return;
+        }
+
         Push(m, uv * Size);
         AcceptEvent();
+    }
+
+    /// <summary>The innermost visible scroll area under a point on the flat panel, if any.</summary>
+    private static ScrollContainer ScrollAt(Node n, Vector2 p)
+    {
+        foreach (Node c in n.GetChildren())
+        {
+            if (c is CanvasItem ci && !ci.Visible) continue;
+            if (ScrollAt(c, p) is ScrollContainer inner) return inner;
+        }
+
+        return n is ScrollContainer sc && sc.GetGlobalRect().HasPoint(p) ? sc : null;
     }
 
     private void Push(InputEventMouse m, Vector2 at)
